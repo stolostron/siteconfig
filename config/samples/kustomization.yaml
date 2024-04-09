@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- metaclusterinstall.openshift.io_v1alpha1_siteconfig.yaml
+#+kubebuilder:scaffold:manifestskustomizesamples

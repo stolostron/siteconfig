@@ -1,0 +1,31 @@
+# permissions for end users to edit siteconfigs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: siteconfig-editor-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: siteconfig
+    app.kubernetes.io/part-of: siteconfig
+    app.kubernetes.io/managed-by: kustomize
+  name: siteconfig-editor-role
+rules:
+- apiGroups:
+  - metaclusterinstall.openshift.io
+  resources:
+  - siteconfigs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - metaclusterinstall.openshift.io
+  resources:
+  - siteconfigs/status
+  verbs:
+  - get

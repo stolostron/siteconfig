@@ -1,0 +1,549 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "metaclusterinstall.openshift.io/v1alpha1",
+          "kind": "SiteConfig",
+          "metadata": {
+            "name": "site-sno-du-1",
+            "namespace": "site-sno-du-1"
+          },
+          "spec": {
+            "additionalNTPSources": [
+              "NTP.server1",
+              "10.16.231.22"
+            ],
+            "baseDomain": "example.com",
+            "caBundleRef": {
+              "name": "my-bundle-ref"
+            },
+            "clusterLabels": {
+              "common": "true",
+              "group-du-sno": "test",
+              "sites": "site-sno-du-1"
+            },
+            "clusterName": "site-sno-du-1",
+            "clusterNetwork": [
+              {
+                "cidr": "10.128.0.0/14",
+                "hostPrefix": 23
+              }
+            ],
+            "clusterType": "SNO",
+            "diskEncryption": {
+              "tang": [
+                {
+                  "thumbprint": "1234567890",
+                  "url": "http://10.0.0.1:7500"
+                }
+              ],
+              "type": "nbde"
+            },
+            "extraManifestsRefs": [
+              {
+                "name": "foobar1"
+              },
+              {
+                "name": "foobar2"
+              }
+            ],
+            "ignitionConfigOverride": "igen",
+            "installConfigOverrides": "{\"capabilities\":{\"baselineCapabilitySet\": \"None\", \"additionalEnabledCapabilities\": [ \"marketplace\", \"NodeTuning\" ] }}",
+            "machineNetwork": [
+              {
+                "cidr": "10.16.231.0/24"
+              }
+            ],
+            "networkType": "OVNKubernetes",
+            "nodes": [
+              {
+                "bmcAddress": "idrac-virtualmedia+https://10.16.231.87/redfish/v1/Systems/System.Embedded.1",
+                "bmcCredentialsName": {
+                  "name": "name of bmcCredentials secret"
+                },
+                "bootMACAddress": "00:00:00:01:20:30",
+                "bootMode": "UEFI",
+                "cpuset": "2-19,22-39",
+                "hostName": "node1",
+                "ignitionConfigOverride": "{\"ignition\": {\"version\": \"3.1.0\"}, \"storage\": {\"files\": [{\"path\": \"/etc/containers/registries.conf\", \"overwrite\": true, \"contents\": {\"source\": \"data:text/plain;base64,aGVsbG8gZnJvbSB6dHAgcG9saWN5IGdlbmVyYXRvcg==\"}}]}}",
+                "installerArgs": "[\"--append-karg\", \"nameserver=8.8.8.8\", \"-n\"]",
+                "ironicInspect": "",
+                "nodeNetwork": {
+                  "config": {
+                    "dns-resolver": {
+                      "config": {
+                        "server": [
+                          "10.19.42.41"
+                        ]
+                      }
+                    },
+                    "interfaces": [
+                      {
+                        "ipv4": {
+                          "address": [
+                            {
+                              "ip": "10.16.231.3",
+                              "prefix-length": 24
+                            },
+                            {
+                              "ip": "10.16.231.28",
+                              "prefix-length": 24
+                            },
+                            {
+                              "ip": "10.16.231.31",
+                              "prefix-length": 24
+                            }
+                          ],
+                          "dhcp": false,
+                          "enabled": true
+                        },
+                        "ipv6": {
+                          "address": [
+                            {
+                              "ip": "2620:52:0:10e7:e42:a1ff:fe8a:601",
+                              "prefix-length": 64
+                            },
+                            {
+                              "ip": "2620:52:0:10e7:e42:a1ff:fe8a:602",
+                              "prefix-length": 64
+                            },
+                            {
+                              "ip": "2620:52:0:10e7:e42:a1ff:fe8a:603",
+                              "prefix-length": 64
+                            }
+                          ],
+                          "dhcp": false,
+                          "enabled": true
+                        },
+                        "name": "eno1",
+                        "type": "ethernet"
+                      },
+                      {
+                        "ipv6": {
+                          "address": [
+                            {
+                              "ip": "2620:52:0:1302::100"
+                            }
+                          ],
+                          "enabled": true,
+                          "link-aggregation": {
+                            "mode": "balance-rr",
+                            "options": {
+                              "miimon": "140"
+                            },
+                            "slaves": [
+                              "eth0",
+                              "eth1"
+                            ]
+                          },
+                          "prefix-length": 64
+                        },
+                        "name": "bond99",
+                        "state": "up",
+                        "type": "bond"
+                      }
+                    ],
+                    "routes": {
+                      "config": [
+                        {
+                          "destination": "0.0.0.0/0",
+                          "next-hop-address": "10.16.231.254",
+                          "next-hop-interface": "eno1",
+                          "table-id": 254
+                        }
+                      ]
+                    }
+                  },
+                  "interfaces": [
+                    {
+                      "macAddress": "00:00:00:01:20:30",
+                      "name": "eno1"
+                    },
+                    {
+                      "macAddress": "02:00:00:80:12:14",
+                      "name": "eth0"
+                    },
+                    {
+                      "macAddress": "02:00:00:80:12:15",
+                      "name": "eth1"
+                    }
+                  ]
+                },
+                "role": "master",
+                "rootDeviceHints": {
+                  "hctl": "1:2:0:0"
+                },
+                "templateRefs": [
+                  {
+                    "name": "aci-node-crs-v1",
+                    "namespace": "siteconfig-system"
+                  }
+                ]
+              }
+            ],
+            "proxy": {
+              "noProxys": "foobar"
+            },
+            "pullSecretRef": {
+              "name": "pullSecretName"
+            },
+            "serviceNetwork": [
+              "172.30.0.0/16"
+            ],
+            "sshPublicKey": "ssh-rsa ",
+            "templateRefs": [
+              {
+                "name": "aci-cluster-crs-v1",
+                "namespace": "siteconfig-system"
+              }
+            ]
+          }
+        }
+      ]
+    capabilities: Basic Install
+    operators.operatorframework.io/builder: operator-sdk-v1.33.0
+    operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+  name: siteconfig.v4.16.0
+  namespace: placeholder
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - kind: SiteConfig
+      name: siteconfigs.metaclusterinstall.openshift.io
+      version: v1alpha1
+  description: Manage SiteConfig
+  displayName: siteconfig
+  icon:
+  - base64data: ""
+    mediatype: ""
+  install:
+    spec:
+      clusterPermissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - namespaces
+          verbs:
+          - get
+          - list
+          - patch
+          - update
+        - apiGroups:
+          - ""
+          resources:
+          - secrets
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - agent-install.openshift.io
+          resources:
+          - infraenvs
+          verbs:
+          - create
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - agent-install.openshift.io
+          resources:
+          - nmstateconfigs
+          verbs:
+          - create
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - agent.open-cluster-management.io
+          resources:
+          - klusterletaddonconfigs
+          verbs:
+          - create
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - cluster.open-cluster-management.io
+          resources:
+          - managedclusters
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - cluster.open-cluster-management.io
+          resources:
+          - managedclustersets/join
+          verbs:
+          - create
+        - apiGroups:
+          - extensions.hive.openshift.io
+          resources:
+          - agentclusterinstalls
+          verbs:
+          - create
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - extensions.hive.openshift.io
+          resources:
+          - imageclusterinstalls
+          verbs:
+          - create
+          - delete
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - hive.openshift.io
+          resources:
+          - clusterdeployments
+          verbs:
+          - create
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - hive.openshift.io
+          resources:
+          - clusterdeployments/status
+          verbs:
+          - get
+          - watch
+        - apiGroups:
+          - metaclusterinstall.openshift.io
+          resources:
+          - siteconfigs
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - metaclusterinstall.openshift.io
+          resources:
+          - siteconfigs/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - metaclusterinstall.openshift.io
+          resources:
+          - siteconfigs/status
+          verbs:
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - metal3.io
+          resources:
+          - baremetalhosts
+          verbs:
+          - create
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - metal3.io
+          resources:
+          - hostfirmwaresettings
+          verbs:
+          - create
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - register.open-cluster-management.io
+          resources:
+          - managedclusters/accept
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - authentication.k8s.io
+          resources:
+          - tokenreviews
+          verbs:
+          - create
+        - apiGroups:
+          - authorization.k8s.io
+          resources:
+          - subjectaccessreviews
+          verbs:
+          - create
+        serviceAccountName: siteconfig-controller-manager
+      deployments:
+      - label:
+          app.kubernetes.io/component: siteconfig
+          app.kubernetes.io/name: siteconfig-controller
+          control-plane: controller-manager
+        name: siteconfig-controller-manager
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app.kubernetes.io/component: siteconfig
+              app.kubernetes.io/name: siteconfig-controller
+              control-plane: controller-manager
+          strategy: {}
+          template:
+            metadata:
+              annotations:
+                openshift.io/scc: restricted
+                target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
+              labels:
+                app.kubernetes.io/component: siteconfig
+                app.kubernetes.io/name: siteconfig-controller
+                control-plane: controller-manager
+            spec:
+              containers:
+              - args:
+                - --secure-listen-address=0.0.0.0:8443
+                - --upstream=http://127.0.0.1:8080/
+                - --logtostderr=true
+                - --v=0
+                image: gcr.io/kubebuilder/kube-rbac-proxy:v0.14.1
+                name: kube-rbac-proxy
+                ports:
+                - containerPort: 8443
+                  name: https
+                  protocol: TCP
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 128Mi
+                  requests:
+                    cpu: 5m
+                    memory: 64Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+              - args:
+                - --health-probe-bind-address=:8081
+                - --metrics-bind-address=127.0.0.1:8080
+                - --leader-elect
+                command:
+                - /usr/local/bin/manager
+                image: quay.io/sakhoury/siteconfig-manager:4.16.0
+                imagePullPolicy: Always
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8081
+                  initialDelaySeconds: 15
+                  periodSeconds: 20
+                name: manager
+                readinessProbe:
+                  httpGet:
+                    path: /readyz
+                    port: 8081
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 256Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+              securityContext:
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              serviceAccountName: siteconfig-controller-manager
+              terminationGracePeriodSeconds: 10
+      permissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - patch
+        serviceAccountName: siteconfig-controller-manager
+    strategy: deployment
+  installModes:
+  - supported: false
+    type: OwnNamespace
+  - supported: false
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - a
+  - v
+  - x
+  links:
+  - name: Siteconfig
+    url: https://siteconfig.domain
+  maturity: alpha
+  provider:
+    name: Red Hat
+  version: 4.16.0

@@ -1,0 +1,27 @@
+# permissions for end users to view siteconfigs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: siteconfig-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: siteconfig
+    app.kubernetes.io/part-of: siteconfig
+    app.kubernetes.io/managed-by: kustomize
+  name: siteconfig-viewer-role
+rules:
+- apiGroups:
+  - metaclusterinstall.openshift.io
+  resources:
+  - siteconfigs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - metaclusterinstall.openshift.io
+  resources:
+  - siteconfigs/status
+  verbs:
+  - get
