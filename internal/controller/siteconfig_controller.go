@@ -18,12 +18,15 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 
 	"github.com/go-logr/logr"
+	"github.com/sakhoury/siteconfig/internal/controller/conditions"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
@@ -32,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	siteconfigv1alpha1 "github.com/sakhoury/siteconfig/api/v1alpha1"
+	"github.com/sakhoury/siteconfig/api/v1alpha1"
 )
 
 const (
@@ -92,6 +95,7 @@ func requeueWithCustomInterval(interval time.Duration) ctrl.Result {
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;update;patch
+//+kubebuilder:rbac:groups=hive.openshift.io,resources=clusterimagesets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=agent-install.openshift.io,resources=infraenvs,verbs=get;create;update;patch
 //+kubebuilder:rbac:groups=agent-install.openshift.io,resources=nmstateconfigs,verbs=get;create;update;patch
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclusters,verbs=get;list;watch;create;update;patch;delete
@@ -100,7 +104,7 @@ func requeueWithCustomInterval(interval time.Duration) ctrl.Result {
 //+kubebuilder:rbac:groups=extensions.hive.openshift.io,resources=agentclusterinstalls,verbs=get;create;update;patch
 //+kubebuilder:rbac:groups=extensions.hive.openshift.io,resources=imageclusterinstalls,verbs=get;create;update;patch;delete
 //+kubebuilder:rbac:groups=hive.openshift.io,resources=clusterdeployments,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups=hive.openshift.io,resources=clusterdeployments/status,verbs=get;watch
+//+kubebuilder:rbac:groups=hive.openshift.io,resources=clusterdeployments/status,verbs=get;watch
 //+kubebuilder:rbac:groups=metal3.io,resources=baremetalhosts,verbs=get;create;update;patch
 //+kubebuilder:rbac:groups=agent.open-cluster-management.io,resources=klusterletaddonconfigs,verbs=get;create;update;patch
 //+kubebuilder:rbac:groups=metal3.io,resources=hostfirmwaresettings,verbs=get;create;update;patch
@@ -115,7 +119,7 @@ func (r *SiteConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	r.Log.Info("Start reconciling SiteConfig", "name", req.NamespacedName)
 
 	// Get the SiteConfig CR
-	siteConfig := &siteconfigv1alpha1.SiteConfig{}
+	siteConfig := &v1alpha1.SiteConfig{}
 	if err := r.Get(ctx, req.NamespacedName, siteConfig); err != nil {
 		if errors.IsNotFound(err) {
 			r.Log.Info("SiteConfig not found", "name", siteConfig.Name)
@@ -135,10 +139,17 @@ func (r *SiteConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return res, err
 	}
 
+	if !r.isSiteConfigValidated(siteConfig) {
+		if err := r.handleValidate(ctx, siteConfig); err != nil {
+			return requeueWithError(err)
+		}
+	}
+	r.Log.Info("SiteConfig is validated", "name", req.NamespacedName)
+
 	return ctrl.Result{}, nil
 }
 
-func (r *SiteConfigReconciler) finalizeSiteConfig(ctx context.Context, siteConfig *siteconfigv1alpha1.SiteConfig) error {
+func (r *SiteConfigReconciler) finalizeSiteConfig(ctx context.Context, siteConfig *v1alpha1.SiteConfig) error {
 	// check if managedcluster resource exists in rendered manifests
 	for _, manifest := range siteConfig.Status.ManifestsRendered {
 		if manifest.Kind == managedClusterKind {
@@ -159,7 +170,7 @@ func (r *SiteConfigReconciler) finalizeSiteConfig(ctx context.Context, siteConfi
 	return nil
 }
 
-func (r *SiteConfigReconciler) handleFinalizer(ctx context.Context, siteConfig *siteconfigv1alpha1.SiteConfig) (ctrl.Result, bool, error) {
+func (r *SiteConfigReconciler) handleFinalizer(ctx context.Context, siteConfig *v1alpha1.SiteConfig) (ctrl.Result, bool, error) {
 	// Check if the SiteConfig instance is marked to be deleted, which is
 	// indicated by the deletion timestamp being set.
 	if siteConfig.DeletionTimestamp.IsZero() {
@@ -187,12 +198,41 @@ func (r *SiteConfigReconciler) handleFinalizer(ctx context.Context, siteConfig *
 	return ctrl.Result{}, false, nil
 }
 
+func (r *SiteConfigReconciler) isSiteConfigValidated(siteConfig *v1alpha1.SiteConfig) bool {
+	condition := meta.FindStatusCondition(siteConfig.Status.Conditions, string(conditions.SiteConfigValidated))
+	if condition != nil && condition.Status == metav1.ConditionTrue {
+		return true
+	}
+	return false
+}
+
+func (r *SiteConfigReconciler) handleValidate(ctx context.Context, siteConfig *v1alpha1.SiteConfig) error {
+	r.Log.Info("Starting validation", "SiteConfig", siteConfig.Name)
+	if err := validateSiteConfig(ctx, r.Client, siteConfig); err != nil {
+		r.Log.Error(err, "SiteConfig validation failed due to error", "SiteConfig", siteConfig.Name)
+		conditions.SetStatusCondition(&siteConfig.Status.Conditions,
+			conditions.SiteConfigValidated,
+			conditions.Failed,
+			metav1.ConditionFalse,
+			fmt.Sprintf("Validation failed: %s", err.Error()))
+	} else {
+		r.Log.Info("Validation succeeded", "SiteConfig", siteConfig.Name)
+		conditions.SetStatusCondition(&siteConfig.Status.Conditions,
+			conditions.SiteConfigValidated,
+			conditions.Completed,
+			metav1.ConditionTrue,
+			"Validation succeeded")
+	}
+	r.Log.Info("Finished validation", "SiteConfig", siteConfig.Name)
+	return conditions.UpdateSiteConfigStatus(ctx, r.Client, siteConfig)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *SiteConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Recorder = mgr.GetEventRecorderFor("SiteConfig")
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&siteconfigv1alpha1.SiteConfig{}).
+		For(&v1alpha1.SiteConfig{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(r)
 }
