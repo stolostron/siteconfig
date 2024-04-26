@@ -11,7 +11,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	siteconfigv1alpha1 "github.com/sakhoury/siteconfig/api/v1alpha1"
+	hivev1 "github.com/openshift/hive/apis/hive/v1"
+	"github.com/sakhoury/siteconfig/api/v1alpha1"
+	"github.com/sakhoury/siteconfig/internal/controller/conditions"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -24,7 +26,7 @@ var _ = Describe("Reconcile", func() {
 		ctx               = context.Background()
 		clusterName       = "test-cluster"
 		clusterNamespace  = "test-namespace"
-		siteConfig        *siteconfigv1alpha1.SiteConfig
+		siteConfig        *v1alpha1.SiteConfig
 		pullSecret        *corev1.Secret
 		testPullSecretVal = `{"auths":{"cloud.openshift.com":{"auth":"dXNlcjpwYXNzd29yZAo=","email":"r@r.com"}}}`
 	)
@@ -32,7 +34,7 @@ var _ = Describe("Reconcile", func() {
 	BeforeEach(func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&siteconfigv1alpha1.SiteConfig{}).
+			WithStatusSubresource(&v1alpha1.SiteConfig{}).
 			Build()
 		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
 		scBuilder := NewSiteConfigBuilder(testLogger)
@@ -52,25 +54,25 @@ var _ = Describe("Reconcile", func() {
 		}
 		Expect(c.Create(ctx, pullSecret)).To(Succeed())
 
-		siteConfig = &siteconfigv1alpha1.SiteConfig{
+		siteConfig = &v1alpha1.SiteConfig{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       clusterName,
 				Namespace:  clusterNamespace,
 				Finalizers: []string{siteConfigFinalizer},
 			},
-			Spec: siteconfigv1alpha1.SiteConfigSpec{
+			Spec: v1alpha1.SiteConfigSpec{
 				ClusterName:            clusterName,
 				PullSecretRef:          &corev1.LocalObjectReference{Name: pullSecret.Name},
 				ClusterImageSetNameRef: "testimage:foobar",
 				SSHPublicKey:           "test-ssh",
 				BaseDomain:             "abcd",
-				ClusterType:            siteconfigv1alpha1.ClusterTypeSNO,
-				TemplateRefs: []siteconfigv1alpha1.TemplateRef{
+				ClusterType:            v1alpha1.ClusterTypeSNO,
+				TemplateRefs: []v1alpha1.TemplateRef{
 					{Name: "test-cluster-template", Namespace: "default"}},
-				Nodes: []siteconfigv1alpha1.NodeSpec{{
+				Nodes: []v1alpha1.NodeSpec{{
 					BmcAddress:         "1:2:3:4",
-					BmcCredentialsName: siteconfigv1alpha1.BmcCredentialsName{Name: "bmc"},
-					TemplateRefs: []siteconfigv1alpha1.TemplateRef{
+					BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: "bmc"},
+					TemplateRefs: []v1alpha1.TemplateRef{
 						{Name: "test-node-template", Namespace: "default"}}}}},
 		}
 	})
@@ -110,7 +112,7 @@ var _ = Describe("handleFinalizer", func() {
 	BeforeEach(func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&siteconfigv1alpha1.SiteConfig{}).
+			WithStatusSubresource(&v1alpha1.SiteConfig{}).
 			Build()
 		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
 		scBuilder := NewSiteConfigBuilder(testLogger)
@@ -123,7 +125,7 @@ var _ = Describe("handleFinalizer", func() {
 	})
 
 	It("adds the finalizer if the SiteConfig is not being deleted", func() {
-		siteConfig := &siteconfigv1alpha1.SiteConfig{
+		siteConfig := &v1alpha1.SiteConfig{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clusterName,
 				Namespace: clusterNamespace,
@@ -145,7 +147,7 @@ var _ = Describe("handleFinalizer", func() {
 	})
 
 	It("does nothing if the finalizer is already present", func() {
-		siteConfig := &siteconfigv1alpha1.SiteConfig{
+		siteConfig := &v1alpha1.SiteConfig{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       clusterName,
 				Namespace:  clusterNamespace,
@@ -158,5 +160,172 @@ var _ = Describe("handleFinalizer", func() {
 		Expect(res).To(Equal(ctrl.Result{}))
 		Expect(stop).To(BeFalse())
 		Expect(err).ToNot(HaveOccurred())
+	})
+})
+
+var _ = Describe("handleValidate", func() {
+	var (
+		c                                            client.Client
+		r                                            *SiteConfigReconciler
+		ctx                                          = context.Background()
+		bmcCredentialsName                           = "bmh-secret"
+		bmc, pullSecret                              *corev1.Secret
+		clusterName                                  = "test-cluster"
+		clusterNamespace                             = "test-cluster"
+		clusterImageSetName                          = "testimage:foobar"
+		clusterImageSet                              *hivev1.ClusterImageSet
+		clusterTemplateRef                           = "cluster-template-ref"
+		clusterTemplate, nodeTemplate, extraManifest *corev1.ConfigMap
+		extraManifestName                            = "extra-manifest"
+		nodeTemplateRef                              = "node-template-ref"
+		siteConfig                                   *v1alpha1.SiteConfig
+	)
+
+	BeforeEach(func() {
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.SiteConfig{}).
+			Build()
+		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
+		scBuilder := NewSiteConfigBuilder(testLogger)
+		r = &SiteConfigReconciler{
+			Client:    c,
+			Scheme:    scheme.Scheme,
+			Log:       testLogger,
+			ScBuilder: scBuilder,
+		}
+
+		bmc = getMockBmcSecret(bmcCredentialsName, clusterNamespace)
+		clusterImageSet = getMockClusterImageSet(clusterImageSetName)
+		pullSecret = getMockPullSecret("pull-secret", clusterNamespace)
+		clusterTemplate = getMockClusterTemplate(clusterTemplateRef, clusterNamespace)
+		nodeTemplate = getMockNodeTemplate(nodeTemplateRef, clusterNamespace)
+		extraManifest = getMockExtraManifest(extraManifestName, clusterNamespace)
+
+		SetupTestPrereqs(ctx, c, bmc, pullSecret, clusterImageSet, clusterTemplate, nodeTemplate, extraManifest)
+		siteConfig = getMockSNOSiteConfig(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
+	})
+
+	It("successfully sets the SiteConfigValidated condition to true for a valid SiteConfig", func() {
+		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+
+		err := r.handleValidate(ctx, siteConfig)
+		Expect(err).ToNot(HaveOccurred())
+
+		key := types.NamespacedName{
+			Name:      clusterName,
+			Namespace: clusterNamespace,
+		}
+		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
+		matched := false
+		for _, cond := range siteConfig.Status.Conditions {
+			if cond.Type == string(conditions.SiteConfigValidated) && cond.Status == metav1.ConditionTrue {
+				matched = true
+			}
+		}
+		Expect(matched).To(BeTrue())
+	})
+
+	It("successfully sets the SiteConfigValidated condition to false for an invalid SiteConfig", func() {
+		siteConfig.Spec.ClusterName = ""
+		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+
+		err := r.handleValidate(ctx, siteConfig)
+		Expect(err).ToNot(HaveOccurred())
+
+		key := types.NamespacedName{
+			Name:      clusterName,
+			Namespace: clusterNamespace,
+		}
+		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
+		matched := false
+		for _, cond := range siteConfig.Status.Conditions {
+			if cond.Type == string(conditions.SiteConfigValidated) && cond.Status == metav1.ConditionFalse {
+				matched = true
+			}
+		}
+		Expect(matched).To(BeTrue())
+	})
+
+})
+
+var _ = Describe("isSiteConfigValidated", func() {
+	var (
+		c                client.Client
+		r                *SiteConfigReconciler
+		ctx              = context.Background()
+		clusterName      = "test-cluster"
+		clusterNamespace = "test-cluster"
+	)
+
+	BeforeEach(func() {
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.SiteConfig{}).
+			Build()
+		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
+		scBuilder := NewSiteConfigBuilder(testLogger)
+		r = &SiteConfigReconciler{
+			Client:    c,
+			Scheme:    scheme.Scheme,
+			Log:       testLogger,
+			ScBuilder: scBuilder,
+		}
+	})
+
+	It("returns false when SiteConfig has not conditions set", func() {
+		siteConfig := &v1alpha1.SiteConfig{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      clusterName,
+				Namespace: clusterNamespace,
+			},
+			Status: v1alpha1.SiteConfigStatus{},
+		}
+		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+
+		res := r.isSiteConfigValidated(siteConfig)
+		Expect(res).To(BeFalse())
+	})
+
+	It("returns true when SiteConfig is validated", func() {
+		siteConfig := &v1alpha1.SiteConfig{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      clusterName,
+				Namespace: clusterNamespace,
+			},
+			Status: v1alpha1.SiteConfigStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   string(conditions.SiteConfigValidated),
+						Status: metav1.ConditionTrue,
+					},
+				},
+			},
+		}
+		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+
+		res := r.isSiteConfigValidated(siteConfig)
+		Expect(res).To(BeTrue())
+	})
+
+	It("returns false when SiteConfig has SiteConfigValidated condition set to false", func() {
+		siteConfig := &v1alpha1.SiteConfig{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      clusterName,
+				Namespace: clusterNamespace,
+			},
+			Status: v1alpha1.SiteConfigStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   string(conditions.SiteConfigValidated),
+						Status: metav1.ConditionFalse,
+					},
+				},
+			},
+		}
+		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+
+		res := r.isSiteConfigValidated(siteConfig)
+		Expect(res).To(BeFalse())
 	})
 })

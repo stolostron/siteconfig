@@ -120,6 +120,14 @@ rules:
   - get
   - watch
 - apiGroups:
+  - hive.openshift.io
+  resources:
+  - clusterimagesets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - metaclusterinstall.openshift.io
   resources:
   - siteconfigs

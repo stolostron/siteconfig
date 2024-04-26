@@ -189,8 +189,8 @@ spec:
                 maxItems: 2
                 type: array
               installConfigOverrides:
-                description: InstallConfigOverrides is a generic way of passing install-config
-                  parameters.
+                description: InstallConfigOverrides is a Json formatted string that
+                  provides a generic way of passing install-config parameters.
                 type: string
               machineNetwork:
                 description: MachineNetwork is the list of IP address pools for machines.
@@ -391,6 +391,11 @@ spec:
                         type: string
                       type: array
                     templateRefs:
+                      description: TemplateRefs is a list of references to node-level
+                        templates. A node-level template consists of a ConfigMap in
+                        which the keys of the data field represent the kind of the
+                        installation manifest(s). Node-level templates are instantiated
+                        once for each node in the SiteConfig CR.
                       items:
                         description: TemplateRef is used to specify the installation
                           CR templates
@@ -445,6 +450,11 @@ spec:
                   type: string
                 type: array
               templateRefs:
+                description: TemplateRefs is a list of references to cluster-level
+                  templates. A cluster-level template consists of a ConfigMap in which
+                  the keys of the data field represent the kind of the installation
+                  manifest(s). Cluster-level templates are instantiated once per cluster
+                  (SiteConfig CR).
                 items:
                   description: TemplateRef is used to specify the installation CR
                     templates

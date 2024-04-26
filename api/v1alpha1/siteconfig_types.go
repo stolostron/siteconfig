@@ -156,6 +156,9 @@ type NodeSpec struct {
 	// +optional
 	IronicInspect IronicInspect `json:"ironicInspect,omitempty"`
 
+	// TemplateRefs is a list of references to node-level templates. A node-level template consists of a ConfigMap
+	// in which the keys of the data field represent the kind of the installation manifest(s).
+	// Node-level templates are instantiated once for each node in the SiteConfig CR.
 	// +required
 	TemplateRefs []TemplateRef `json:"templateRefs,omitempty"`
 }
@@ -250,7 +253,8 @@ type SiteConfigSpec struct {
 	// +optional
 	ClusterLabels map[string]string `json:"clusterLabels,omitempty"`
 
-	// InstallConfigOverrides is a generic way of passing install-config parameters.
+	// InstallConfigOverrides is a Json formatted string that provides a generic way of passing
+	// install-config parameters.
 	// +optional
 	InstallConfigOverrides string `json:"installConfigOverrides,omitempty"`
 
@@ -286,6 +290,9 @@ type SiteConfigSpec struct {
 	// +kubebuilder:validation:Enum=SNO;HighlyAvailable
 	ClusterType ClusterType `json:"clusterType,omitempty"`
 
+	// TemplateRefs is a list of references to cluster-level templates. A cluster-level template consists of a ConfigMap
+	// in which the keys of the data field represent the kind of the installation manifest(s).
+	// Cluster-level templates are instantiated once per cluster (SiteConfig CR).
 	// +required
 	TemplateRefs []TemplateRef `json:"templateRefs,omitempty"`
 

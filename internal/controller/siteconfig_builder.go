@@ -17,7 +17,14 @@ limitations under the License.
 package controller
 
 import (
+	"context"
+
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/sakhoury/siteconfig/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 type SiteConfigBuilder struct {
@@ -28,4 +35,18 @@ func NewSiteConfigBuilder(pLog logr.Logger) *SiteConfigBuilder {
 	scBuilder := SiteConfigBuilder{Log: pLog}
 
 	return &scBuilder
+}
+
+// getConfigMap retrieves the configmap from cluster for a given TemplateRef
+func getConfigMap(ctx context.Context, c client.Client, templateRef v1alpha1.TemplateRef) (*corev1.ConfigMap, error) {
+
+	cm := &corev1.ConfigMap{}
+	if err := c.Get(ctx, types.NamespacedName{
+		Name:      templateRef.Name,
+		Namespace: templateRef.Namespace,
+	}, cm); err != nil {
+		return nil, err
+	}
+
+	return cm, nil
 }
