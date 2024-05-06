@@ -57,7 +57,11 @@ func validateSiteConfig(ctx context.Context, c client.Client, siteConfig *v1alph
 	}
 	// Verify that the cluster-level TemplateRefs exist
 	for _, templateRef := range siteConfig.Spec.TemplateRefs {
-		if _, err := getConfigMap(ctx, c, templateRef); err != nil {
+		cm := &corev1.ConfigMap{}
+		if err := c.Get(ctx, types.NamespacedName{
+			Name:      templateRef.Name,
+			Namespace: templateRef.Namespace,
+		}, cm); err != nil {
 			return fmt.Errorf("failed to validate cluster-level TemplateRef: [%s in namespace %s], err: %w", templateRef.Name, templateRef.Namespace, err)
 		}
 	}
@@ -91,9 +95,12 @@ func validateSiteConfig(ctx context.Context, c client.Client, siteConfig *v1alph
 	// If extraManifests are defined - check that they exist
 	if siteConfig.Spec.ExtraManifestsRefs != nil && len(siteConfig.Spec.ExtraManifestsRefs) > 0 {
 		for _, extraManifestRef := range siteConfig.Spec.ExtraManifestsRefs {
-			ref := v1alpha1.TemplateRef{Name: extraManifestRef.Name, Namespace: siteConfig.Namespace}
-			if _, err := getConfigMap(ctx, c, ref); err != nil {
-				return fmt.Errorf("failed to retrieve ExtraManifest: %s in namespace %s, err: %w", ref.Name, ref.Namespace, err)
+			cm := &corev1.ConfigMap{}
+			if err := c.Get(ctx, types.NamespacedName{
+				Name:      extraManifestRef.Name,
+				Namespace: siteConfig.Namespace,
+			}, cm); err != nil {
+				return fmt.Errorf("failed to retrieve ExtraManifest: %s in namespace %s, err: %w", extraManifestRef.Name, siteConfig.Namespace, err)
 			}
 		}
 	}
@@ -114,7 +121,11 @@ func validateSiteConfig(ctx context.Context, c client.Client, siteConfig *v1alph
 		}
 		// Verify that the node-level TemplateRefs exist
 		for _, templateRef := range node.TemplateRefs {
-			if _, err := getConfigMap(ctx, c, templateRef); err != nil {
+			cm := &corev1.ConfigMap{}
+			if err := c.Get(ctx, types.NamespacedName{
+				Name:      templateRef.Name,
+				Namespace: templateRef.Namespace,
+			}, cm); err != nil {
 				return fmt.Errorf("failed to validate node-level TemplateRef: %s in namespace %s [Node: Hostname=%s], err: %w", templateRef.Name, templateRef.Namespace, node.HostName, err)
 			}
 		}
