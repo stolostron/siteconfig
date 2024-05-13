@@ -373,17 +373,17 @@ func init() {
 	SchemeBuilder.Register(&SiteConfig{}, &SiteConfigList{})
 }
 
-// ExtraAnnotationSearch Looks up a specific CR Annotation for this site
-func (site *SiteConfigSpec) ExtraAnnotationSearch(kind string, action string) (map[string]string, bool) {
+// ExtraAnnotationSearch Looks up a specific manifest Annotation for this site
+func (site *SiteConfigSpec) ExtraAnnotationSearch(kind string) (map[string]string, bool) {
 	annotations, ok := site.ExtraAnnotations[kind]
 	return annotations, ok
 }
 
-// ExtraAnnotationSearch Looks up a specific CR annotation for this node, with fallback to site
-func (node *NodeSpec) ExtraAnnotationSearch(kind string, action string, site *SiteConfigSpec) (map[string]string, bool) {
+// ExtraAnnotationSearch Looks up a specific manifest annotation for this node, with fallback to site
+func (node *NodeSpec) ExtraAnnotationSearch(kind string, site *SiteConfigSpec) (map[string]string, bool) {
 	annotations, ok := node.ExtraAnnotations[kind]
 	if ok {
 		return annotations, ok
 	}
-	return site.ExtraAnnotationSearch(kind, action)
+	return site.ExtraAnnotationSearch(kind)
 }
