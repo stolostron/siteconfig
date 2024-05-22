@@ -17,13 +17,21 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"os"
 
+	"github.com/go-logr/logr"
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	"github.com/openshift/assisted-service/api/v1beta1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
+	"github.com/sakhoury/siteconfig/internal/controller/retry"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sretry "k8s.io/client-go/util/retry"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -39,6 +47,7 @@ import (
 
 	siteconfigv1alpha1 "github.com/sakhoury/siteconfig/api/v1alpha1"
 	"github.com/sakhoury/siteconfig/internal/controller"
+	assistedinstaller "github.com/sakhoury/siteconfig/internal/templates/assisted-installer"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -48,7 +57,9 @@ var (
 )
 
 const (
-	SiteConfigNamespace = "siteconfig-system"
+	SiteConfigNamespace               = "siteconfig-system"
+	AssistedInstallerClusterTemplates = "ai-cluster-templates-v1"
+	AssistedInstallerNodeTemplates    = "ai-node-templates-v1"
 )
 
 func init() {
@@ -108,6 +119,11 @@ func main() {
 
 	log := ctrl.Log.WithName("controllers").WithName("SiteConfig")
 
+	if err := initConfigMapTemplates(context.TODO(), mgr.GetClient(), setupLog); err != nil {
+		setupLog.Error(err, "unable to initialize default reference ConfigMap templates")
+		os.Exit(1)
+	}
+
 	if err = (&controller.SiteConfigReconciler{
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
@@ -135,4 +151,32 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func initConfigMapTemplates(ctx context.Context, c client.Client, log logr.Logger) error {
+	templates := make(map[string]map[string]string, 2)
+	templates[AssistedInstallerClusterTemplates] = assistedinstaller.GetClusterTemplates()
+	templates[AssistedInstallerNodeTemplates] = assistedinstaller.GetNodeTemplates()
+
+	for k, v := range templates {
+		immutable := true
+		configMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      k,
+				Namespace: SiteConfigNamespace,
+			},
+			Immutable: &immutable,
+			Data:      v,
+		}
+
+		if err := retry.RetryOnConflictOrRetriable(k8sretry.DefaultBackoff, func() error {
+			return client.IgnoreAlreadyExists(c.Create(ctx, configMap))
+		}); err != nil {
+			return fmt.Errorf("failed to create default reference template ConfigMap %s/%s during init, error: %w", SiteConfigNamespace, k, err)
+		}
+
+		log.Info("created default reference template ConfigMap %s/%s", SiteConfigNamespace, k)
+	}
+
+	return nil
 }
