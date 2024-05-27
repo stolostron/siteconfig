@@ -59,28 +59,42 @@ var _ = Describe("initConfigMapTemplates", func() {
 		Expect(c.Create(ctx, siteConfigNS)).To(Succeed())
 	})
 
-	It("should create default assisted install cluster templates on initialization", func() {
+	It("should create default assisted install and image based install cluster templates on initialization", func() {
 		err := initConfigMapTemplates(ctx, c, log)
 		Expect(err).ToNot(HaveOccurred())
 
-		aiClusterCM := &corev1.ConfigMap{}
+		cm := &corev1.ConfigMap{}
 		key := types.NamespacedName{
 			Name:      AssistedInstallerClusterTemplates,
 			Namespace: SiteConfigNamespace,
 		}
-		Expect(c.Get(ctx, key, aiClusterCM)).To(Succeed())
+		Expect(c.Get(ctx, key, cm)).To(Succeed())
+
+		cm = &corev1.ConfigMap{}
+		key = types.NamespacedName{
+			Name:      ImageBasedInstallClusterTemplates,
+			Namespace: SiteConfigNamespace,
+		}
+		Expect(c.Get(ctx, key, cm)).To(Succeed())
 	})
 
-	It("should create default assisted install node templates on initialization", func() {
+	It("should create default assisted install and image based install node templates on initialization", func() {
 		err := initConfigMapTemplates(ctx, c, log)
 		Expect(err).ToNot(HaveOccurred())
 
-		aiNodeCM := &corev1.ConfigMap{}
+		cm := &corev1.ConfigMap{}
 		key := types.NamespacedName{
 			Name:      AssistedInstallerNodeTemplates,
 			Namespace: SiteConfigNamespace,
 		}
-		Expect(c.Get(ctx, key, aiNodeCM)).To(Succeed())
+		Expect(c.Get(ctx, key, cm)).To(Succeed())
+
+		cm = &corev1.ConfigMap{}
+		key = types.NamespacedName{
+			Name:      ImageBasedInstallNodeTemplates,
+			Namespace: SiteConfigNamespace,
+		}
+		Expect(c.Get(ctx, key, cm)).To(Succeed())
 	})
 
 	It("should not throw an error if a ConfigMap template already exists", func() {
