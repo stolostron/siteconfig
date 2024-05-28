@@ -48,6 +48,7 @@ import (
 	siteconfigv1alpha1 "github.com/sakhoury/siteconfig/api/v1alpha1"
 	"github.com/sakhoury/siteconfig/internal/controller"
 	assistedinstaller "github.com/sakhoury/siteconfig/internal/templates/assisted-installer"
+	imagebasedinstall "github.com/sakhoury/siteconfig/internal/templates/image-based-install"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -60,6 +61,8 @@ const (
 	SiteConfigNamespace               = "siteconfig-system"
 	AssistedInstallerClusterTemplates = "ai-cluster-templates-v1"
 	AssistedInstallerNodeTemplates    = "ai-node-templates-v1"
+	ImageBasedInstallClusterTemplates = "ibi-cluster-templates-v1"
+	ImageBasedInstallNodeTemplates    = "ibi-node-templates-v1"
 )
 
 func init() {
@@ -154,9 +157,11 @@ func main() {
 }
 
 func initConfigMapTemplates(ctx context.Context, c client.Client, log logr.Logger) error {
-	templates := make(map[string]map[string]string, 2)
+	templates := make(map[string]map[string]string, 4)
 	templates[AssistedInstallerClusterTemplates] = assistedinstaller.GetClusterTemplates()
 	templates[AssistedInstallerNodeTemplates] = assistedinstaller.GetNodeTemplates()
+	templates[ImageBasedInstallClusterTemplates] = imagebasedinstall.GetClusterTemplates()
+	templates[ImageBasedInstallNodeTemplates] = imagebasedinstall.GetNodeTemplates()
 
 	for k, v := range templates {
 		immutable := true
