@@ -1,5 +1,5 @@
-# siteconfig-controller
-Provide site deployment to Single and Multi Node OpenShift clusters to complete installation
+# siteconfig
+Provides site deployment to Single and Multi Node OpenShift clusters to complete installation
 
 ## Description
 The siteconfig-controller enables users to deploy clusters using either the Assisted Installer or Image Based Installer flows through the SiteConfig API.
