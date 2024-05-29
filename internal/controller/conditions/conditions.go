@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	siteconfigv1 "github.com/sakhoury/siteconfig/api/v1alpha1"
+	hivev1 "github.com/openshift/hive/apis/hive/v1"
+	"github.com/sakhoury/siteconfig/api/v1alpha1"
 	"github.com/sakhoury/siteconfig/internal/controller/retry"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,6 +20,7 @@ const (
 	SiteConfigValidated        ConditionType = "SiteConfigValidated"
 	RenderedTemplates          ConditionType = "RenderedTemplates"
 	RenderedTemplatesValidated ConditionType = "RenderedTemplatesValidated"
+	RenderedTemplatesApplied   ConditionType = "RenderedTemplatesApplied"
 	Provisioned                ConditionType = "Provisioned"
 )
 
@@ -54,19 +56,31 @@ func SetStatusCondition(existingConditions *[]metav1.Condition, conditionType Co
 	)
 }
 
-func UpdateSiteConfigStatus(ctx context.Context, c client.Client, siteConfig *siteconfigv1.SiteConfig) error {
-	if c == nil {
-		// In UT code
-		return nil
-	}
-
-	err := retry.RetryOnRetriable(retry.RetryBackoffTwoMinutes, func() error {
+func UpdateStatus(ctx context.Context, c client.Client, siteConfig *v1alpha1.SiteConfig) error {
+	if err := retry.RetryOnConflictOrRetriable(retry.RetryBackoffTwoMinutes, func() error {
 		return c.Status().Update(ctx, siteConfig) //nolint:wrapcheck
-	})
-
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("failed to update SiteConfig status: %w", err)
 	}
 
+	return nil
+}
+
+func PatchStatus(ctx context.Context, c client.Client, siteConfig *v1alpha1.SiteConfig, patch client.Patch) error {
+	if err := retry.RetryOnConflictOrRetriable(retry.RetryBackoffTwoMinutes, func() error {
+		return c.Status().Patch(ctx, siteConfig, patch) //nolint:wrapcheck
+	}); err != nil {
+		return fmt.Errorf("failed to update SiteConfig status: %w", err)
+	}
+
+	return nil
+}
+
+func FindConditionType(conditions []hivev1.ClusterDeploymentCondition, condType hivev1.ClusterDeploymentConditionType) *hivev1.ClusterDeploymentCondition {
+	for i := range conditions {
+		if conditions[i].Type == condType {
+			return &conditions[i]
+		}
+	}
 	return nil
 }
