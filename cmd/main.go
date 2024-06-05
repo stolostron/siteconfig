@@ -45,7 +45,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	siteconfigv1alpha1 "github.com/sakhoury/siteconfig/api/v1alpha1"
+	"github.com/sakhoury/siteconfig/api/v1alpha1"
 	"github.com/sakhoury/siteconfig/internal/controller"
 	assistedinstaller "github.com/sakhoury/siteconfig/internal/templates/assisted-installer"
 	imagebasedinstall "github.com/sakhoury/siteconfig/internal/templates/image-based-install"
@@ -68,7 +68,7 @@ const (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(siteconfigv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
 	utilruntime.Must(hivev1.AddToScheme(scheme))
 	utilruntime.Must(v1beta1.AddToScheme(scheme))
 	utilruntime.Must(clusterv1.AddToScheme(scheme))
@@ -138,6 +138,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controller.ClusterDeploymentReconciler{
+		Client: mgr.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("ClusterDeploymentReconciler"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ClusterDeploymentReconciler")
+		os.Exit(1)
+	}
+
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -180,7 +189,7 @@ func initConfigMapTemplates(ctx context.Context, c client.Client, log logr.Logge
 			return fmt.Errorf("failed to create default reference template ConfigMap %s/%s during init, error: %w", SiteConfigNamespace, k, err)
 		}
 
-		log.Info("created default reference template ConfigMap %s/%s", SiteConfigNamespace, k)
+		log.Info(fmt.Sprintf("created default reference template ConfigMap %s/%s", SiteConfigNamespace, k))
 	}
 
 	return nil

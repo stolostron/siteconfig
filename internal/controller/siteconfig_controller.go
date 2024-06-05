@@ -224,7 +224,7 @@ func (r *SiteConfigReconciler) handleValidate(ctx context.Context, siteConfig *v
 			"Validation succeeded")
 	}
 	r.Log.Info("Finished validation", "SiteConfig", siteConfig.Name)
-	return conditions.UpdateSiteConfigStatus(ctx, r.Client, siteConfig)
+	return conditions.UpdateStatus(ctx, r.Client, siteConfig)
 }
 
 // SetupWithManager sets up the controller with the Manager.
