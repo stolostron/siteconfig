@@ -32,6 +32,11 @@ import (
 	"github.com/sakhoury/siteconfig/api/v1alpha1"
 )
 
+const (
+	WaveAnnotation        = v1alpha1.Group + "/sync-wave"
+	DefaultWaveAnnotation = "0"
+)
+
 type SiteConfigBuilder struct {
 	Log logr.Logger
 }
@@ -134,8 +139,8 @@ func (scbuilder *SiteConfigBuilder) renderTemplates(ctx context.Context, c clien
 					}
 				} else {
 					// Append node-level user provided extra annotations if exist
-					if extraCRAnnotations, ok := node.ExtraAnnotationSearch(kind, &siteConfig.Spec); ok {
-						manifest = appendManifestAnnotations(extraCRAnnotations, manifest)
+					if extraManifestAnnotations, ok := node.ExtraAnnotationSearch(kind, &siteConfig.Spec); ok {
+						manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
 					}
 				}
 				manifests = append(manifests, manifest)
