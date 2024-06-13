@@ -420,8 +420,8 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA": getMockBasicClusterTemplate("TestA"),
-				"TestB": getMockBasicClusterTemplate("TestB"),
+				"TestA_Foobar": getMockBasicClusterTemplate("TestA"),
+				"TestB":        getMockBasicClusterTemplate("TestB"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())

@@ -160,8 +160,8 @@ func buildSiteData(siteConfig *v1alpha1.SiteConfig, node *v1alpha1.NodeSpec) (da
 	return
 }
 
-// suppressRenderingManifest function returns true if the manifest-rendering should be suppressed
-func suppressRenderingManifest(kind string, suppressedManifests []string) bool {
+// suppressManifest function returns true if the manifest-rendering should be suppressed
+func suppressManifest(kind string, suppressedManifests []string) bool {
 	if kind == "" || len(suppressedManifests) == 0 {
 		return false
 	}
