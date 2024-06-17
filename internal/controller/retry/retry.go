@@ -16,6 +16,13 @@ var RetryBackoffTwoMinutes = wait.Backoff{
 	Jitter:   0.1,
 }
 
+var RetryBackoff30Seconds = wait.Backoff{
+	Steps:    30,
+	Duration: time.Second,
+	Factor:   1.0,
+	Jitter:   0.1,
+}
+
 func isRetriable(err error) bool {
 	return apierrors.IsInternalError(err) || apierrors.IsServiceUnavailable(err) || net.IsConnectionRefused(err)
 }

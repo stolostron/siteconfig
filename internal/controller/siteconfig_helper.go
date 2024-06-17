@@ -25,6 +25,7 @@ import (
 
 	sprig "github.com/go-task/slim-sprig"
 	"github.com/sakhoury/siteconfig/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8syaml "sigs.k8s.io/yaml"
 )
 
@@ -281,4 +282,15 @@ func funcMap() template.FuncMap {
 	f["toYaml"] = toYaml
 	f["anyFieldDefined"] = anyFieldDefined
 	return f
+}
+
+func toUnstructured(obj interface{}) (unstructured.Unstructured, error) {
+	var uObj unstructured.Unstructured
+	// Marshal the input object to JSON
+	if content, err := json.Marshal(obj); err != nil {
+		return uObj, err
+	} else if err = json.Unmarshal(content, &uObj); err != nil {
+		return uObj, err
+	}
+	return uObj, nil
 }

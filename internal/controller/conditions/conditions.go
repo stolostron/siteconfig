@@ -48,16 +48,17 @@ func SetStatusCondition(existingConditions *[]metav1.Condition, conditionType Co
 	meta.SetStatusCondition(
 		existingConditions,
 		metav1.Condition{
-			Type:    string(conditionType),
-			Status:  conditionStatus,
-			Reason:  string(conditionReason),
-			Message: message,
+			Type:               string(conditionType),
+			Status:             conditionStatus,
+			Reason:             string(conditionReason),
+			Message:            message,
+			LastTransitionTime: metav1.Now(),
 		},
 	)
 }
 
 func UpdateStatus(ctx context.Context, c client.Client, siteConfig *v1alpha1.SiteConfig) error {
-	if err := retry.RetryOnConflictOrRetriable(retry.RetryBackoffTwoMinutes, func() error {
+	if err := retry.RetryOnConflictOrRetriable(retry.RetryBackoff30Seconds, func() error {
 		return c.Status().Update(ctx, siteConfig) //nolint:wrapcheck
 	}); err != nil {
 		return fmt.Errorf("failed to update SiteConfig status: %w", err)
@@ -67,7 +68,7 @@ func UpdateStatus(ctx context.Context, c client.Client, siteConfig *v1alpha1.Sit
 }
 
 func PatchStatus(ctx context.Context, c client.Client, siteConfig *v1alpha1.SiteConfig, patch client.Patch) error {
-	if err := retry.RetryOnConflictOrRetriable(retry.RetryBackoffTwoMinutes, func() error {
+	if err := retry.RetryOnConflictOrRetriable(retry.RetryBackoff30Seconds, func() error {
 		return c.Status().Patch(ctx, siteConfig, patch) //nolint:wrapcheck
 	}); err != nil {
 		return fmt.Errorf("failed to update SiteConfig status: %w", err)

@@ -305,7 +305,12 @@ type SiteConfigSpec struct {
 	Nodes []NodeSpec `json:"nodes,omitempty"`
 }
 
-const ManifestRenderedSuccess = "rendered"
+const (
+	ManifestRenderedSuccess   = "rendered"
+	ManifestRenderedFailure   = "failed"
+	ManifestRenderedValidated = "validated"
+	ManifestSuppressed        = "suppressed"
+)
 
 // ManifestReference contains enough information to let you locate the
 // typed referenced object inside the same namespace.
@@ -322,6 +327,15 @@ type ManifestReference struct {
 	Name string `json:"name,omitempty"`
 	// Status is the status of the manifest
 	Status string `json:"status,omitempty"`
+	// lastAppliedTime is the last time the manifest was applied.
+	// This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Format=date-time
+	LastAppliedTime metav1.Time `json:"lastAppliedTime,omitempty"`
+	// message is a human readable message indicating details about the transition.
+	// This may be an empty string.
+	// +kubebuilder:validation:MaxLength=32768
+	Message string `json:"message,omitempty"`
 }
 
 // SiteConfigStatus defines the observed state of SiteConfig
