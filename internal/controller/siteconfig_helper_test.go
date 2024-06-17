@@ -257,7 +257,7 @@ func Test_buildSiteData(t *testing.T) {
 
 }
 
-func Test_suppressRenderingManifest(t *testing.T) {
+func Test_suppressManifest(t *testing.T) {
 	type args struct {
 		kind                string
 		suppressedManifests []string
@@ -306,8 +306,8 @@ func Test_suppressRenderingManifest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := suppressRenderingManifest(tt.args.kind, tt.args.suppressedManifests); got != tt.want {
-				t.Errorf("suppressRenderingManifest() = %v, want %v", got, tt.want)
+			if got := suppressManifest(tt.args.kind, tt.args.suppressedManifests); got != tt.want {
+				t.Errorf("suppressManifest() = %v, want %v", got, tt.want)
 			}
 		})
 	}

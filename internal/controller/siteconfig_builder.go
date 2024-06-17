@@ -112,11 +112,7 @@ func (scbuilder *SiteConfigBuilder) renderTemplates(ctx context.Context, c clien
 		}
 
 		// process Template ConfigMap
-		for kind, template := range templatesConfigMap.Data {
-			if suppressRenderingManifest(kind, suppressedManifests) {
-				scbuilder.Log.Info(fmt.Sprintf("renderTemplates: skipping rendering template manifest %s for SiteConfig %s", kind, siteConfig.Name))
-				continue
-			}
+		for templateKey, template := range templatesConfigMap.Data {
 
 			siteData, err := buildSiteData(siteConfig, node)
 			if err != nil {
@@ -124,36 +120,42 @@ func (scbuilder *SiteConfigBuilder) renderTemplates(ctx context.Context, c clien
 				return nil, err
 			}
 
-			manifest, err := scbuilder.render(kind, template, siteData)
+			manifest, err := scbuilder.render(templateKey, template, siteData)
 			if err != nil {
 				scbuilder.Log.Error(err, fmt.Sprintf("renderTemplates: failed to render templateRef %s for SiteConfig %s", templateRef.Name, siteConfig.Name))
 				return manifests, err
 			}
 
-			if manifest != nil {
-				kind := manifest["kind"].(string)
-				if node == nil {
-					// Append cluster-level user provided extra annotations if exist
-					if extraManifestAnnotations, ok := siteConfig.Spec.ExtraAnnotationSearch(kind); ok {
-						manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
-					}
-				} else {
-					// Append node-level user provided extra annotations if exist
-					if extraManifestAnnotations, ok := node.ExtraAnnotationSearch(kind, &siteConfig.Spec); ok {
-						manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
-					}
-				}
-				manifests = append(manifests, manifest)
+			if manifest == nil {
+				continue
 			}
+
+			kind := manifest["kind"].(string)
+			if suppressManifest(kind, suppressedManifests) {
+				scbuilder.Log.Info(fmt.Sprintf("renderTemplates: suppressing manifest %s for SiteConfig %s", kind, siteConfig.Name))
+				continue
+			}
+			if node == nil {
+				// Append cluster-level user provided extra annotations if exist
+				if extraManifestAnnotations, ok := siteConfig.Spec.ExtraAnnotationSearch(kind); ok {
+					manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
+				}
+			} else {
+				// Append node-level user provided extra annotations if exist
+				if extraManifestAnnotations, ok := node.ExtraAnnotationSearch(kind, &siteConfig.Spec); ok {
+					manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
+				}
+			}
+			manifests = append(manifests, manifest)
 		}
 	}
 	return manifests, nil
 }
 
-func (scbuilder *SiteConfigBuilder) render(templateType, templateStr string, data *SiteData) (map[string]interface{}, error) {
+func (scbuilder *SiteConfigBuilder) render(templateKey, templateStr string, data *SiteData) (map[string]interface{}, error) {
 	renderedTemplate := make(map[string]interface{})
 	fMap := funcMap()
-	t, err := template.New(templateType).Funcs(fMap).Parse(templateStr)
+	t, err := template.New(templateKey).Funcs(fMap).Parse(templateStr)
 	if err != nil {
 		return nil, err
 	}
