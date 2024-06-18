@@ -50,7 +50,11 @@ spec:
 {{ end }}
 {{ if .Site.ServiceNetwork }}
     serviceNetwork:
-{{ .Site.ServiceNetwork | toYaml | indent 6 }}
+{{ $serviceNetworks := list }}
+{{ range .Site.ServiceNetwork }}
+{{ $serviceNetworks = append $serviceNetworks .CIDR }}
+{{ end }}
+{{ $serviceNetworks | toYaml | indent 6 }}
 {{ end }}
   provisionRequirements:
     controlPlaneAgents: {{ .SpecialVars.ControlPlaneAgents }}
