@@ -47,6 +47,12 @@ type ClusterNetworkEntry struct {
 	HostPrefix int32 `json:"hostPrefix,omitempty"`
 }
 
+// ServiceNetworkEntry is a single IP address block for node IP blocks.
+type ServiceNetworkEntry struct {
+	// CIDR is the IP block address pool for machines within the cluster.
+	CIDR string `json:"cidr"`
+}
+
 // BmcCredentialsName
 type BmcCredentialsName struct {
 	Name string `json:"name,omitempty"`
@@ -236,7 +242,7 @@ type SiteConfigSpec struct {
 
 	// ServiceNetwork is the list of IP address pools for services.
 	// +optional
-	ServiceNetwork []string `json:"serviceNetwork,omitempty"`
+	ServiceNetwork []ServiceNetworkEntry `json:"serviceNetwork,omitempty"`
 
 	// NetworkType is the Container Network Interface (CNI) plug-in to install
 	// The default value is OpenShiftSDN for IPv4, and OVNKubernetes for IPv6 or SNO

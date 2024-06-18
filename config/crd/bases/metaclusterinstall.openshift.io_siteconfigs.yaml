@@ -436,7 +436,16 @@ spec:
               serviceNetwork:
                 description: ServiceNetwork is the list of IP address pools for services.
                 items:
-                  type: string
+                  description: ServiceNetworkEntry is a single IP address block for
+                    node IP blocks.
+                  properties:
+                    cidr:
+                      description: CIDR is the IP block address pool for machines
+                        within the cluster.
+                      type: string
+                  required:
+                  - cidr
+                  type: object
                 type: array
               sshPublicKey:
                 description: SSHPublicKey is the public Secure Shell (SSH) key to
