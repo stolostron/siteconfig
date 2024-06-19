@@ -46,9 +46,9 @@ spec:
 machineNetwork:
 {{ .Site.MachineNetwork | toYaml | indent 4 }}
 {{ end }}
-{{ if (anyFieldDefined .Site.ProxySettings) }}
+{{ if (anyFieldDefined .Site.Proxy) }}
   proxy:
-{{ .Site.ProxySettings | toYaml | indent 4 }}
+{{ .Site.Proxy | toYaml | indent 4 }}
 {{ end }}
 `
 

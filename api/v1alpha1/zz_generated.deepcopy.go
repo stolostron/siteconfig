@@ -304,7 +304,7 @@ func (in *SiteConfigSpec) DeepCopyInto(out *SiteConfigSpec) {
 		}
 	}
 	in.DiskEncryption.DeepCopyInto(&out.DiskEncryption)
-	out.ProxySettings = in.ProxySettings
+	out.Proxy = in.Proxy
 	if in.ExtraManifestsRefs != nil {
 		in, out := &in.ExtraManifestsRefs, &out.ExtraManifestsRefs
 		*out = make([]v1.LocalObjectReference, len(*in))
