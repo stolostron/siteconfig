@@ -274,7 +274,7 @@ type SiteConfigSpec struct {
 
 	// ProxySettings defines the proxy settings used for the install config
 	// +optional
-	ProxySettings aiv1beta1.Proxy `json:"proxy,omitempty"`
+	ProxySettings aiv1beta1.Proxy `json:"proxySettings,omitempty"`
 
 	// ExtraManifestsRefs is list of config map references containing additional manifests to be applied to the cluster.
 	// +optional

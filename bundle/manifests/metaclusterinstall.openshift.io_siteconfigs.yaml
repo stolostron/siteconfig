@@ -408,7 +408,7 @@ spec:
                       type: array
                   type: object
                 type: array
-              proxy:
+              proxySettings:
                 description: ProxySettings defines the proxy settings used for the
                   install config
                 properties:
