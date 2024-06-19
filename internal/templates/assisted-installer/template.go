@@ -59,9 +59,9 @@ spec:
   provisionRequirements:
     controlPlaneAgents: {{ .SpecialVars.ControlPlaneAgents }}
     workerAgents: {{ .SpecialVars.WorkerAgents }}
-{{ if (anyFieldDefined .Site.ProxySettings) }}
+{{ if (anyFieldDefined .Site.Proxy) }}
   proxy:
-{{ .Site.ProxySettings | toYaml | indent 4 }}
+{{ .Site.Proxy | toYaml | indent 4 }}
 {{ end }}
   sshPublicKey: "{{ .Site.SSHPublicKey }}"
   manifestsConfigMapRef:
@@ -102,9 +102,9 @@ spec:
     name: "{{ .Site.ClusterName }}"
     namespace: "{{ .Site.ClusterName }}"
   sshAuthorizedKey: "{{ .Site.SSHPublicKey }}"
-{{ if (anyFieldDefined .Site.ProxySettings) }}
+{{ if (anyFieldDefined .Site.Proxy) }}
   proxy:
-{{ .Site.ProxySettings | toYaml | indent 4 }}
+{{ .Site.Proxy | toYaml | indent 4 }}
 {{ end }}
   pullSecretRef:
     name: "{{ .Site.PullSecretRef.Name }}"

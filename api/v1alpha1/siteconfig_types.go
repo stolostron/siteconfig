@@ -272,9 +272,9 @@ type SiteConfigSpec struct {
 	// +optional
 	DiskEncryption DiskEncryption `json:"diskEncryption,omitempty"`
 
-	// ProxySettings defines the proxy settings used for the install config
+	// Proxy defines the proxy settings used for the install config
 	// +optional
-	ProxySettings aiv1beta1.Proxy `json:"proxySettings,omitempty"`
+	Proxy aiv1beta1.Proxy `json:"proxy,omitempty"`
 
 	// ExtraManifestsRefs is list of config map references containing additional manifests to be applied to the cluster.
 	// +optional

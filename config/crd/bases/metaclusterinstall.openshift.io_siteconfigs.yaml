@@ -408,9 +408,9 @@ spec:
                       type: array
                   type: object
                 type: array
-              proxySettings:
-                description: ProxySettings defines the proxy settings used for the
-                  install config
+              proxy:
+                description: Proxy defines the proxy settings used for the install
+                  config
                 properties:
                   httpProxy:
                     description: HTTPProxy is the URL of the proxy for HTTP requests.

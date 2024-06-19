@@ -83,9 +83,9 @@ spec:
   provisionRequirements:
     controlPlaneAgents: {{ .SpecialVars.ControlPlaneAgents }}
     workerAgents: {{ .SpecialVars.WorkerAgents }}
-{{ if (anyFieldDefined .Site.ProxySettings) }}
+{{ if (anyFieldDefined .Site.Proxy) }}
   proxy:
-{{ .Site.ProxySettings | toYaml | indent 4 }}
+{{ .Site.Proxy | toYaml | indent 4 }}
 {{ end }}
   sshPublicKey: "{{ .Site.SSHPublicKey }}"
   manifestsConfigMapRef:
@@ -198,7 +198,7 @@ func TestSiteConfigBuilder_render(t *testing.T) {
 			DiskEncryption: v1alpha1.DiskEncryption{
 				Type: "nbde",
 				Tang: []v1alpha1.TangConfig{{URL: "http://10.0.0.1:7500", Thumbprint: "1234567890"}}},
-			ProxySettings:      aiv1beta1.Proxy{NoProxy: "foobar"},
+			Proxy:              aiv1beta1.Proxy{NoProxy: "foobar"},
 			ExtraManifestsRefs: []corev1.LocalObjectReference{{Name: "foobar1"}, {Name: "foobar2"}},
 			TemplateRefs:       []v1alpha1.TemplateRef{{Name: "cluster-v1", Namespace: "site-sno-du-1"}},
 			Nodes: []v1alpha1.NodeSpec{{
