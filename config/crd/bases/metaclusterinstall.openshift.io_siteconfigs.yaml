@@ -617,11 +617,20 @@ spec:
                       maxLength: 32768
                       type: string
                     name:
-                      description: Name is the name of resource being referenced
+                      description: Name is the name of the resource being referenced
+                      type: string
+                    namespace:
+                      description: Namespace is the namespace of the resource being
+                        referenced
                       type: string
                     status:
                       description: Status is the status of the manifest
                       type: string
+                    syncWave:
+                      description: 'SyncWave is the order in which the resource should
+                        be processed: created in ascending order, deleted in descending
+                        order.'
+                      type: integer
                   type: object
                   x-kubernetes-map-type: atomic
                 type: array

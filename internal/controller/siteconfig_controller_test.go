@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"reflect"
 
+	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
@@ -32,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
+	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -180,6 +182,189 @@ var _ = Describe("handleFinalizer", func() {
 		Expect(stop).To(BeFalse())
 		Expect(err).ToNot(HaveOccurred())
 	})
+
+	It("deletes all rendered manifests", func() {
+
+		manifestName := "test"
+		bmhApilGroup := "metal3.io/v1alpha1"
+		cdApiGroup := "hive.openshift.io/v1"
+		mcApiGroup := "cluster.open-cluster-management.io/v1"
+
+		siteConfig := &v1alpha1.SiteConfig{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       clusterName,
+				Namespace:  clusterNamespace,
+				Finalizers: []string{siteConfigFinalizer},
+			},
+			Status: v1alpha1.SiteConfigStatus{
+				ManifestsRendered: []v1alpha1.ManifestReference{
+					{
+						APIGroup:  &cdApiGroup,
+						Kind:      "ClusterDeployment",
+						Name:      manifestName,
+						Namespace: clusterNamespace,
+						SyncWave:  1,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+					},
+					{
+						APIGroup:  &bmhApilGroup,
+						Kind:      "BareMetalHost",
+						Name:      manifestName,
+						Namespace: clusterNamespace,
+						SyncWave:  2,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+					},
+					{
+						APIGroup: &mcApiGroup,
+						Kind:     "ManagedCluster",
+						Name:     manifestName,
+						SyncWave: 3,
+						Status:   v1alpha1.ManifestRenderedSuccess,
+					},
+				},
+			},
+		}
+		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+
+		// Create manifests
+		cd := &hivev1.ClusterDeployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      manifestName,
+				Namespace: clusterNamespace,
+			},
+		}
+		Expect(c.Create(ctx, cd)).To(Succeed())
+
+		bmh := &bmh_v1alpha1.BareMetalHost{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      manifestName,
+				Namespace: clusterNamespace,
+			},
+		}
+		Expect(c.Create(ctx, bmh)).To(Succeed())
+
+		mc := &clusterv1.ManagedCluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: manifestName,
+			},
+		}
+		Expect(c.Create(ctx, mc)).To(Succeed())
+
+		// Get the created manfiests to confirm they exist before calling finalizer
+		key := types.NamespacedName{
+			Name:      manifestName,
+			Namespace: clusterNamespace,
+		}
+		keyMc := types.NamespacedName{
+			Name: manifestName,
+		}
+		Expect(c.Get(ctx, key, cd)).To(Succeed())
+		Expect(c.Get(ctx, key, bmh)).To(Succeed())
+		Expect(c.Get(ctx, keyMc, mc)).To(Succeed())
+
+		// Set the deletionTimestamp to force deletion of siteconfig manifests
+		deletionTimeStamp := metav1.Now()
+		siteConfig.ObjectMeta.DeletionTimestamp = &deletionTimeStamp
+
+		// Expect the manifests previously created to be deleted after the handleFinalizer is called
+		res, stop, err := r.handleFinalizer(ctx, siteConfig)
+		Expect(res).To(Equal(ctrl.Result{}))
+		Expect(stop).To(BeTrue())
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(c.Get(ctx, key, cd)).ToNot(Succeed())
+		Expect(c.Get(ctx, key, bmh)).ToNot(Succeed())
+		Expect(c.Get(ctx, keyMc, mc)).ToNot(Succeed())
+	})
+
+	It("does not fail to handle the finalizer when attempting to delete a missing manifest", func() {
+
+		manifestName := "test"
+		bmhApilGroup := "metal3.io/v1alpha1"
+		cdApiGroup := "hive.openshift.io/v1"
+		mcApiGroup := "cluster.open-cluster-management.io/v1"
+
+		siteConfig := &v1alpha1.SiteConfig{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       clusterName,
+				Namespace:  clusterNamespace,
+				Finalizers: []string{siteConfigFinalizer},
+			},
+			Status: v1alpha1.SiteConfigStatus{
+				ManifestsRendered: []v1alpha1.ManifestReference{
+					{
+						APIGroup:  &cdApiGroup,
+						Kind:      "ClusterDeployment",
+						Name:      manifestName,
+						Namespace: clusterNamespace,
+						SyncWave:  1,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+					},
+					{
+						APIGroup:  &bmhApilGroup,
+						Kind:      "BareMetalHost",
+						Name:      manifestName,
+						Namespace: clusterNamespace,
+						SyncWave:  2,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+					},
+					{
+						APIGroup: &mcApiGroup,
+						Kind:     "ManagedCluster",
+						Name:     manifestName,
+						SyncWave: 3,
+						Status:   v1alpha1.ManifestRenderedSuccess,
+					},
+				},
+			},
+		}
+		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+
+		// Create manifests
+		cd := &hivev1.ClusterDeployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      manifestName,
+				Namespace: clusterNamespace,
+			},
+		}
+		Expect(c.Create(ctx, cd)).To(Succeed())
+
+		mc := &clusterv1.ManagedCluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: manifestName,
+			},
+		}
+		Expect(c.Create(ctx, mc)).To(Succeed())
+
+		// Get the created manfiests to confirm they exist before calling finalizer
+		key := types.NamespacedName{
+			Name:      manifestName,
+			Namespace: clusterNamespace,
+		}
+		keyMc := types.NamespacedName{
+			Name: manifestName,
+		}
+		Expect(c.Get(ctx, key, cd)).To(Succeed())
+		Expect(c.Get(ctx, keyMc, mc)).To(Succeed())
+
+		// BareMetalHost manifest is not created!
+		bmh := &bmh_v1alpha1.BareMetalHost{}
+		Expect(c.Get(ctx, key, bmh)).ToNot(Succeed())
+
+		// Set the deletionTimestamp to force deletion of siteconfig manifests
+		deletionTimeStamp := metav1.Now()
+		siteConfig.ObjectMeta.DeletionTimestamp = &deletionTimeStamp
+
+		// Expect the manifests previously created to be deleted after the handleFinalizer is called
+		res, stop, err := r.handleFinalizer(ctx, siteConfig)
+		Expect(res).To(Equal(ctrl.Result{}))
+		Expect(stop).To(BeTrue())
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(c.Get(ctx, key, cd)).ToNot(Succeed())
+		Expect(c.Get(ctx, keyMc, mc)).ToNot(Succeed())
+	})
+
 })
 
 var _ = Describe("handleValidate", func() {

@@ -329,8 +329,12 @@ type ManifestReference struct {
 	APIGroup *string `json:"apiGroup,omitempty"`
 	// Kind is the type of resource being referenced
 	Kind string `json:"kind,omitempty"`
-	// Name is the name of resource being referenced
+	// Name is the name of the resource being referenced
 	Name string `json:"name,omitempty"`
+	// Namespace is the namespace of the resource being referenced
+	Namespace string `json:"namespace,omitempty"`
+	//SyncWave is the order in which the resource should be processed: created in ascending order, deleted in descending order.
+	SyncWave int `json:"syncWave,omitempty"`
 	// Status is the status of the manifest
 	Status string `json:"status,omitempty"`
 	// lastAppliedTime is the last time the manifest was applied.
