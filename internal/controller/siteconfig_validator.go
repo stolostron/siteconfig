@@ -98,9 +98,9 @@ func validateSiteConfig(ctx context.Context, c client.Client, siteConfig *v1alph
 			cm := &corev1.ConfigMap{}
 			if err := c.Get(ctx, types.NamespacedName{
 				Name:      extraManifestRef.Name,
-				Namespace: siteConfig.Namespace,
+				Namespace: extraManifestRef.Namespace,
 			}, cm); err != nil {
-				return fmt.Errorf("failed to retrieve ExtraManifest: %s in namespace %s, err: %w", extraManifestRef.Name, siteConfig.Namespace, err)
+				return fmt.Errorf("failed to retrieve ExtraManifest: %s in namespace %s, err: %w", extraManifestRef.Name, extraManifestRef.Namespace, err)
 			}
 		}
 	}

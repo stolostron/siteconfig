@@ -199,7 +199,7 @@ func TestSiteConfigBuilder_render(t *testing.T) {
 				Type: "nbde",
 				Tang: []v1alpha1.TangConfig{{URL: "http://10.0.0.1:7500", Thumbprint: "1234567890"}}},
 			Proxy:              aiv1beta1.Proxy{NoProxy: "foobar"},
-			ExtraManifestsRefs: []corev1.LocalObjectReference{{Name: "foobar1"}, {Name: "foobar2"}},
+			ExtraManifestsRefs: []v1alpha1.ExtraManifestRef{{Name: "foobar1", Namespace: "site-sno-du-1"}, {Name: "foobar2", Namespace: "site-sno-du-1"}},
 			TemplateRefs:       []v1alpha1.TemplateRef{{Name: "cluster-v1", Namespace: "site-sno-du-1"}},
 			Nodes: []v1alpha1.NodeSpec{{
 				BmcAddress:             "idrac-virtualmedia+https://10.16.231.87/redfish/v1/Systems/System.Embedded.1",

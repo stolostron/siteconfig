@@ -87,7 +87,7 @@ func getMockSNOSiteConfig(clusterName, clusterNamespace, pullSecret, bmcCredenti
 			SSHPublicKey:           "test-ssh",
 			BaseDomain:             "abcd",
 			ClusterType:            v1alpha1.ClusterTypeSNO,
-			ExtraManifestsRefs:     []corev1.LocalObjectReference{{Name: extraManifest}},
+			ExtraManifestsRefs:     []v1alpha1.ExtraManifestRef{{Name: extraManifest, Namespace: clusterNamespace}},
 			TemplateRefs: []v1alpha1.TemplateRef{
 				{Name: clusterTemplateRef, Namespace: clusterNamespace}},
 			InstallConfigOverrides: installConfigOverrides,
@@ -210,7 +210,7 @@ var _ = Describe("validateSiteConfig", func() {
 	})
 
 	It("fails validation when an ExtraManifest reference does not exist", func() {
-		siteConfig.Spec.ExtraManifestsRefs = []corev1.LocalObjectReference{{Name: "does-not-exist"}}
+		siteConfig.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestRef{{Name: "does-not-exist", Namespace: clusterNamespace}}
 		Expect(c.Create(ctx, siteConfig)).To(Succeed())
 		err := validateSiteConfig(ctx, c, siteConfig)
 		Expect(err).To(MatchError(ContainSubstring("failed to retrieve ExtraManifest")))
