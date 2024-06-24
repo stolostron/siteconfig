@@ -17,13 +17,21 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"os"
 
+	"github.com/go-logr/logr"
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	"github.com/openshift/assisted-service/api/v1beta1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
+	"github.com/sakhoury/siteconfig/internal/controller/retry"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sretry "k8s.io/client-go/util/retry"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -37,8 +45,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	siteconfigv1alpha1 "github.com/sakhoury/siteconfig/api/v1alpha1"
+	"github.com/sakhoury/siteconfig/api/v1alpha1"
 	"github.com/sakhoury/siteconfig/internal/controller"
+	assistedinstaller "github.com/sakhoury/siteconfig/internal/templates/assisted-installer"
+	imagebasedinstall "github.com/sakhoury/siteconfig/internal/templates/image-based-install"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -48,13 +58,17 @@ var (
 )
 
 const (
-	SiteConfigNamespace = "siteconfig-system"
+	SiteConfigNamespace               = "siteconfig-system"
+	AssistedInstallerClusterTemplates = "ai-cluster-templates-v1"
+	AssistedInstallerNodeTemplates    = "ai-node-templates-v1"
+	ImageBasedInstallClusterTemplates = "ibi-cluster-templates-v1"
+	ImageBasedInstallNodeTemplates    = "ibi-node-templates-v1"
 )
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(siteconfigv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
 	utilruntime.Must(hivev1.AddToScheme(scheme))
 	utilruntime.Must(v1beta1.AddToScheme(scheme))
 	utilruntime.Must(clusterv1.AddToScheme(scheme))
@@ -108,6 +122,11 @@ func main() {
 
 	log := ctrl.Log.WithName("controllers").WithName("SiteConfig")
 
+	if err := initConfigMapTemplates(context.TODO(), mgr.GetClient(), setupLog); err != nil {
+		setupLog.Error(err, "unable to initialize default reference ConfigMap templates")
+		os.Exit(1)
+	}
+
 	if err = (&controller.SiteConfigReconciler{
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
@@ -116,6 +135,15 @@ func main() {
 		ScBuilder: controller.NewSiteConfigBuilder(log.WithName("SiteConfigBuilder")),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SiteConfig")
+		os.Exit(1)
+	}
+
+	if err = (&controller.ClusterDeploymentReconciler{
+		Client: mgr.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("ClusterDeploymentReconciler"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ClusterDeploymentReconciler")
 		os.Exit(1)
 	}
 
@@ -135,4 +163,34 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func initConfigMapTemplates(ctx context.Context, c client.Client, log logr.Logger) error {
+	templates := make(map[string]map[string]string, 4)
+	templates[AssistedInstallerClusterTemplates] = assistedinstaller.GetClusterTemplates()
+	templates[AssistedInstallerNodeTemplates] = assistedinstaller.GetNodeTemplates()
+	templates[ImageBasedInstallClusterTemplates] = imagebasedinstall.GetClusterTemplates()
+	templates[ImageBasedInstallNodeTemplates] = imagebasedinstall.GetNodeTemplates()
+
+	for k, v := range templates {
+		immutable := true
+		configMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      k,
+				Namespace: SiteConfigNamespace,
+			},
+			Immutable: &immutable,
+			Data:      v,
+		}
+
+		if err := retry.RetryOnConflictOrRetriable(k8sretry.DefaultBackoff, func() error {
+			return client.IgnoreAlreadyExists(c.Create(ctx, configMap))
+		}); err != nil {
+			return fmt.Errorf("failed to create default reference template ConfigMap %s/%s during init, error: %w", SiteConfigNamespace, k, err)
+		}
+
+		log.Info(fmt.Sprintf("created default reference template ConfigMap %s/%s", SiteConfigNamespace, k))
+	}
+
+	return nil
 }

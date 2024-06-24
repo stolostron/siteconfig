@@ -47,6 +47,12 @@ type ClusterNetworkEntry struct {
 	HostPrefix int32 `json:"hostPrefix,omitempty"`
 }
 
+// ServiceNetworkEntry is a single IP address block for node IP blocks.
+type ServiceNetworkEntry struct {
+	// CIDR is the IP block address pool for machines within the cluster.
+	CIDR string `json:"cidr"`
+}
+
 // BmcCredentialsName
 type BmcCredentialsName struct {
 	Name string `json:"name,omitempty"`
@@ -236,7 +242,7 @@ type SiteConfigSpec struct {
 
 	// ServiceNetwork is the list of IP address pools for services.
 	// +optional
-	ServiceNetwork []string `json:"serviceNetwork,omitempty"`
+	ServiceNetwork []ServiceNetworkEntry `json:"serviceNetwork,omitempty"`
 
 	// NetworkType is the Container Network Interface (CNI) plug-in to install
 	// The default value is OpenShiftSDN for IPv4, and OVNKubernetes for IPv6 or SNO
@@ -266,9 +272,9 @@ type SiteConfigSpec struct {
 	// +optional
 	DiskEncryption DiskEncryption `json:"diskEncryption,omitempty"`
 
-	// ProxySettings defines the proxy settings used for the install config
+	// Proxy defines the proxy settings used for the install config
 	// +optional
-	ProxySettings aiv1beta1.Proxy `json:"proxy,omitempty"`
+	Proxy aiv1beta1.Proxy `json:"proxy,omitempty"`
 
 	// ExtraManifestsRefs is list of config map references containing additional manifests to be applied to the cluster.
 	// +optional
@@ -305,7 +311,12 @@ type SiteConfigSpec struct {
 	Nodes []NodeSpec `json:"nodes,omitempty"`
 }
 
-const ManifestRenderedSuccess = "rendered"
+const (
+	ManifestRenderedSuccess   = "rendered"
+	ManifestRenderedFailure   = "failed"
+	ManifestRenderedValidated = "validated"
+	ManifestSuppressed        = "suppressed"
+)
 
 // ManifestReference contains enough information to let you locate the
 // typed referenced object inside the same namespace.
@@ -322,6 +333,15 @@ type ManifestReference struct {
 	Name string `json:"name,omitempty"`
 	// Status is the status of the manifest
 	Status string `json:"status,omitempty"`
+	// lastAppliedTime is the last time the manifest was applied.
+	// This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Format=date-time
+	LastAppliedTime metav1.Time `json:"lastAppliedTime,omitempty"`
+	// message is a human readable message indicating details about the transition.
+	// This may be an empty string.
+	// +kubebuilder:validation:MaxLength=32768
+	Message string `json:"message,omitempty"`
 }
 
 // SiteConfigStatus defines the observed state of SiteConfig
@@ -373,17 +393,17 @@ func init() {
 	SchemeBuilder.Register(&SiteConfig{}, &SiteConfigList{})
 }
 
-// ExtraAnnotationSearch Looks up a specific CR Annotation for this site
-func (site *SiteConfigSpec) ExtraAnnotationSearch(kind string, action string) (map[string]string, bool) {
+// ExtraAnnotationSearch Looks up a specific manifest Annotation for this site
+func (site *SiteConfigSpec) ExtraAnnotationSearch(kind string) (map[string]string, bool) {
 	annotations, ok := site.ExtraAnnotations[kind]
 	return annotations, ok
 }
 
-// ExtraAnnotationSearch Looks up a specific CR annotation for this node, with fallback to site
-func (node *NodeSpec) ExtraAnnotationSearch(kind string, action string, site *SiteConfigSpec) (map[string]string, bool) {
+// ExtraAnnotationSearch Looks up a specific manifest annotation for this node, with fallback to site
+func (node *NodeSpec) ExtraAnnotationSearch(kind string, site *SiteConfigSpec) (map[string]string, bool) {
 	annotations, ok := node.ExtraAnnotations[kind]
 	if ok {
 		return annotations, ok
 	}
-	return site.ExtraAnnotationSearch(kind, action)
+	return site.ExtraAnnotationSearch(kind)
 }
