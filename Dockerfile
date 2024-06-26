@@ -25,4 +25,11 @@ COPY --from=builder \
     /opt/app-root/src/build/manager \
     /usr/local/bin/
 
+# Copy the licence
+COPY LICENSE /licenses/LICENSE
+
+ENV USER_UID=1001
+
+USER ${USER_UID}
+
 ENTRYPOINT ["/usr/local/bin/manager"]
