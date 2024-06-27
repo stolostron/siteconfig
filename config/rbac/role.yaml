@@ -21,6 +21,8 @@ rules:
   resources:
   - namespaces
   verbs:
+  - create
+  - delete
   - get
   - list
   - patch
@@ -43,6 +45,7 @@ rules:
   - infraenvs
   verbs:
   - create
+  - delete
   - get
   - patch
   - update
@@ -52,6 +55,7 @@ rules:
   - nmstateconfigs
   verbs:
   - create
+  - delete
   - get
   - patch
   - update
@@ -61,6 +65,7 @@ rules:
   - klusterletaddonconfigs
   verbs:
   - create
+  - delete
   - get
   - patch
   - update
@@ -88,6 +93,7 @@ rules:
   - agentclusterinstalls
   verbs:
   - create
+  - delete
   - get
   - patch
   - update
@@ -107,6 +113,7 @@ rules:
   - clusterdeployments
   verbs:
   - create
+  - delete
   - get
   - list
   - patch
@@ -159,6 +166,7 @@ rules:
   - baremetalhosts
   verbs:
   - create
+  - delete
   - get
   - patch
   - update
@@ -168,6 +176,7 @@ rules:
   - hostfirmwaresettings
   verbs:
   - create
+  - delete
   - get
   - patch
   - update

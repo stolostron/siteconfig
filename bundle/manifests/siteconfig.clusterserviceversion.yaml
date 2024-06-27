@@ -241,6 +241,8 @@ spec:
           resources:
           - namespaces
           verbs:
+          - create
+          - delete
           - get
           - list
           - patch
@@ -263,6 +265,7 @@ spec:
           - infraenvs
           verbs:
           - create
+          - delete
           - get
           - patch
           - update
@@ -272,6 +275,7 @@ spec:
           - nmstateconfigs
           verbs:
           - create
+          - delete
           - get
           - patch
           - update
@@ -281,6 +285,7 @@ spec:
           - klusterletaddonconfigs
           verbs:
           - create
+          - delete
           - get
           - patch
           - update
@@ -308,6 +313,7 @@ spec:
           - agentclusterinstalls
           verbs:
           - create
+          - delete
           - get
           - patch
           - update
@@ -327,6 +333,7 @@ spec:
           - clusterdeployments
           verbs:
           - create
+          - delete
           - get
           - list
           - patch
@@ -379,6 +386,7 @@ spec:
           - baremetalhosts
           verbs:
           - create
+          - delete
           - get
           - patch
           - update
@@ -388,6 +396,7 @@ spec:
           - hostfirmwaresettings
           verbs:
           - create
+          - delete
           - get
           - patch
           - update

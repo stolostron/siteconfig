@@ -25,12 +25,12 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/sakhoury/siteconfig/internal/controller/conditions"
+	"golang.org/x/exp/maps"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -40,10 +40,7 @@ import (
 	"github.com/sakhoury/siteconfig/api/v1alpha1"
 )
 
-const (
-	siteConfigFinalizer = "metaclusterinstall.openshift.io/finalizer"
-	managedClusterKind  = "ManagedCluster"
-)
+const siteConfigFinalizer = "metaclusterinstall.openshift.io/finalizer"
 
 // SiteConfigReconciler reconciles a SiteConfig object
 type SiteConfigReconciler struct {
@@ -96,20 +93,20 @@ func requeueWithCustomInterval(interval time.Duration) ctrl.Result {
 //+kubebuilder:rbac:groups=metaclusterinstall.openshift.io,resources=siteconfigs/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;update;patch
+//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;create;update;patch;delete
 //+kubebuilder:rbac:groups=hive.openshift.io,resources=clusterimagesets,verbs=get;list;watch
-//+kubebuilder:rbac:groups=agent-install.openshift.io,resources=infraenvs,verbs=get;create;update;patch
-//+kubebuilder:rbac:groups=agent-install.openshift.io,resources=nmstateconfigs,verbs=get;create;update;patch
+//+kubebuilder:rbac:groups=agent-install.openshift.io,resources=infraenvs,verbs=get;create;update;patch;delete
+//+kubebuilder:rbac:groups=agent-install.openshift.io,resources=nmstateconfigs,verbs=get;create;update;patch;delete
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=register.open-cluster-management.io,resources=managedclusters/accept,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets/join,verbs=create
-//+kubebuilder:rbac:groups=extensions.hive.openshift.io,resources=agentclusterinstalls,verbs=get;create;update;patch
+//+kubebuilder:rbac:groups=extensions.hive.openshift.io,resources=agentclusterinstalls,verbs=get;create;update;patch;delete
 //+kubebuilder:rbac:groups=extensions.hive.openshift.io,resources=imageclusterinstalls,verbs=get;create;update;patch;delete
-//+kubebuilder:rbac:groups=hive.openshift.io,resources=clusterdeployments,verbs=get;list;watch;create;update;patch
+//+kubebuilder:rbac:groups=hive.openshift.io,resources=clusterdeployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=hive.openshift.io,resources=clusterdeployments/status,verbs=get;watch
-//+kubebuilder:rbac:groups=metal3.io,resources=baremetalhosts,verbs=get;create;update;patch
-//+kubebuilder:rbac:groups=agent.open-cluster-management.io,resources=klusterletaddonconfigs,verbs=get;create;update;patch
-//+kubebuilder:rbac:groups=metal3.io,resources=hostfirmwaresettings,verbs=get;create;update;patch
+//+kubebuilder:rbac:groups=metal3.io,resources=baremetalhosts,verbs=get;create;update;patch;delete
+//+kubebuilder:rbac:groups=agent.open-cluster-management.io,resources=klusterletaddonconfigs,verbs=get;create;update;patch;delete
+//+kubebuilder:rbac:groups=metal3.io,resources=hostfirmwaresettings,verbs=get;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -164,19 +161,35 @@ func (r *SiteConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *SiteConfigReconciler) finalizeSiteConfig(ctx context.Context, siteConfig *v1alpha1.SiteConfig) error {
-	// check if managedcluster resource exists in rendered manifests
+
+	// Group the manifests by the sync-wave
+	// This is so that the manifests can be deleted in descending order of sync-wave
+	manifestGroups := map[int][]v1alpha1.ManifestReference{}
 	for _, manifest := range siteConfig.Status.ManifestsRendered {
-		if manifest.Kind == managedClusterKind {
-			// delete ManagedCluster resource
-			managedCluster := &clusterv1.ManagedCluster{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: manifest.Name,
-				},
-			}
-			if err := r.Client.Delete(ctx, managedCluster); err == nil {
-				r.Log.Info("Successfully deleted ManagedCluster", "ManagedCluster", manifest.Name)
+		// check if the key exists in the map
+		if _, ok := manifestGroups[manifest.SyncWave]; !ok {
+			// if key doesn't exist, initialize the slice
+			manifestGroups[manifest.SyncWave] = make([]v1alpha1.ManifestReference, 0)
+		}
+		// append the value to the slice associated with the key
+		manifestGroups[manifest.SyncWave] = append(manifestGroups[manifest.SyncWave], manifest)
+	}
+
+	syncWaves := maps.Keys(manifestGroups)
+	// Sort the syncWaves in descending order
+	sort.Sort(sort.Reverse(sort.IntSlice(syncWaves)))
+
+	for _, syncWave := range syncWaves {
+		for _, manifest := range manifestGroups[syncWave] {
+			obj := &unstructured.Unstructured{}
+			obj.SetName(manifest.Name)
+			obj.SetNamespace(manifest.Namespace)
+			obj.SetAPIVersion(*manifest.APIGroup)
+			obj.SetKind(manifest.Kind)
+			if err := r.Client.Delete(ctx, obj); err == nil {
+				r.Log.Info("Successfully deleted resource", manifest.Kind, manifest.Name)
 			} else if !errors.IsNotFound(err) {
-				r.Log.Info("Failed to delete ManagedCluster", "ManagedCluster", manifest.Name)
+				r.Log.Info("Failed to delete resource", manifest.Kind, manifest.Name)
 				return err
 			}
 		}
@@ -386,7 +399,12 @@ func (r *SiteConfigReconciler) executeRenderedManifests(ctx context.Context, c c
 			apiVersion := manifest["apiVersion"].(string)
 			kind := manifest["kind"].(string)
 
-			manifestRef := &v1alpha1.ManifestReference{Name: name, Kind: kind, APIGroup: &apiVersion, LastAppliedTime: metav1.NewTime(time.Now())}
+			manifestRef := &v1alpha1.ManifestReference{Name: name, Kind: kind, APIGroup: &apiVersion, SyncWave: syncWave, LastAppliedTime: metav1.NewTime(time.Now())}
+
+			namespace, namespaceOk := metadata["namespace"].(string)
+			if namespaceOk {
+				manifestRef.Namespace = namespace
+			}
 
 			if obj, err := toUnstructured(item); err != nil {
 				successfulExecution = false
@@ -394,7 +412,7 @@ func (r *SiteConfigReconciler) executeRenderedManifests(ctx context.Context, c c
 				manifestRef.Message = err.Error()
 			} else {
 				setOwnerRef := func() error {
-					if kind != managedClusterKind {
+					if namespaceOk && namespace == siteConfig.Namespace {
 						return ctrl.SetControllerReference(siteConfig, &obj, r.Scheme)
 					}
 					return nil
