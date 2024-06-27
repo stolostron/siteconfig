@@ -81,11 +81,17 @@ const (
 	CPUPartitioningAllNodes CPUPartitioningMode = "AllNodes"
 )
 
-// TemplateRef is used to specify the installation CR templates
-type TemplateRef struct {
+// ObjectRef is a generic struct for specifying the name and namespace of an object
+type ObjectRef struct {
 	Name      string `json:"name,omitempty"`
 	Namespace string `json:"namespace,omitempty"`
 }
+
+// TemplateRef is used to specify the installation CR templates
+type TemplateRef ObjectRef
+
+// ExtraManifestRef is used to specify the extra-manifest ConfigMaps
+type ExtraManifestRef ObjectRef
 
 // NodeSpec
 type NodeSpec struct {
@@ -278,7 +284,7 @@ type SiteConfigSpec struct {
 
 	// ExtraManifestsRefs is list of config map references containing additional manifests to be applied to the cluster.
 	// +optional
-	ExtraManifestsRefs []corev1.LocalObjectReference `json:"extraManifestsRef,omitempty"`
+	ExtraManifestsRefs []ExtraManifestRef `json:"extraManifestsRef,omitempty"`
 
 	// SuppressedManifests is a list of manifest names to be excluded from the template rendering process
 	// +optional
