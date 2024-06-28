@@ -73,6 +73,9 @@ CONTAINER_TOOL ?= docker
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
+# Test output files
+unit_test_json_output ?= ${PWD}/unit-test-results.json
+
 .PHONY: all
 all: build
 
@@ -137,6 +140,11 @@ vet: ## Run go vet against code.
 unittest:
 	@echo "Running unit tests"
 	go test -v ./...
+
+.PHONY: ci-test-unit
+ci-test-unit:
+	gotestsum --jsonfile-timing-events=$(unit_test_json_output) --format short-verbose -- -p 1 -v $(TESTFLAGS) \
+		./...
 
 .PHONY: ci-job
 ci-job: common-deps-update generate fmt vet golangci-lint unittest shellcheck bashate bundle-check
