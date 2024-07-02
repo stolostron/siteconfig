@@ -55,8 +55,8 @@ spec:
 
             # Set Vars
             TARGET_COMPONENT_NAME="siteconfig-main"
-            REPO_URL=$(echo $SNAPSHOT | jq -r --arg TARGET_COMPONENT_NAME '.components[] | select(.name == "$TARGET_COMPONENT_NAME").source.git.url')
-            REPO_COMMIT=$(echo $SNAPSHOT | jq -r --arg TARGET_COMPONENT_NAME '.components[] | select(.name == "$TARGET_COMPONENT_NAME").source.git.revision')
+            REPO_URL=$(echo $SNAPSHOT | jq -r --arg name "$TARGET_COMPONENT_NAME" '.components[] | select(.name == $name) | .source.git.url')
+            REPO_COMMIT=$(echo $SNAPSHOT | jq -r --arg name "$TARGET_COMPONENT_NAME" '.components[] | select(.name == $name) | .source.git.revision')
             test_output_file=${PWD}/test_output.json
 
             # Log Vars for Tracibility
