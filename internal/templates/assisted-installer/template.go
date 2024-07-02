@@ -24,7 +24,7 @@ metadata:
 {{ if .SpecialVars.InstallConfigOverrides }}
     agent-install.openshift.io/install-config-overrides: '{{ .SpecialVars.InstallConfigOverrides }}'
 {{ end }}
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
 spec:
   clusterDeploymentRef:
     name: "{{ .Site.ClusterName }}"
@@ -73,7 +73,7 @@ metadata:
   name: "{{ .Site.ClusterName }}"
   namespace: "{{ .Site.ClusterName }}"
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
 spec:
   baseDomain: "{{ .Site.BaseDomain }}"
   clusterInstallRef:
@@ -94,7 +94,7 @@ const InfraEnv = `apiVersion: agent-install.openshift.io/v1beta1
 kind: InfraEnv
 metadata:
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
   name: "{{ .Site.ClusterName }}"
   namespace: "{{ .Site.ClusterName }}"
 spec:
@@ -119,7 +119,7 @@ const KlusterletAddonConfig = `apiVersion: agent.open-cluster-management.io/v1
 kind: KlusterletAddonConfig
 metadata:
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "2"
+    siteconfig.open-cluster-management.io/sync-wave: "2"
   name: "{{ .Site.ClusterName }}"
   namespace: "{{ .Site.ClusterName }}"
 spec:
@@ -143,7 +143,7 @@ const NMStateConfig = `apiVersion: agent-install.openshift.io/v1beta1
 kind: NMStateConfig
 metadata:
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
   namespace: "{{ .Site.ClusterName }}"
   labels:
@@ -161,7 +161,7 @@ metadata:
   labels:
 {{ .Site.ClusterLabels | toYaml | indent 4 }}
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "2"
+    siteconfig.open-cluster-management.io/sync-wave: "2"
 spec:
   hubAcceptsClient: true`
 
@@ -171,7 +171,7 @@ metadata:
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
   namespace: "{{ .Site.ClusterName }}"
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
     inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
 {{ if .SpecialVars.CurrentNode.NodeLabels }}
     bmac.agent-install.openshift.io.node-label:

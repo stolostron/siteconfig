@@ -1,4 +1,4 @@
-apiVersion: metaclusterinstall.openshift.io/v1alpha1
+apiVersion: siteconfig.open-cluster-management.io/v1alpha1
 kind: SiteConfig
 metadata:
   name: "site-sno-du-1"

@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
-	"github.com/sakhoury/siteconfig/api/v1alpha1"
-	"github.com/sakhoury/siteconfig/internal/controller/retry"
+	"github.com/stolostron/siteconfig/api/v1alpha1"
+	"github.com/stolostron/siteconfig/internal/controller/retry"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"

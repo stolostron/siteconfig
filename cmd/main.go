@@ -26,7 +26,7 @@ import (
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	"github.com/openshift/assisted-service/api/v1beta1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
-	"github.com/sakhoury/siteconfig/internal/controller/retry"
+	"github.com/stolostron/siteconfig/internal/controller/retry"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sretry "k8s.io/client-go/util/retry"
@@ -45,10 +45,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/sakhoury/siteconfig/api/v1alpha1"
-	"github.com/sakhoury/siteconfig/internal/controller"
-	assistedinstaller "github.com/sakhoury/siteconfig/internal/templates/assisted-installer"
-	imagebasedinstall "github.com/sakhoury/siteconfig/internal/templates/image-based-install"
+	"github.com/stolostron/siteconfig/api/v1alpha1"
+	"github.com/stolostron/siteconfig/internal/controller"
+	assistedinstaller "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
+	imagebasedinstall "github.com/stolostron/siteconfig/internal/templates/image-based-install"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -102,7 +102,7 @@ func main() {
 		//Port:                   9443,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "siteconfig.metaclusterinstall.openshift.io",
+		LeaderElectionID:       "siteconfig.open-cluster-management.io",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly

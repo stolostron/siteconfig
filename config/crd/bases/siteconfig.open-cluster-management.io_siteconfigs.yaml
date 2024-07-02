@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.13.0
-  name: siteconfigs.metaclusterinstall.openshift.io
+  name: siteconfigs.siteconfig.open-cluster-management.io
 spec:
-  group: metaclusterinstall.openshift.io
+  group: siteconfig.open-cluster-management.io
   names:
     kind: SiteConfig
     listKind: SiteConfigList

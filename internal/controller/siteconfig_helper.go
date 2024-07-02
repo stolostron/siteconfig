@@ -24,7 +24,7 @@ import (
 	"strings"
 
 	sprig "github.com/go-task/slim-sprig"
-	"github.com/sakhoury/siteconfig/api/v1alpha1"
+	"github.com/stolostron/siteconfig/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8syaml "sigs.k8s.io/yaml"
 )

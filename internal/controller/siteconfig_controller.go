@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/sakhoury/siteconfig/internal/controller/conditions"
+	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	"golang.org/x/exp/maps"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,10 +37,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	"github.com/sakhoury/siteconfig/api/v1alpha1"
+	"github.com/stolostron/siteconfig/api/v1alpha1"
 )
 
-const siteConfigFinalizer = "metaclusterinstall.openshift.io/finalizer"
+const siteConfigFinalizer = "siteconfig.open-cluster-management.io/finalizer"
 
 // SiteConfigReconciler reconciles a SiteConfig object
 type SiteConfigReconciler struct {
@@ -88,9 +88,9 @@ func requeueWithCustomInterval(interval time.Duration) ctrl.Result {
 	return ctrl.Result{RequeueAfter: interval}
 }
 
-//+kubebuilder:rbac:groups=metaclusterinstall.openshift.io,resources=siteconfigs,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=metaclusterinstall.openshift.io,resources=siteconfigs/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=metaclusterinstall.openshift.io,resources=siteconfigs/finalizers,verbs=update
+//+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=siteconfigs,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=siteconfigs/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=siteconfigs/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;create;update;patch;delete

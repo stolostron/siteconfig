@@ -12,7 +12,7 @@ metadata:
   name: siteconfig-editor-role
 rules:
 - apiGroups:
-  - metaclusterinstall.openshift.io
+  - siteconfig.open-cluster-management.io
   resources:
   - siteconfigs
   verbs:
@@ -24,7 +24,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - metaclusterinstall.openshift.io
+  - siteconfig.open-cluster-management.io
   resources:
   - siteconfigs/status
   verbs:

@@ -22,8 +22,8 @@ import (
 
 	"github.com/go-logr/logr"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
-	"github.com/sakhoury/siteconfig/api/v1alpha1"
-	"github.com/sakhoury/siteconfig/internal/controller/conditions"
+	"github.com/stolostron/siteconfig/api/v1alpha1"
+	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"

@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
-	"github.com/sakhoury/siteconfig/api/v1alpha1"
+	"github.com/stolostron/siteconfig/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 )
 

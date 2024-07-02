@@ -5,7 +5,7 @@ metadata:
     alm-examples: |-
       [
         {
-          "apiVersion": "metaclusterinstall.openshift.io/v1alpha1",
+          "apiVersion": "siteconfig.open-cluster-management.io/v1alpha1",
           "kind": "SiteConfig",
           "metadata": {
             "name": "site-sno-du-1",
@@ -212,8 +212,15 @@ spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
     owned:
-    - kind: SiteConfig
-      name: siteconfigs.metaclusterinstall.openshift.io
+    - description: SiteConfig is the Schema for the siteconfigs API
+      displayName: Site Config
+      kind: SiteConfig
+      name: siteconfigs.siteconfig.open-cluster-management.io
+      statusDescriptors:
+      - displayName: Conditions
+        path: conditions
+        x-descriptors:
+        - urn:alm:descriptor:io.kubernetes.conditions
       version: v1alpha1
   description: Manage SiteConfig
   displayName: siteconfig
@@ -355,32 +362,6 @@ spec:
           - list
           - watch
         - apiGroups:
-          - metaclusterinstall.openshift.io
-          resources:
-          - siteconfigs
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
-        - apiGroups:
-          - metaclusterinstall.openshift.io
-          resources:
-          - siteconfigs/finalizers
-          verbs:
-          - update
-        - apiGroups:
-          - metaclusterinstall.openshift.io
-          resources:
-          - siteconfigs/status
-          verbs:
-          - get
-          - patch
-          - update
-        - apiGroups:
           - metal3.io
           resources:
           - baremetalhosts
@@ -412,6 +393,32 @@ spec:
           - patch
           - update
           - watch
+        - apiGroups:
+          - siteconfig.open-cluster-management.io
+          resources:
+          - siteconfigs
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - siteconfig.open-cluster-management.io
+          resources:
+          - siteconfigs/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - siteconfig.open-cluster-management.io
+          resources:
+          - siteconfigs/status
+          verbs:
+          - get
+          - patch
+          - update
         - apiGroups:
           - authentication.k8s.io
           resources:
@@ -479,7 +486,7 @@ spec:
                 - --leader-elect
                 command:
                 - /usr/local/bin/manager
-                image: quay.io/sakhoury/siteconfig-manager:4.16.0
+                image: quay.io/stolostron/siteconfig-operator:4.16.0
                 imagePullPolicy: Always
                 livenessProbe:
                   httpGet:

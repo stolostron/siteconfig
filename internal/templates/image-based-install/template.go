@@ -21,7 +21,7 @@ metadata:
   name: "{{ .Site.ClusterName }}"
   namespace: "{{ .Site.ClusterName }}"
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
 spec:
   clusterDeploymentRef:
     name: "{{ .Site.ClusterName }}"
@@ -58,7 +58,7 @@ metadata:
   name: "{{ .Site.ClusterName }}"
   namespace: "{{ .Site.ClusterName }}"
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
 spec:
   baseDomain: "{{ .Site.BaseDomain }}"
   clusterInstallRef:
@@ -79,7 +79,7 @@ const NetworkConfigMap = `apiVersion: v1
 kind: ConfigMap
 metadata:
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
   namespace: "{{ .Site.ClusterName }}"
 data:
@@ -91,7 +91,7 @@ const KlusterletAddonConfig = `apiVersion: agent.open-cluster-management.io/v1
 kind: KlusterletAddonConfig
 metadata:
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "2"
+    siteconfig.open-cluster-management.io/sync-wave: "2"
   labels:
     installer.name: multiclusterhub
     installer.namespace: open-cluster-management
@@ -121,7 +121,7 @@ metadata:
   labels:
 {{ .Site.ClusterLabels | toYaml | indent 4 }}
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "2"
+    siteconfig.open-cluster-management.io/sync-wave: "2"
 spec:
   hubAcceptsClient: true`
 
@@ -131,7 +131,7 @@ metadata:
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
   namespace: "{{ .Site.ClusterName }}"
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
     inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
 {{ if .SpecialVars.CurrentNode.NodeLabels }}
     bmac.agent-install.openshift.io.node-label:

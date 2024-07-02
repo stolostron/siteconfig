@@ -25,7 +25,7 @@ import (
 	"github.com/go-logr/logr"
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	aiv1beta1 "github.com/openshift/assisted-service/api/v1beta1"
-	"github.com/sakhoury/siteconfig/api/v1alpha1"
+	"github.com/stolostron/siteconfig/api/v1alpha1"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -48,7 +48,7 @@ metadata:
 {{ if .SpecialVars.InstallConfigOverrides }}
     agent-install.openshift.io/install-config-overrides: '{{ .SpecialVars.InstallConfigOverrides }}'
 {{ end }}
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
 spec:
   clusterDeploymentRef:
     name: "{{ .Site.ClusterName }}"
@@ -97,7 +97,7 @@ func getMockNMStateConfigTemplate() string {
 kind: NMStateConfig
 metadata:
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
   namespace: "{{ .Site.ClusterName }}"
   labels:
@@ -263,7 +263,7 @@ func TestSiteConfigBuilder_render(t *testing.T) {
 				"metadata": map[string]interface{}{
 					"annotations": map[string]interface{}{
 						"agent-install.openshift.io/install-config-overrides": "{\"networking\":{\"networkType\":\"OVNKubernetes\"},\"capabilities\":{\"baselineCapabilitySet\": \"None\", \"additionalEnabledCapabilities\": [ \"marketplace\", \"NodeTuning\" ] }}",
-						"metaclusterinstall.openshift.io/sync-wave":           "1"},
+						"siteconfig.open-cluster-management.io/sync-wave":     "1"},
 					"name":      "site-sno-du-1",
 					"namespace": "site-sno-du-1",
 				},
@@ -294,7 +294,7 @@ func TestSiteConfigBuilder_render(t *testing.T) {
 				"apiVersion": "agent-install.openshift.io/v1beta1",
 				"kind":       "NMStateConfig",
 				"metadata": map[string]interface{}{
-					"annotations": map[string]interface{}{"metaclusterinstall.openshift.io/sync-wave": "1"},
+					"annotations": map[string]interface{}{"siteconfig.open-cluster-management.io/sync-wave": "1"},
 					"labels":      map[string]interface{}{"nmstate-label": "site-sno-du-1"},
 					"name":        "node1",
 					"namespace":   "site-sno-du-1",

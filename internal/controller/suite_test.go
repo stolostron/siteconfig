@@ -29,7 +29,7 @@ import (
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 
-	siteconfigv1alpha1 "github.com/sakhoury/siteconfig/api/v1alpha1"
+	siteconfigv1alpha1 "github.com/stolostron/siteconfig/api/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 
