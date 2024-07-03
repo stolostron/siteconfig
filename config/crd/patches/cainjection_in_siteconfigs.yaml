@@ -4,4 +4,4 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     cert-manager.io/inject-ca-from: CERTIFICATE_NAMESPACE/CERTIFICATE_NAME
-  name: siteconfigs.metaclusterinstall.openshift.io
+  name: siteconfigs.siteconfig.open-cluster-management.io

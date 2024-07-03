@@ -22,8 +22,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
-	"github.com/sakhoury/siteconfig/api/v1alpha1"
-	"github.com/sakhoury/siteconfig/internal/controller/conditions"
+	"github.com/stolostron/siteconfig/api/v1alpha1"
+	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -146,7 +146,7 @@ var _ = Describe("Reconcile", func() {
 				Namespace: clusterNamespace,
 				OwnerReferences: []metav1.OwnerReference{
 					{
-						APIVersion: "metaclusterinstall.openshift.io/v1alpha1",
+						APIVersion: "siteconfig.open-cluster-management.io/v1alpha1",
 						Kind:       v1alpha1.SiteConfigKind,
 						Name:       clusterName,
 					},
@@ -210,7 +210,7 @@ var _ = Describe("Reconcile", func() {
 				Namespace: clusterNamespace,
 				OwnerReferences: []metav1.OwnerReference{
 					{
-						APIVersion: "metaclusterinstall.openshift.io/v1alpha1",
+						APIVersion: "siteconfig.open-cluster-management.io/v1alpha1",
 						Kind:       v1alpha1.SiteConfigKind,
 						Name:       clusterName,
 					},
@@ -324,7 +324,7 @@ var _ = Describe("Reconcile", func() {
 				Namespace: clusterNamespace,
 				OwnerReferences: []metav1.OwnerReference{
 					{
-						APIVersion: "metaclusterinstall.openshift.io/v1alpha1",
+						APIVersion: "siteconfig.open-cluster-management.io/v1alpha1",
 						Kind:       v1alpha1.SiteConfigKind,
 						Name:       clusterName,
 					},

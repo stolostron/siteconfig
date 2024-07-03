@@ -28,8 +28,8 @@ BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 # This variable is used to construct full image tags for bundle and catalog images.
 #
 # For example, running 'make bundle-build bundle-push catalog-build catalog-push' will build and push both
-# metaclusterinstall.openshift.io/siteconfig-bundle:$VERSION and metaclusterinstall.openshift.io/siteconfig-catalog:$VERSION.
-IMAGE_TAG_BASE ?= quay.io/sakhoury/siteconfig-manager
+# open-cluster-management.io/siteconfig-bundle:$VERSION and open-cluster-management.io/siteconfig-catalog:$VERSION.
+IMAGE_TAG_BASE ?= quay.io/stolostron/siteconfig-operator
 
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)

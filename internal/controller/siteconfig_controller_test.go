@@ -25,8 +25,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
-	"github.com/sakhoury/siteconfig/api/v1alpha1"
-	"github.com/sakhoury/siteconfig/internal/controller/conditions"
+	"github.com/stolostron/siteconfig/api/v1alpha1"
+	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -575,7 +575,7 @@ metadata:
   name: "{{ .Site.ClusterName }}"
   namespace: "{{ .Site.ClusterName }}"
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
 kind: Test
 spec:
   name: "{{ .Site.ClusterNamee }}"`
@@ -633,7 +633,7 @@ metadata:
   name: "{{ .Site.ClusterName }}"
   namespace: "{{ .Site.ClusterName }}"
   annotations:
-    metaclusterinstall.openshift.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "1"
 kind: Test
 spec:
   name: "{{ .Site.ClusterName }}"`

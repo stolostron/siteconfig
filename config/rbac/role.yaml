@@ -135,32 +135,6 @@ rules:
   - list
   - watch
 - apiGroups:
-  - metaclusterinstall.openshift.io
-  resources:
-  - siteconfigs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - metaclusterinstall.openshift.io
-  resources:
-  - siteconfigs/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - metaclusterinstall.openshift.io
-  resources:
-  - siteconfigs/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
   - metal3.io
   resources:
   - baremetalhosts
@@ -192,3 +166,29 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - siteconfig.open-cluster-management.io
+  resources:
+  - siteconfigs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - siteconfig.open-cluster-management.io
+  resources:
+  - siteconfigs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - siteconfig.open-cluster-management.io
+  resources:
+  - siteconfigs/status
+  verbs:
+  - get
+  - patch
+  - update

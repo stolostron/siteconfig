@@ -14,9 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1alpha1 contains API Schema definitions for the metaclusterinstall.openshift.io v1alpha1 API group
+// Package v1alpha1 contains API Schema definitions for the siteconfig v1alpha1 API group
 // +kubebuilder:object:generate=true
-// +groupName=metaclusterinstall.openshift.io
+// +groupName=siteconfig.open-cluster-management.io
 package v1alpha1
 
 import (
@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	Group          = "metaclusterinstall.openshift.io"
+	Group          = "siteconfig.open-cluster-management.io"
 	Version        = "v1alpha1"
 	SiteConfigKind = "SiteConfig"
 )

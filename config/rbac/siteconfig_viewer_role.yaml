@@ -12,7 +12,7 @@ metadata:
   name: siteconfig-viewer-role
 rules:
 - apiGroups:
-  - metaclusterinstall.openshift.io
+  - siteconfig.open-cluster-management.io
   resources:
   - siteconfigs
   verbs:
@@ -20,7 +20,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - metaclusterinstall.openshift.io
+  - siteconfig.open-cluster-management.io
   resources:
   - siteconfigs/status
   verbs:
