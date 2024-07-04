@@ -37,51 +37,51 @@ const (
 	DefaultWaveAnnotation = "0"
 )
 
-type SiteConfigBuilder struct {
+type ClusterInstanceBuilder struct {
 	Log logr.Logger
 }
 
-func NewSiteConfigBuilder(pLog logr.Logger) *SiteConfigBuilder {
-	scBuilder := SiteConfigBuilder{Log: pLog}
+func NewClusterInstanceBuilder(pLog logr.Logger) *ClusterInstanceBuilder {
+	scBuilder := ClusterInstanceBuilder{Log: pLog}
 
 	return &scBuilder
 }
 
-func (scbuilder *SiteConfigBuilder) ProcessTemplates(ctx context.Context, c client.Client, siteConfig v1alpha1.SiteConfig) ([]interface{}, error) {
-	scbuilder.Log.Info(fmt.Sprintf("Processing cluster-level templates for SiteConfig %s", siteConfig.Name))
+func (cib *ClusterInstanceBuilder) ProcessTemplates(ctx context.Context, c client.Client, clusterInstance v1alpha1.ClusterInstance) ([]interface{}, error) {
+	cib.Log.Info(fmt.Sprintf("Processing cluster-level templates for ClusterInstance %s", clusterInstance.Name))
 
 	// Render cluster-level templates
-	siteManifests, err := scbuilder.renderTemplates(ctx, c, &siteConfig, nil)
+	clusterManifests, err := cib.renderTemplates(ctx, c, &clusterInstance, nil)
 	if err != nil {
-		scbuilder.Log.Info(fmt.Sprintf("encountered error while processing cluster-level templates for SiteConfig %s, err: %s", siteConfig.Name, err.Error()))
-		return siteManifests, err
+		cib.Log.Info(fmt.Sprintf("encountered error while processing cluster-level templates for ClusterInstance %s, err: %s", clusterInstance.Name, err.Error()))
+		return clusterManifests, err
 	}
-	scbuilder.Log.Info(fmt.Sprintf("Processed cluster-level templates for SiteConfig %s", siteConfig.Name))
+	cib.Log.Info(fmt.Sprintf("Processed cluster-level templates for ClusterInstance %s", clusterInstance.Name))
 
 	// Process node-level templates
-	numNodes := len(siteConfig.Spec.Nodes)
-	for nodeId, node := range siteConfig.Spec.Nodes {
-		scbuilder.Log.Info(fmt.Sprintf("Processing node-level templates for SiteConfig %s [node: %d of %d]", siteConfig.Name, nodeId+1, numNodes))
+	numNodes := len(clusterInstance.Spec.Nodes)
+	for nodeId, node := range clusterInstance.Spec.Nodes {
+		cib.Log.Info(fmt.Sprintf("Processing node-level templates for ClusterInstance %s [node: %d of %d]", clusterInstance.Name, nodeId+1, numNodes))
 
 		// Render node-level templates
-		nodeManifests, err := scbuilder.renderTemplates(ctx, c, &siteConfig, &node)
+		nodeManifests, err := cib.renderTemplates(ctx, c, &clusterInstance, &node)
 		if err != nil {
-			scbuilder.Log.Info(fmt.Sprintf("encountered error while processing node-level templates for SiteConfig %s [%d of %d], err: %s", siteConfig.Name, nodeId+1, numNodes, err.Error()))
-			return siteManifests, err
+			cib.Log.Info(fmt.Sprintf("encountered error while processing node-level templates for ClusterInstance %s [%d of %d], err: %s", clusterInstance.Name, nodeId+1, numNodes, err.Error()))
+			return clusterManifests, err
 		}
-		scbuilder.Log.Info(fmt.Sprintf("Processed node-level templates for SiteConfig %s [node: %d of %d]", siteConfig.Name, nodeId+1, numNodes))
+		cib.Log.Info(fmt.Sprintf("Processed node-level templates for ClusterInstance %s [node: %d of %d]", clusterInstance.Name, nodeId+1, numNodes))
 
 		for _, nodeCR := range nodeManifests {
 			if nodeCR != nil {
-				siteManifests = append(siteManifests, nodeCR)
+				clusterManifests = append(clusterManifests, nodeCR)
 			}
 		}
 	}
 
-	return siteManifests, nil
+	return clusterManifests, nil
 }
 
-func (scbuilder *SiteConfigBuilder) renderTemplates(ctx context.Context, c client.Client, siteConfig *v1alpha1.SiteConfig, node *v1alpha1.NodeSpec) ([]interface{}, error) {
+func (cib *ClusterInstanceBuilder) renderTemplates(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.NodeSpec) ([]interface{}, error) {
 	var (
 		manifests           []interface{}
 		templateRefs        []v1alpha1.TemplateRef
@@ -91,8 +91,8 @@ func (scbuilder *SiteConfigBuilder) renderTemplates(ctx context.Context, c clien
 	// Determine whether templateRefs and suppressedManifests values are cluster-based or node-based
 	if node == nil {
 		// use cluster-level values
-		templateRefs = siteConfig.Spec.TemplateRefs
-		suppressedManifests = siteConfig.Spec.SuppressedManifests
+		templateRefs = clusterInstance.Spec.TemplateRefs
+		suppressedManifests = clusterInstance.Spec.SuppressedManifests
 	} else {
 		// use node-level values
 		templateRefs = node.TemplateRefs
@@ -100,29 +100,29 @@ func (scbuilder *SiteConfigBuilder) renderTemplates(ctx context.Context, c clien
 	}
 
 	for tId, templateRef := range templateRefs {
-		scbuilder.Log.Info(fmt.Sprintf("renderTemplates: processing templateRef %d of %d", tId+1, len(templateRefs)))
+		cib.Log.Info(fmt.Sprintf("renderTemplates: processing templateRef %d of %d", tId+1, len(templateRefs)))
 
 		templatesConfigMap := &corev1.ConfigMap{}
 		if err := c.Get(ctx, types.NamespacedName{
 			Name:      templateRef.Name,
 			Namespace: templateRef.Namespace,
 		}, templatesConfigMap); err != nil {
-			scbuilder.Log.Info(fmt.Sprintf("renderTemplates: failed to get ConfigMap, err: %s", err.Error()))
+			cib.Log.Info(fmt.Sprintf("renderTemplates: failed to get ConfigMap, err: %s", err.Error()))
 			return manifests, err
 		}
 
 		// process Template ConfigMap
 		for templateKey, template := range templatesConfigMap.Data {
 
-			siteData, err := buildSiteData(siteConfig, node)
+			clusterData, err := buildClusterData(clusterInstance, node)
 			if err != nil {
-				scbuilder.Log.Error(err, fmt.Sprintf("renderTemplates: failed to build SiteConfig data for SiteConfig %s", siteConfig.Name))
+				cib.Log.Error(err, fmt.Sprintf("renderTemplates: failed to build ClusterInstance data for ClusterInstance %s", clusterInstance.Name))
 				return nil, err
 			}
 
-			manifest, err := scbuilder.render(templateKey, template, siteData)
+			manifest, err := cib.render(templateKey, template, clusterData)
 			if err != nil {
-				scbuilder.Log.Error(err, fmt.Sprintf("renderTemplates: failed to render templateRef %s for SiteConfig %s", templateRef.Name, siteConfig.Name))
+				cib.Log.Error(err, fmt.Sprintf("renderTemplates: failed to render templateRef %s for ClusterInstance %s", templateRef.Name, clusterInstance.Name))
 				return manifests, err
 			}
 
@@ -132,17 +132,17 @@ func (scbuilder *SiteConfigBuilder) renderTemplates(ctx context.Context, c clien
 
 			kind := manifest["kind"].(string)
 			if suppressManifest(kind, suppressedManifests) {
-				scbuilder.Log.Info(fmt.Sprintf("renderTemplates: suppressing manifest %s for SiteConfig %s", kind, siteConfig.Name))
+				cib.Log.Info(fmt.Sprintf("renderTemplates: suppressing manifest %s for ClusterInstance %s", kind, clusterInstance.Name))
 				continue
 			}
 			if node == nil {
 				// Append cluster-level user provided extra annotations if exist
-				if extraManifestAnnotations, ok := siteConfig.Spec.ExtraAnnotationSearch(kind); ok {
+				if extraManifestAnnotations, ok := clusterInstance.Spec.ExtraAnnotationSearch(kind); ok {
 					manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
 				}
 			} else {
 				// Append node-level user provided extra annotations if exist
-				if extraManifestAnnotations, ok := node.ExtraAnnotationSearch(kind, &siteConfig.Spec); ok {
+				if extraManifestAnnotations, ok := node.ExtraAnnotationSearch(kind, &clusterInstance.Spec); ok {
 					manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
 				}
 			}
@@ -152,7 +152,7 @@ func (scbuilder *SiteConfigBuilder) renderTemplates(ctx context.Context, c clien
 	return manifests, nil
 }
 
-func (scbuilder *SiteConfigBuilder) render(templateKey, templateStr string, data *SiteData) (map[string]interface{}, error) {
+func (cib *ClusterInstanceBuilder) render(templateKey, templateStr string, data *ClusterData) (map[string]interface{}, error) {
 	renderedTemplate := make(map[string]interface{})
 	fMap := funcMap()
 	t, err := template.New(templateKey).Funcs(fMap).Parse(templateStr)

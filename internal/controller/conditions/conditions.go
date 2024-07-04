@@ -17,7 +17,7 @@ type ConditionType string
 
 // The following constants define the different types of conditions that will be set
 const (
-	SiteConfigValidated        ConditionType = "SiteConfigValidated"
+	ClusterInstanceValidated   ConditionType = "ClusterInstanceValidated"
 	RenderedTemplates          ConditionType = "RenderedTemplates"
 	RenderedTemplatesValidated ConditionType = "RenderedTemplatesValidated"
 	RenderedTemplatesApplied   ConditionType = "RenderedTemplatesApplied"
@@ -57,21 +57,21 @@ func SetStatusCondition(existingConditions *[]metav1.Condition, conditionType Co
 	)
 }
 
-func UpdateStatus(ctx context.Context, c client.Client, siteConfig *v1alpha1.SiteConfig) error {
+func UpdateStatus(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance) error {
 	if err := retry.RetryOnConflictOrRetriable(retry.RetryBackoff30Seconds, func() error {
-		return c.Status().Update(ctx, siteConfig) //nolint:wrapcheck
+		return c.Status().Update(ctx, clusterInstance) //nolint:wrapcheck
 	}); err != nil {
-		return fmt.Errorf("failed to update SiteConfig status: %w", err)
+		return fmt.Errorf("failed to update ClusterInstance status: %w", err)
 	}
 
 	return nil
 }
 
-func PatchStatus(ctx context.Context, c client.Client, siteConfig *v1alpha1.SiteConfig, patch client.Patch) error {
+func PatchStatus(ctx context.Context, c client.Client, siteConfig *v1alpha1.ClusterInstance, patch client.Patch) error {
 	if err := retry.RetryOnConflictOrRetriable(retry.RetryBackoff30Seconds, func() error {
 		return c.Status().Patch(ctx, siteConfig, patch) //nolint:wrapcheck
 	}); err != nil {
-		return fmt.Errorf("failed to update SiteConfig status: %w", err)
+		return fmt.Errorf("failed to update ClusterInstance status: %w", err)
 	}
 
 	return nil

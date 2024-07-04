@@ -25,9 +25,9 @@ import (
 )
 
 const (
-	Group          = "siteconfig.open-cluster-management.io"
-	Version        = "v1alpha1"
-	SiteConfigKind = "SiteConfig"
+	Group               = "siteconfig.open-cluster-management.io"
+	Version             = "v1alpha1"
+	ClusterInstanceKind = "ClusterInstance"
 )
 
 var (

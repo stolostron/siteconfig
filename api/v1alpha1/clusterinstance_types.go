@@ -18,10 +18,8 @@ package v1alpha1
 
 import (
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
-
 	aiv1beta1 "github.com/openshift/assisted-service/api/v1beta1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -164,7 +162,7 @@ type NodeSpec struct {
 
 	// TemplateRefs is a list of references to node-level templates. A node-level template consists of a ConfigMap
 	// in which the keys of the data field represent the kind of the installation manifest(s).
-	// Node-level templates are instantiated once for each node in the SiteConfig CR.
+	// Node-level templates are instantiated once for each node in the ClusterInstance CR.
 	// +required
 	TemplateRefs []TemplateRef `json:"templateRefs,omitempty"`
 }
@@ -177,9 +175,9 @@ const (
 	ClusterTypeHighlyAvailable ClusterType = "HighlyAvailable"
 )
 
-// SiteConfigSpec defines the desired state of SiteConfig
-type SiteConfigSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+// ClusterInstanceSpec defines the desired state of ClusterInstance
+type ClusterInstanceSpec struct {
+	// Desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// ClusterName is the name of the cluster.
@@ -278,7 +276,7 @@ type SiteConfigSpec struct {
 
 	// ExtraManifestsRefs is list of config map references containing additional manifests to be applied to the cluster.
 	// +optional
-	ExtraManifestsRefs []corev1.LocalObjectReference `json:"extraManifestsRef,omitempty"`
+	ExtraManifestsRefs []corev1.LocalObjectReference `json:"extraManifestsRefs,omitempty"`
 
 	// SuppressedManifests is a list of manifest names to be excluded from the template rendering process
 	// +optional
@@ -298,7 +296,7 @@ type SiteConfigSpec struct {
 
 	// TemplateRefs is a list of references to cluster-level templates. A cluster-level template consists of a ConfigMap
 	// in which the keys of the data field represent the kind of the installation manifest(s).
-	// Cluster-level templates are instantiated once per cluster (SiteConfig CR).
+	// Cluster-level templates are instantiated once per cluster (ClusterInstance CR).
 	// +required
 	TemplateRefs []TemplateRef `json:"templateRefs,omitempty"`
 
@@ -348,8 +346,8 @@ type ManifestReference struct {
 	Message string `json:"message,omitempty"`
 }
 
-// SiteConfigStatus defines the observed state of SiteConfig
-type SiteConfigStatus struct {
+// ClusterInstanceStatus defines the observed state of ClusterInstance
+type ClusterInstanceStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
@@ -370,44 +368,29 @@ type SiteConfigStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:resource:path=siteconfigs,scope=Namespaced
+//+kubebuilder:resource:path=clusterinstances,scope=Namespaced
 //+kubebuilder:printcolumn:name="State",type="string",JSONPath=".status.conditions[-1:].reason"
 //+kubebuilder:printcolumn:name="Details",type="string",JSONPath=".status.conditions[-1:].message"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// SiteConfig is the Schema for the siteconfigs API
-type SiteConfig struct {
+// ClusterInstance is the Schema for the clusterinstances API
+type ClusterInstance struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   SiteConfigSpec   `json:"spec,omitempty"`
-	Status SiteConfigStatus `json:"status,omitempty"`
+	Spec   ClusterInstanceSpec   `json:"spec,omitempty"`
+	Status ClusterInstanceStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
-// SiteConfigList contains a list of SiteConfig
-type SiteConfigList struct {
+// ClusterInstanceList contains a list of ClusterInstance
+type ClusterInstanceList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []SiteConfig `json:"items"`
+	Items           []ClusterInstance `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&SiteConfig{}, &SiteConfigList{})
-}
-
-// ExtraAnnotationSearch Looks up a specific manifest Annotation for this site
-func (site *SiteConfigSpec) ExtraAnnotationSearch(kind string) (map[string]string, bool) {
-	annotations, ok := site.ExtraAnnotations[kind]
-	return annotations, ok
-}
-
-// ExtraAnnotationSearch Looks up a specific manifest annotation for this node, with fallback to site
-func (node *NodeSpec) ExtraAnnotationSearch(kind string, site *SiteConfigSpec) (map[string]string, bool) {
-	annotations, ok := node.ExtraAnnotations[kind]
-	if ok {
-		return annotations, ok
-	}
-	return site.ExtraAnnotationSearch(kind)
+	SchemeBuilder.Register(&ClusterInstance{}, &ClusterInstanceList{})
 }

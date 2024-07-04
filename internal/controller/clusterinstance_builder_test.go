@@ -171,15 +171,15 @@ func getMockNetConfig() *NetConfigData {
 	return netConf
 }
 
-func TestSiteConfigBuilder_render(t *testing.T) {
+func TestClusterInstanceBuilder_render(t *testing.T) {
 
 	NetConfig := getMockNetConfig()
-	TestSiteConfig := &v1alpha1.SiteConfig{
+	TestClusterInstance := &v1alpha1.ClusterInstance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "site-sno-du-1",
 			Namespace: "site-sno-du-1",
 		},
-		Spec: v1alpha1.SiteConfigSpec{
+		Spec: v1alpha1.ClusterInstanceSpec{
 			ClusterName:            "site-sno-du-1",
 			PullSecretRef:          &corev1.LocalObjectReference{Name: "pullSecretName"},
 			ClusterImageSetNameRef: "openshift-test",
@@ -222,7 +222,7 @@ func TestSiteConfigBuilder_render(t *testing.T) {
 		},
 	}
 
-	TestData, _ := buildSiteData(TestSiteConfig, &TestSiteConfig.Spec.Nodes[0])
+	TestData, _ := buildClusterData(TestClusterInstance, &TestClusterInstance.Spec.Nodes[0])
 
 	type fields struct {
 		Log logr.Logger
@@ -230,7 +230,7 @@ func TestSiteConfigBuilder_render(t *testing.T) {
 	type args struct {
 		templateType string
 		templateStr  string
-		data         *SiteData
+		data         *ClusterData
 	}
 	tests := []struct {
 		name    string
@@ -310,17 +310,17 @@ func TestSiteConfigBuilder_render(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scbuilder := &SiteConfigBuilder{
+			scbuilder := &ClusterInstanceBuilder{
 				Log: tt.fields.Log,
 			}
 			got, err := scbuilder.render(tt.args.templateType, tt.args.templateStr, tt.args.data)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("SiteConfigBuilder.render() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("ClusterInstanceBuilder.render() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("SiteConfigBuilder.render() = %v, want %v", got, tt.want)
+				t.Errorf("ClusterInstanceBuilder.render() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -342,27 +342,27 @@ spec:
 
 var _ = Describe("renderTemplates", func() {
 	var (
-		c              client.Client
-		ctx            = context.Background()
-		scBuilder      *SiteConfigBuilder
-		TestSiteConfig *v1alpha1.SiteConfig
+		c                   client.Client
+		ctx                 = context.Background()
+		scBuilder           *ClusterInstanceBuilder
+		TestClusterInstance *v1alpha1.ClusterInstance
 	)
 
 	BeforeEach(func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&v1alpha1.SiteConfig{}).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 
-		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder = NewSiteConfigBuilder(testLogger)
+		testLogger := ctrl.Log.WithName("ClusterInstanceBuilder")
+		scBuilder = NewClusterInstanceBuilder(testLogger)
 
-		TestSiteConfig = &v1alpha1.SiteConfig{
+		TestClusterInstance = &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "site-sno-du-1",
 				Namespace: "site-sno-du-1",
 			},
-			Spec: v1alpha1.SiteConfigSpec{
+			Spec: v1alpha1.ClusterInstanceSpec{
 				ClusterName: "site-sno-du-1",
 				Nodes: []v1alpha1.NodeSpec{{
 					HostName: "node1",
@@ -372,14 +372,14 @@ var _ = Describe("renderTemplates", func() {
 	})
 
 	It("fails when the template reference cannot be retrieved", func() {
-		TestSiteConfig.Spec.TemplateRefs = []v1alpha1.TemplateRef{{Name: "does-not-exist", Namespace: "test"}}
+		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{{Name: "does-not-exist", Namespace: "test"}}
 
-		_, err := scBuilder.renderTemplates(ctx, c, TestSiteConfig, nil)
+		_, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).To(HaveOccurred())
 	})
 
 	It("fails to render template because it cannot build the site data", func() {
-		TestSiteConfig.Spec.TemplateRefs = []v1alpha1.TemplateRef{
+		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "cluster-level", Namespace: "test"},
 		}
 
@@ -391,14 +391,14 @@ var _ = Describe("renderTemplates", func() {
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
-		TestSiteConfig.Spec.InstallConfigOverrides = "{foobar}"
-		_, err := scBuilder.renderTemplates(ctx, c, TestSiteConfig, nil)
+		TestClusterInstance.Spec.InstallConfigOverrides = "{foobar}"
+		_, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("invalid json parameter set at installConfigOverride")))
 	})
 
 	It("fails to render template due to invalid template", func() {
-		TestSiteConfig.Spec.TemplateRefs = []v1alpha1.TemplateRef{
+		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "cluster-level", Namespace: "test"},
 		}
 
@@ -410,14 +410,14 @@ var _ = Describe("renderTemplates", func() {
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
-		_, err := scBuilder.renderTemplates(ctx, c, TestSiteConfig, nil)
+		_, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("field doesNotExist")))
 	})
 
 	It("suppresses rendering manifests at cluster-level", func() {
 
-		TestSiteConfig.Spec.TemplateRefs = []v1alpha1.TemplateRef{
+		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "cluster-level", Namespace: "test"},
 		}
 
@@ -430,9 +430,9 @@ var _ = Describe("renderTemplates", func() {
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
-		TestSiteConfig.Spec.SuppressedManifests = []string{"TestA", "TestC"}
+		TestClusterInstance.Spec.SuppressedManifests = []string{"TestA", "TestC"}
 
-		got, err := scBuilder.renderTemplates(ctx, c, TestSiteConfig, nil)
+		got, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(1))
@@ -447,7 +447,7 @@ var _ = Describe("renderTemplates", func() {
 
 	It("suppresses rendering manifests at node-level", func() {
 
-		node := &TestSiteConfig.Spec.Nodes[0]
+		node := &TestClusterInstance.Spec.Nodes[0]
 		node.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "node-level", Namespace: "test"},
 		}
@@ -463,7 +463,7 @@ var _ = Describe("renderTemplates", func() {
 
 		node.SuppressedManifests = []string{"TestA", "TestC"}
 
-		got, err := scBuilder.renderTemplates(ctx, c, TestSiteConfig, node)
+		got, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(1))
@@ -478,7 +478,7 @@ var _ = Describe("renderTemplates", func() {
 
 	It("renders a cluster-level template with extra annotations", func() {
 
-		TestSiteConfig.Spec.TemplateRefs = []v1alpha1.TemplateRef{
+		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "cluster-level", Namespace: "test"},
 		}
 
@@ -490,13 +490,13 @@ var _ = Describe("renderTemplates", func() {
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
-		TestSiteConfig.Spec.ExtraAnnotations = map[string]map[string]string{
+		TestClusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{
 			"Cluster": {
 				"extra-annotation-l1": "test",
 				"extra-annotation-l2": "test",
 			},
 		}
-		got, err := scBuilder.renderTemplates(ctx, c, TestSiteConfig, nil)
+		got, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(1))
@@ -516,7 +516,7 @@ var _ = Describe("renderTemplates", func() {
 	})
 
 	It("renders a node-level template with extra annotations defined at cluster-level", func() {
-		node := &TestSiteConfig.Spec.Nodes[0]
+		node := &TestClusterInstance.Spec.Nodes[0]
 		node.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "node-level", Namespace: "test"},
 		}
@@ -530,13 +530,13 @@ var _ = Describe("renderTemplates", func() {
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
 		// Extra annotations defined at cluster-level
-		TestSiteConfig.Spec.ExtraAnnotations = map[string]map[string]string{
+		TestClusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{
 			"Node": {
 				"extra-node-annotation-l1": "test",
 				"extra-node-annotation-l2": "test",
 			},
 		}
-		got, err := scBuilder.renderTemplates(ctx, c, TestSiteConfig, node)
+		got, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(1))
@@ -556,7 +556,7 @@ var _ = Describe("renderTemplates", func() {
 	})
 
 	It("renders a node-level template with extra annotations defined at node-level", func() {
-		node := &TestSiteConfig.Spec.Nodes[0]
+		node := &TestClusterInstance.Spec.Nodes[0]
 		node.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "node-level", Namespace: "test"},
 		}
@@ -576,7 +576,7 @@ var _ = Describe("renderTemplates", func() {
 				"extra-node-annotation-l2": "test",
 			},
 		}
-		got, err := scBuilder.renderTemplates(ctx, c, TestSiteConfig, node)
+		got, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(1))
@@ -599,27 +599,27 @@ var _ = Describe("renderTemplates", func() {
 
 var _ = Describe("ProcessTemplates", func() {
 	var (
-		c              client.Client
-		ctx            = context.Background()
-		scBuilder      *SiteConfigBuilder
-		TestSiteConfig v1alpha1.SiteConfig
+		c                   client.Client
+		ctx                 = context.Background()
+		scBuilder           *ClusterInstanceBuilder
+		TestClusterInstance v1alpha1.ClusterInstance
 	)
 
 	BeforeEach(func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&v1alpha1.SiteConfig{}).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 
-		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder = NewSiteConfigBuilder(testLogger)
+		testLogger := ctrl.Log.WithName("ClusterInstanceBuilder")
+		scBuilder = NewClusterInstanceBuilder(testLogger)
 
-		TestSiteConfig = v1alpha1.SiteConfig{
+		TestClusterInstance = v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "site-sno-du-1",
 				Namespace: "site-sno-du-1",
 			},
-			Spec: v1alpha1.SiteConfigSpec{
+			Spec: v1alpha1.ClusterInstanceSpec{
 				ClusterName: "site-sno-du-1",
 				Nodes: []v1alpha1.NodeSpec{{
 					HostName: "node1",
@@ -639,11 +639,11 @@ var _ = Describe("ProcessTemplates", func() {
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
-		TestSiteConfig.Spec.TemplateRefs = []v1alpha1.TemplateRef{
+		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "cluster-level", Namespace: "test"},
 		}
 
-		_, err := scBuilder.ProcessTemplates(ctx, c, TestSiteConfig)
+		_, err := scBuilder.ProcessTemplates(ctx, c, TestClusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("can't evaluate field")))
 	})
@@ -658,12 +658,12 @@ var _ = Describe("ProcessTemplates", func() {
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
-		TestSiteConfig.Spec.TemplateRefs = []v1alpha1.TemplateRef{
+		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "cluster-level", Namespace: "test"},
 		}
 
 		// Define and create node-level template refs
-		node := &TestSiteConfig.Spec.Nodes[0]
+		node := &TestClusterInstance.Spec.Nodes[0]
 		nodeTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "node-level", Namespace: "test"},
 			Data: map[string]string{
@@ -676,7 +676,7 @@ var _ = Describe("ProcessTemplates", func() {
 			{Name: "node-level", Namespace: "test"},
 		}
 
-		_, err := scBuilder.ProcessTemplates(ctx, c, TestSiteConfig)
+		_, err := scBuilder.ProcessTemplates(ctx, c, TestClusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("can't evaluate field")))
 	})
@@ -693,12 +693,12 @@ var _ = Describe("ProcessTemplates", func() {
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
-		TestSiteConfig.Spec.TemplateRefs = []v1alpha1.TemplateRef{
+		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "cluster-level", Namespace: "test"},
 		}
 
 		// Define and create node-level template refs
-		node := &TestSiteConfig.Spec.Nodes[0]
+		node := &TestClusterInstance.Spec.Nodes[0]
 		node.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "node-level", Namespace: "test"},
 		}
@@ -712,11 +712,11 @@ var _ = Describe("ProcessTemplates", func() {
 		Expect(c.Create(ctx, nodeTemplates)).To(Succeed())
 
 		// Define suppressed manifest lists for both cluster and node levels
-		TestSiteConfig.Spec.SuppressedManifests = []string{"TestB"}
+		TestClusterInstance.Spec.SuppressedManifests = []string{"TestB"}
 		node.SuppressedManifests = []string{"TestC"}
 
 		// Define extra annotations for both cluster and node levels
-		TestSiteConfig.Spec.ExtraAnnotations = map[string]map[string]string{
+		TestClusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{
 			"TestA": {
 				"extra-annotation-l1": "test",
 			},
@@ -727,7 +727,7 @@ var _ = Describe("ProcessTemplates", func() {
 			},
 		}
 
-		got, err := scBuilder.ProcessTemplates(ctx, c, TestSiteConfig)
+		got, err := scBuilder.ProcessTemplates(ctx, c, TestClusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify manifest suppression

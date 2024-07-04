@@ -39,17 +39,17 @@ type SpecialVars struct {
 	ControlPlaneAgents, WorkerAgents int
 }
 
-// SiteData is a special object that provides an interface to the SiteConfig spec fields for use in rendering templates
-type SiteData struct {
-	Site        v1alpha1.SiteConfigSpec
+// ClusterData is a special object that provides an interface to the SiteConfig spec fields for use in rendering templates
+type ClusterData struct {
+	Site        v1alpha1.ClusterInstanceSpec
 	SpecialVars SpecialVars
 }
 
 // getWorkloadPinningInstallConfigOverrides applies workload pinning to install config overrides if applicable
-func getWorkloadPinningInstallConfigOverrides(siteConfig *v1alpha1.SiteConfig) (result string, err error) {
+func getWorkloadPinningInstallConfigOverrides(clusterInstance *v1alpha1.ClusterInstance) (result string, err error) {
 
-	scInstallConfigOverrides := siteConfig.Spec.InstallConfigOverrides
-	if siteConfig.Spec.CPUPartitioning == v1alpha1.CPUPartitioningAllNodes {
+	scInstallConfigOverrides := clusterInstance.Spec.InstallConfigOverrides
+	if clusterInstance.Spec.CPUPartitioning == v1alpha1.CPUPartitioningAllNodes {
 		installOverrideValues := map[string]interface{}{}
 		if scInstallConfigOverrides != "" {
 			err := json.Unmarshal([]byte(scInstallConfigOverrides), &installOverrideValues)
@@ -58,7 +58,7 @@ func getWorkloadPinningInstallConfigOverrides(siteConfig *v1alpha1.SiteConfig) (
 			}
 		}
 
-		// Because the explicit value siteConfig.Spec.CPUPartitioning == CPUPartitioningAllNodes, we always overwrite
+		// Because the explicit value clusterInstance.Spec.CPUPartitioning == CPUPartitioningAllNodes, we always overwrite
 		// the installConfigOverrides value or add it if not present
 		installOverrideValues[cpuPartitioningKey] = v1alpha1.CPUPartitioningAllNodes
 
@@ -73,16 +73,16 @@ func getWorkloadPinningInstallConfigOverrides(siteConfig *v1alpha1.SiteConfig) (
 }
 
 // getInstallConfigOverrides builds the InstallConfigOverrides and returns it as a json string
-func getInstallConfigOverrides(siteConfig *v1alpha1.SiteConfig) (string, error) {
+func getInstallConfigOverrides(clusterInstance *v1alpha1.ClusterInstance) (string, error) {
 
 	// Get workload-pinning install config overrides
-	installConfigOverrides, err := getWorkloadPinningInstallConfigOverrides(siteConfig)
+	installConfigOverrides, err := getWorkloadPinningInstallConfigOverrides(clusterInstance)
 	if err != nil {
 		return installConfigOverrides, err
 	}
 
 	var commonKey = "networking"
-	networkAnnotation := "{\"networking\":{\"networkType\":\"" + siteConfig.Spec.NetworkType + "\"}}"
+	networkAnnotation := "{\"networking\":{\"networkType\":\"" + clusterInstance.Spec.NetworkType + "\"}}"
 	if !json.Valid([]byte(networkAnnotation)) {
 		return installConfigOverrides, fmt.Errorf("invalid json conversion of network type")
 	}
@@ -121,8 +121,8 @@ func getInstallConfigOverrides(siteConfig *v1alpha1.SiteConfig) (string, error) 
 	}
 }
 
-// buildSiteData returns a Site object that is consumed for rendering templates
-func buildSiteData(siteConfig *v1alpha1.SiteConfig, node *v1alpha1.NodeSpec) (data *SiteData, err error) {
+// buildClusterData returns a Cluster object that is consumed for rendering templates
+func buildClusterData(clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.NodeSpec) (data *ClusterData, err error) {
 
 	// Prepare specialVars
 	var currentNode v1alpha1.NodeSpec
@@ -130,7 +130,7 @@ func buildSiteData(siteConfig *v1alpha1.SiteConfig, node *v1alpha1.NodeSpec) (da
 		currentNode = *node
 	}
 
-	installConfigOverrides, err := getInstallConfigOverrides(siteConfig)
+	installConfigOverrides, err := getInstallConfigOverrides(clusterInstance)
 	if err != nil {
 		installConfigOverrides = ""
 	}
@@ -138,7 +138,7 @@ func buildSiteData(siteConfig *v1alpha1.SiteConfig, node *v1alpha1.NodeSpec) (da
 	// Determine the number of control-plane and worker agents
 	controlPlaneAgents := 0
 	workerAgents := 0
-	for _, node := range siteConfig.Spec.Nodes {
+	for _, node := range clusterInstance.Spec.Nodes {
 		switch node.Role {
 		case "master":
 			controlPlaneAgents++
@@ -147,8 +147,8 @@ func buildSiteData(siteConfig *v1alpha1.SiteConfig, node *v1alpha1.NodeSpec) (da
 		}
 	}
 
-	data = &SiteData{
-		Site: siteConfig.Spec,
+	data = &ClusterData{
+		Site: clusterInstance.Spec,
 		SpecialVars: SpecialVars{
 			CurrentNode:            currentNode,
 			InstallConfigOverrides: installConfigOverrides,

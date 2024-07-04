@@ -34,29 +34,29 @@ func isValidJsonString(input string) bool {
 	return err == nil
 }
 
-// validateSiteConfig validates the given SiteConfig, returns an error if validation fails, returns nil if it succeeds
-func validateSiteConfig(ctx context.Context, c client.Client, siteConfig *v1alpha1.SiteConfig) error {
+// validateClusterInstance validates the given ClusterInstance, returns an error if validation fails, returns nil if it succeeds
+func validateClusterInstance(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance) error {
 
-	if siteConfig.Spec.ClusterName == "" {
+	if clusterInstance.Spec.ClusterName == "" {
 		return fmt.Errorf("missing cluster name")
 	}
 
-	if siteConfig.Spec.ClusterImageSetNameRef == "" {
+	if clusterInstance.Spec.ClusterImageSetNameRef == "" {
 		return fmt.Errorf("clusterImageSetNameRef cannot be empty")
 	}
 	// Verify that the ClusterImageSet resource exists
 	clusterImageSet := hivev1.ClusterImageSet{}
-	key := types.NamespacedName{Name: siteConfig.Spec.ClusterImageSetNameRef, Namespace: ""}
+	key := types.NamespacedName{Name: clusterInstance.Spec.ClusterImageSetNameRef, Namespace: ""}
 	if err := c.Get(ctx, key, &clusterImageSet); err != nil {
-		return fmt.Errorf("encountered error validating ClusterImageSetNameRef: %s, err: %w", siteConfig.Spec.ClusterImageSetNameRef, err)
+		return fmt.Errorf("encountered error validating ClusterImageSetNameRef: %s, err: %w", clusterInstance.Spec.ClusterImageSetNameRef, err)
 	}
 
 	// Check the cluster-level template references are defined
-	if (siteConfig.Spec.TemplateRefs == nil) || (len(siteConfig.Spec.TemplateRefs) < 1) {
+	if (clusterInstance.Spec.TemplateRefs == nil) || (len(clusterInstance.Spec.TemplateRefs) < 1) {
 		return fmt.Errorf("missing cluster-level TemplateRefs")
 	}
 	// Verify that the cluster-level TemplateRefs exist
-	for _, templateRef := range siteConfig.Spec.TemplateRefs {
+	for _, templateRef := range clusterInstance.Spec.TemplateRefs {
 		cm := &corev1.ConfigMap{}
 		if err := c.Get(ctx, types.NamespacedName{
 			Name:      templateRef.Name,
@@ -67,47 +67,47 @@ func validateSiteConfig(ctx context.Context, c client.Client, siteConfig *v1alph
 	}
 
 	// Check that pull secret exists in cluster namespace
-	if siteConfig.Spec.PullSecretRef.Name != "" {
+	if clusterInstance.Spec.PullSecretRef.Name != "" {
 		// Get the secret
 		pullSecret := &corev1.Secret{}
 		if err := c.Get(ctx, types.NamespacedName{
-			Name:      siteConfig.Spec.PullSecretRef.Name,
-			Namespace: siteConfig.Spec.ClusterName},
+			Name:      clusterInstance.Spec.PullSecretRef.Name,
+			Namespace: clusterInstance.Spec.ClusterName},
 			pullSecret); err != nil {
-			return fmt.Errorf("failed to validate Pull Secret: [%s in namespace %s], err: %w", siteConfig.Spec.PullSecretRef.Name, siteConfig.Spec.ClusterName, err)
+			return fmt.Errorf("failed to validate Pull Secret: [%s in namespace %s], err: %w", clusterInstance.Spec.PullSecretRef.Name, clusterInstance.Spec.ClusterName, err)
 		}
 	}
 
 	// Check that InstallConfigOverrides is a valid json-formatted string
-	if siteConfig.Spec.InstallConfigOverrides != "" {
-		if !isValidJsonString(siteConfig.Spec.InstallConfigOverrides) {
+	if clusterInstance.Spec.InstallConfigOverrides != "" {
+		if !isValidJsonString(clusterInstance.Spec.InstallConfigOverrides) {
 			return fmt.Errorf("installConfigOverrides is not a valid JSON-formatted string")
 		}
 	}
 
 	// Check that IgnitionConfigOverride is a valid json-formatted string
-	if siteConfig.Spec.IgnitionConfigOverride != "" {
-		if !isValidJsonString(siteConfig.Spec.IgnitionConfigOverride) {
+	if clusterInstance.Spec.IgnitionConfigOverride != "" {
+		if !isValidJsonString(clusterInstance.Spec.IgnitionConfigOverride) {
 			return fmt.Errorf("cluster-level ignitionConfigOverride is not a valid JSON-formatted string")
 		}
 	}
 
 	// If extraManifests are defined - check that they exist
-	if siteConfig.Spec.ExtraManifestsRefs != nil && len(siteConfig.Spec.ExtraManifestsRefs) > 0 {
-		for _, extraManifestRef := range siteConfig.Spec.ExtraManifestsRefs {
+	if clusterInstance.Spec.ExtraManifestsRefs != nil && len(clusterInstance.Spec.ExtraManifestsRefs) > 0 {
+		for _, extraManifestRef := range clusterInstance.Spec.ExtraManifestsRefs {
 			cm := &corev1.ConfigMap{}
 			if err := c.Get(ctx, types.NamespacedName{
 				Name:      extraManifestRef.Name,
-				Namespace: siteConfig.Namespace,
+				Namespace: clusterInstance.Namespace,
 			}, cm); err != nil {
-				return fmt.Errorf("failed to retrieve ExtraManifest: %s in namespace %s, err: %w", extraManifestRef.Name, siteConfig.Namespace, err)
+				return fmt.Errorf("failed to retrieve ExtraManifest: %s in namespace %s, err: %w", extraManifestRef.Name, clusterInstance.Namespace, err)
 			}
 		}
 	}
 
 	numControlPlaneAgents := 0
 	numWorkerAgents := 0
-	for _, node := range siteConfig.Spec.Nodes {
+	for _, node := range clusterInstance.Spec.Nodes {
 
 		if node.Role == "master" {
 			numControlPlaneAgents++
@@ -136,9 +136,9 @@ func validateSiteConfig(ctx context.Context, c client.Client, siteConfig *v1alph
 			bmcSecret := &corev1.Secret{}
 			if err := c.Get(ctx, types.NamespacedName{
 				Name:      node.BmcCredentialsName.Name,
-				Namespace: siteConfig.Spec.ClusterName},
+				Namespace: clusterInstance.Spec.ClusterName},
 				bmcSecret); err != nil {
-				return fmt.Errorf("failed to validate BMC credentials: %s in namespace %s [Node: Hostname=%s], err: %w", node.BmcCredentialsName.Name, siteConfig.Spec.ClusterName, node.HostName, err)
+				return fmt.Errorf("failed to validate BMC credentials: %s in namespace %s [Node: Hostname=%s], err: %w", node.BmcCredentialsName.Name, clusterInstance.Spec.ClusterName, node.HostName, err)
 			}
 		}
 
@@ -162,7 +162,7 @@ func validateSiteConfig(ctx context.Context, c client.Client, siteConfig *v1alph
 	}
 
 	// Validate ClusterType based on the node counts and validate number of worker agents to 0 for SNO
-	if numControlPlaneAgents == 1 && siteConfig.Spec.ClusterType == v1alpha1.ClusterTypeSNO && numWorkerAgents != 0 {
+	if numControlPlaneAgents == 1 && clusterInstance.Spec.ClusterType == v1alpha1.ClusterTypeSNO && numWorkerAgents != 0 {
 		return fmt.Errorf("sno cluster-type requires 1 control-plane agent and no worker agents")
 	}
 

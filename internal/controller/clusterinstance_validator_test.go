@@ -70,17 +70,17 @@ func getMockExtraManifest(name, namespace string) *corev1.ConfigMap {
 		Data: map[string]string{"foo": "bar"}}
 }
 
-func getMockSNOSiteConfig(clusterName, clusterNamespace, pullSecret, bmcCredentialsName, clusterImageSetName, extraManifest, clusterTemplateRef, nodeTemplateRef string) *v1alpha1.SiteConfig {
+func getMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret, bmcCredentialsName, clusterImageSetName, extraManifest, clusterTemplateRef, nodeTemplateRef string) *v1alpha1.ClusterInstance {
 	installConfigOverrides := "{\"networking\":{\"networkType\":\"OVNKubernetes\"},\"cpuPartitioningMode\":\"AllNodes\"}"
 	installerArgs := "[\"--append-karg\", \"nameserver=8.8.8.8\", \"-n\"]"
 	nodeIgnitionConfigOverride := "{\"ignition\": {\"version\": \"3.1.0\"}, \"storage\": {\"files\": [{\"path\": \"/etc/containers/registries.conf\", \"overwrite\": true, \"contents\": {\"source\": \"data:text/plain;base64,aGVsbG8gZnJvbSB6dHAgcG9saWN5IGdlbmVyYXRvcg==\"}}]}}"
 
-	return &v1alpha1.SiteConfig{
+	return &v1alpha1.ClusterInstance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      clusterName,
 			Namespace: clusterNamespace,
 		},
-		Spec: v1alpha1.SiteConfigSpec{
+		Spec: v1alpha1.ClusterInstanceSpec{
 			ClusterName:            clusterName,
 			PullSecretRef:          &corev1.LocalObjectReference{Name: pullSecret},
 			ClusterImageSetNameRef: clusterImageSetName,
@@ -126,13 +126,13 @@ var _ = Describe("validateSiteConfig", func() {
 		clusterTemplate, nodeTemplate, extraManifest *corev1.ConfigMap
 		extraManifestName                            = "extra-manifest"
 		nodeTemplateRef                              = "node-template-ref"
-		siteConfig                                   *v1alpha1.SiteConfig
+		clusterInstance                              *v1alpha1.ClusterInstance
 	)
 
 	BeforeEach(func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&v1alpha1.SiteConfig{}).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 
 		bmc = getMockBmcSecret(bmcCredentialsName, clusterNamespace)
@@ -144,129 +144,129 @@ var _ = Describe("validateSiteConfig", func() {
 
 		SetupTestPrereqs(ctx, c, bmc, pullSecret, clusterImageSet, clusterTemplate, nodeTemplate, extraManifest)
 
-		siteConfig = getMockSNOSiteConfig(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
+		clusterInstance = getMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
 
 	})
 
 	It("successfully validates a well-defined SiteConfig", func() {
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := validateSiteConfig(ctx, c, siteConfig)
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 	})
 
 	It("fails validation when cluster name is not defined", func() {
-		siteConfig.Spec.ClusterName = ""
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		clusterInstance.Spec.ClusterName = ""
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := validateSiteConfig(ctx, c, siteConfig)
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("missing cluster name")))
 	})
 
 	It("fails validation when clusterImageSetName reference is not defined", func() {
-		siteConfig.Spec.ClusterImageSetNameRef = ""
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		clusterInstance.Spec.ClusterImageSetNameRef = ""
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := validateSiteConfig(ctx, c, siteConfig)
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("clusterImageSetNameRef cannot be empty")))
 	})
 
 	It("fails validation when clusterImageSet resource does not exist", func() {
-		siteConfig.Spec.ClusterImageSetNameRef = "does-not-exist"
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		clusterInstance.Spec.ClusterImageSetNameRef = "does-not-exist"
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := validateSiteConfig(ctx, c, siteConfig)
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("encountered error validating ClusterImageSetNameRef")))
 	})
 
 	It("fails validation when cluster-level template refs are not defined", func() {
-		siteConfig.Spec.TemplateRefs = []v1alpha1.TemplateRef{}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		clusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := validateSiteConfig(ctx, c, siteConfig)
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError("missing cluster-level TemplateRefs"))
 	})
 
 	It("fails validation due to missing pull secret", func() {
-		siteConfig.Spec.PullSecretRef = &corev1.LocalObjectReference{Name: "does-not-exist"}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		clusterInstance.Spec.PullSecretRef = &corev1.LocalObjectReference{Name: "does-not-exist"}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := validateSiteConfig(ctx, c, siteConfig)
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("failed to validate Pull Secret")))
 	})
 
 	It("fails validation due to invalid cluster-level installConfigOverrides JSON-formatted strings", func() {
-		siteConfig.Spec.InstallConfigOverrides = "foobar"
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
-		err := validateSiteConfig(ctx, c, siteConfig)
+		clusterInstance.Spec.InstallConfigOverrides = "foobar"
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("installConfigOverrides is not a valid JSON-formatted string")))
 	})
 
 	It("fails validation due to invalid cluster-level ignitionConfigOverride JSON-formatted strings", func() {
-		siteConfig.Spec.IgnitionConfigOverride = "{foo:bar}"
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
-		err := validateSiteConfig(ctx, c, siteConfig)
+		clusterInstance.Spec.IgnitionConfigOverride = "{foo:bar}"
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("cluster-level ignitionConfigOverride is not a valid JSON-formatted string")))
 	})
 
 	It("fails validation when an ExtraManifest reference does not exist", func() {
-		siteConfig.Spec.ExtraManifestsRefs = []corev1.LocalObjectReference{{Name: "does-not-exist"}}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
-		err := validateSiteConfig(ctx, c, siteConfig)
+		clusterInstance.Spec.ExtraManifestsRefs = []corev1.LocalObjectReference{{Name: "does-not-exist"}}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("failed to retrieve ExtraManifest")))
 	})
 
 	It("fails validation when node-level template refs are not defined", func() {
-		siteConfig.Spec.Nodes[0].TemplateRefs = []v1alpha1.TemplateRef{}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		clusterInstance.Spec.Nodes[0].TemplateRefs = []v1alpha1.TemplateRef{}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := validateSiteConfig(ctx, c, siteConfig)
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("missing node-level template refs")))
 	})
 
 	It("fails validation when a node-level template ref does not exist", func() {
-		siteConfig.Spec.Nodes[0].TemplateRefs = []v1alpha1.TemplateRef{
+		clusterInstance.Spec.Nodes[0].TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "does-not-exist", Namespace: clusterName}}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := validateSiteConfig(ctx, c, siteConfig)
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("failed to validate node-level TemplateRef")))
 	})
 
 	It("fails validation due to missing BMC credential secret", func() {
-		siteConfig.Spec.Nodes[0].BmcCredentialsName = v1alpha1.BmcCredentialsName{Name: "does-not-exist"}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		clusterInstance.Spec.Nodes[0].BmcCredentialsName = v1alpha1.BmcCredentialsName{Name: "does-not-exist"}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := validateSiteConfig(ctx, c, siteConfig)
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("failed to validate BMC credentials")))
 	})
 
 	It("fails validation due to invalid node-level installerArgs JSON-formatted strings", func() {
-		siteConfig.Spec.Nodes[0].InstallerArgs = "{foo:bar}"
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		clusterInstance.Spec.Nodes[0].InstallerArgs = "{foo:bar}"
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := validateSiteConfig(ctx, c, siteConfig)
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("installerArgs is not a valid JSON-formatted string")))
 	})
 
 	It("fails validation due to invalid node-level ignitionConfigOverride JSON-formatted strings", func() {
-		siteConfig.Spec.Nodes[0].IgnitionConfigOverride = "{foo:bar}"
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
-		err := validateSiteConfig(ctx, c, siteConfig)
+		clusterInstance.Spec.Nodes[0].IgnitionConfigOverride = "{foo:bar}"
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+		err := validateClusterInstance(ctx, c, clusterInstance)
 
 		Expect(err).To(MatchError(ContainSubstring("ignitionConfigOverride is not a valid JSON-formatted string")))
 	})
 
 	It("fails validation when no control-plane agents are configured", func() {
-		siteConfig.Spec.Nodes[0].Role = "worker"
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		clusterInstance.Spec.Nodes[0].Role = "worker"
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := validateSiteConfig(ctx, c, siteConfig)
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("at least 1 ControlPlane agent is required")))
 	})
 
 	It("fails validation when worker agents are defined for SNO-based cluster-type", func() {
-		siteConfig.Spec.Nodes = []v1alpha1.NodeSpec{
+		clusterInstance.Spec.Nodes = []v1alpha1.NodeSpec{
 			{
 				Role:               "master",
 				BmcAddress:         "1:2:3:4",
@@ -279,9 +279,9 @@ var _ = Describe("validateSiteConfig", func() {
 				BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: bmcCredentialsName},
 				TemplateRefs: []v1alpha1.TemplateRef{
 					{Name: nodeTemplateRef, Namespace: clusterName}}}}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := validateSiteConfig(ctx, c, siteConfig)
+		err := validateClusterInstance(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("sno cluster-type requires 1 control-plane agent and no worker agents")))
 	})
 })

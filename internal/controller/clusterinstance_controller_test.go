@@ -43,11 +43,11 @@ import (
 var _ = Describe("Reconcile", func() {
 	var (
 		c                 client.Client
-		r                 *SiteConfigReconciler
+		r                 *ClusterInstanceReconciler
 		ctx               = context.Background()
 		clusterName       = "test-cluster"
 		clusterNamespace  = "test-namespace"
-		siteConfig        *v1alpha1.SiteConfig
+		clusterInstance   *v1alpha1.ClusterInstance
 		pullSecret        *corev1.Secret
 		testPullSecretVal = `{"auths":{"cloud.openshift.com":{"auth":"dXNlcjpwYXNzd29yZAo=","email":"r@r.com"}}}`
 	)
@@ -55,11 +55,11 @@ var _ = Describe("Reconcile", func() {
 	BeforeEach(func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&v1alpha1.SiteConfig{}).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder := NewSiteConfigBuilder(testLogger)
-		r = &SiteConfigReconciler{
+		scBuilder := NewClusterInstanceBuilder(testLogger)
+		r = &ClusterInstanceReconciler{
 			Client:    c,
 			Scheme:    scheme.Scheme,
 			Log:       testLogger,
@@ -75,13 +75,13 @@ var _ = Describe("Reconcile", func() {
 		}
 		Expect(c.Create(ctx, pullSecret)).To(Succeed())
 
-		siteConfig = &v1alpha1.SiteConfig{
+		clusterInstance = &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       clusterName,
 				Namespace:  clusterNamespace,
-				Finalizers: []string{siteConfigFinalizer},
+				Finalizers: []string{clusterInstanceFinalizer},
 			},
-			Spec: v1alpha1.SiteConfigSpec{
+			Spec: v1alpha1.ClusterInstanceSpec{
 				ClusterName:            clusterName,
 				PullSecretRef:          &corev1.LocalObjectReference{Name: pullSecret.Name},
 				ClusterImageSetNameRef: "testimage:foobar",
@@ -99,7 +99,7 @@ var _ = Describe("Reconcile", func() {
 	})
 
 	It("creates the correct SiteConfig manifest", func() {
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		key := types.NamespacedName{
 			Namespace: clusterName,
@@ -124,7 +124,7 @@ var _ = Describe("Reconcile", func() {
 var _ = Describe("handleFinalizer", func() {
 	var (
 		c                client.Client
-		r                *SiteConfigReconciler
+		r                *ClusterInstanceReconciler
 		ctx              = context.Background()
 		clusterName      = "test-cluster"
 		clusterNamespace = "test-namespace"
@@ -133,11 +133,11 @@ var _ = Describe("handleFinalizer", func() {
 	BeforeEach(func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&v1alpha1.SiteConfig{}).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder := NewSiteConfigBuilder(testLogger)
-		r = &SiteConfigReconciler{
+		scBuilder := NewClusterInstanceBuilder(testLogger)
+		r = &ClusterInstanceReconciler{
 			Client:    c,
 			Scheme:    scheme.Scheme,
 			Log:       testLogger,
@@ -146,15 +146,15 @@ var _ = Describe("handleFinalizer", func() {
 	})
 
 	It("adds the finalizer if the SiteConfig is not being deleted", func() {
-		siteConfig := &v1alpha1.SiteConfig{
+		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clusterName,
 				Namespace: clusterNamespace,
 			},
 		}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		res, stop, err := r.handleFinalizer(ctx, siteConfig)
+		res, stop, err := r.handleFinalizer(ctx, clusterInstance)
 		Expect(res).To(Equal(ctrl.Result{Requeue: true}))
 		Expect(stop).To(BeTrue())
 		Expect(err).ToNot(HaveOccurred())
@@ -163,21 +163,21 @@ var _ = Describe("handleFinalizer", func() {
 			Name:      clusterName,
 			Namespace: clusterNamespace,
 		}
-		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
-		Expect(siteConfig.GetFinalizers()).To(ContainElement(siteConfigFinalizer))
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+		Expect(clusterInstance.GetFinalizers()).To(ContainElement(clusterInstanceFinalizer))
 	})
 
 	It("does nothing if the finalizer is already present", func() {
-		siteConfig := &v1alpha1.SiteConfig{
+		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       clusterName,
 				Namespace:  clusterNamespace,
-				Finalizers: []string{siteConfigFinalizer},
+				Finalizers: []string{clusterInstanceFinalizer},
 			},
 		}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		res, stop, err := r.handleFinalizer(ctx, siteConfig)
+		res, stop, err := r.handleFinalizer(ctx, clusterInstance)
 		Expect(res).To(Equal(ctrl.Result{}))
 		Expect(stop).To(BeFalse())
 		Expect(err).ToNot(HaveOccurred())
@@ -190,13 +190,13 @@ var _ = Describe("handleFinalizer", func() {
 		cdApiGroup := "hive.openshift.io/v1"
 		mcApiGroup := "cluster.open-cluster-management.io/v1"
 
-		siteConfig := &v1alpha1.SiteConfig{
+		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       clusterName,
 				Namespace:  clusterNamespace,
-				Finalizers: []string{siteConfigFinalizer},
+				Finalizers: []string{clusterInstanceFinalizer},
 			},
-			Status: v1alpha1.SiteConfigStatus{
+			Status: v1alpha1.ClusterInstanceStatus{
 				ManifestsRendered: []v1alpha1.ManifestReference{
 					{
 						APIGroup:  &cdApiGroup,
@@ -224,7 +224,7 @@ var _ = Describe("handleFinalizer", func() {
 				},
 			},
 		}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		// Create manifests
 		cd := &hivev1.ClusterDeployment{
@@ -264,10 +264,10 @@ var _ = Describe("handleFinalizer", func() {
 
 		// Set the deletionTimestamp to force deletion of siteconfig manifests
 		deletionTimeStamp := metav1.Now()
-		siteConfig.ObjectMeta.DeletionTimestamp = &deletionTimeStamp
+		clusterInstance.ObjectMeta.DeletionTimestamp = &deletionTimeStamp
 
 		// Expect the manifests previously created to be deleted after the handleFinalizer is called
-		res, stop, err := r.handleFinalizer(ctx, siteConfig)
+		res, stop, err := r.handleFinalizer(ctx, clusterInstance)
 		Expect(res).To(Equal(ctrl.Result{}))
 		Expect(stop).To(BeTrue())
 		Expect(err).ToNot(HaveOccurred())
@@ -284,13 +284,13 @@ var _ = Describe("handleFinalizer", func() {
 		cdApiGroup := "hive.openshift.io/v1"
 		mcApiGroup := "cluster.open-cluster-management.io/v1"
 
-		siteConfig := &v1alpha1.SiteConfig{
+		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       clusterName,
 				Namespace:  clusterNamespace,
-				Finalizers: []string{siteConfigFinalizer},
+				Finalizers: []string{clusterInstanceFinalizer},
 			},
-			Status: v1alpha1.SiteConfigStatus{
+			Status: v1alpha1.ClusterInstanceStatus{
 				ManifestsRendered: []v1alpha1.ManifestReference{
 					{
 						APIGroup:  &cdApiGroup,
@@ -318,7 +318,7 @@ var _ = Describe("handleFinalizer", func() {
 				},
 			},
 		}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		// Create manifests
 		cd := &hivev1.ClusterDeployment{
@@ -353,10 +353,10 @@ var _ = Describe("handleFinalizer", func() {
 
 		// Set the deletionTimestamp to force deletion of siteconfig manifests
 		deletionTimeStamp := metav1.Now()
-		siteConfig.ObjectMeta.DeletionTimestamp = &deletionTimeStamp
+		clusterInstance.ObjectMeta.DeletionTimestamp = &deletionTimeStamp
 
 		// Expect the manifests previously created to be deleted after the handleFinalizer is called
-		res, stop, err := r.handleFinalizer(ctx, siteConfig)
+		res, stop, err := r.handleFinalizer(ctx, clusterInstance)
 		Expect(res).To(Equal(ctrl.Result{}))
 		Expect(stop).To(BeTrue())
 		Expect(err).ToNot(HaveOccurred())
@@ -370,7 +370,7 @@ var _ = Describe("handleFinalizer", func() {
 var _ = Describe("handleValidate", func() {
 	var (
 		c                                            client.Client
-		r                                            *SiteConfigReconciler
+		r                                            *ClusterInstanceReconciler
 		ctx                                          = context.Background()
 		bmcCredentialsName                           = "bmh-secret"
 		bmc, pullSecret                              *corev1.Secret
@@ -382,17 +382,17 @@ var _ = Describe("handleValidate", func() {
 		clusterTemplate, nodeTemplate, extraManifest *corev1.ConfigMap
 		extraManifestName                            = "extra-manifest"
 		nodeTemplateRef                              = "node-template-ref"
-		siteConfig                                   *v1alpha1.SiteConfig
+		clusterInstance                              *v1alpha1.ClusterInstance
 	)
 
 	BeforeEach(func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&v1alpha1.SiteConfig{}).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder := NewSiteConfigBuilder(testLogger)
-		r = &SiteConfigReconciler{
+		scBuilder := NewClusterInstanceBuilder(testLogger)
+		r = &ClusterInstanceReconciler{
 			Client:    c,
 			Scheme:    scheme.Scheme,
 			Log:       testLogger,
@@ -407,23 +407,23 @@ var _ = Describe("handleValidate", func() {
 		extraManifest = getMockExtraManifest(extraManifestName, clusterNamespace)
 
 		SetupTestPrereqs(ctx, c, bmc, pullSecret, clusterImageSet, clusterTemplate, nodeTemplate, extraManifest)
-		siteConfig = getMockSNOSiteConfig(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
+		clusterInstance = getMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
 	})
 
 	It("successfully sets the SiteConfigValidated condition to true for a valid SiteConfig", func() {
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.handleValidate(ctx, siteConfig)
+		err := r.handleValidate(ctx, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		key := types.NamespacedName{
 			Name:      clusterName,
 			Namespace: clusterNamespace,
 		}
-		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		matched := false
-		for _, cond := range siteConfig.Status.Conditions {
-			if cond.Type == string(conditions.SiteConfigValidated) && cond.Status == metav1.ConditionTrue {
+		for _, cond := range clusterInstance.Status.Conditions {
+			if cond.Type == string(conditions.ClusterInstanceValidated) && cond.Status == metav1.ConditionTrue {
 				matched = true
 			}
 		}
@@ -431,20 +431,20 @@ var _ = Describe("handleValidate", func() {
 	})
 
 	It("successfully sets the SiteConfigValidated condition to false for an invalid SiteConfig", func() {
-		siteConfig.Spec.ClusterName = ""
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		clusterInstance.Spec.ClusterName = ""
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.handleValidate(ctx, siteConfig)
+		err := r.handleValidate(ctx, clusterInstance)
 		Expect(err).To(HaveOccurred())
 
 		key := types.NamespacedName{
 			Name:      clusterName,
 			Namespace: clusterNamespace,
 		}
-		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		matched := false
-		for _, cond := range siteConfig.Status.Conditions {
-			if cond.Type == string(conditions.SiteConfigValidated) && cond.Status == metav1.ConditionFalse {
+		for _, cond := range clusterInstance.Status.Conditions {
+			if cond.Type == string(conditions.ClusterInstanceValidated) && cond.Status == metav1.ConditionFalse {
 				matched = true
 			}
 		}
@@ -452,27 +452,27 @@ var _ = Describe("handleValidate", func() {
 	})
 
 	It("does not require a reconcile when the SiteConfigValidated condition remains unchanged", func() {
-		siteConfig.Status.Conditions = []metav1.Condition{
+		clusterInstance.Status.Conditions = []metav1.Condition{
 			{
-				Type:    string(conditions.SiteConfigValidated),
+				Type:    string(conditions.ClusterInstanceValidated),
 				Reason:  string(conditions.Completed),
 				Status:  metav1.ConditionTrue,
 				Message: "Validation succeeded",
 			},
 		}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.handleValidate(ctx, siteConfig)
+		err := r.handleValidate(ctx, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		key := types.NamespacedName{
 			Name:      clusterName,
 			Namespace: clusterNamespace,
 		}
-		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		matched := false
-		for _, cond := range siteConfig.Status.Conditions {
-			if cond.Type == string(conditions.SiteConfigValidated) && cond.Status == metav1.ConditionTrue {
+		for _, cond := range clusterInstance.Status.Conditions {
+			if cond.Type == string(conditions.ClusterInstanceValidated) && cond.Status == metav1.ConditionTrue {
 				matched = true
 			}
 		}
@@ -480,27 +480,27 @@ var _ = Describe("handleValidate", func() {
 	})
 
 	It("requires a reconcile when the SiteConfigValidated condition has changed", func() {
-		siteConfig.Status.Conditions = []metav1.Condition{
+		clusterInstance.Status.Conditions = []metav1.Condition{
 			{
-				Type:    string(conditions.SiteConfigValidated),
+				Type:    string(conditions.ClusterInstanceValidated),
 				Reason:  string(conditions.Failed),
 				Status:  metav1.ConditionFalse,
 				Message: "Validation failed",
 			},
 		}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.handleValidate(ctx, siteConfig)
+		err := r.handleValidate(ctx, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		key := types.NamespacedName{
 			Name:      clusterName,
 			Namespace: clusterNamespace,
 		}
-		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		matched := false
-		for _, cond := range siteConfig.Status.Conditions {
-			if cond.Type == string(conditions.SiteConfigValidated) && cond.Status == metav1.ConditionTrue {
+		for _, cond := range clusterInstance.Status.Conditions {
+			if cond.Type == string(conditions.ClusterInstanceValidated) && cond.Status == metav1.ConditionTrue {
 				matched = true
 			}
 		}
@@ -511,10 +511,10 @@ var _ = Describe("handleValidate", func() {
 
 var _ = Describe("handleRenderTemplates", func() {
 	var (
-		c          client.Client
-		r          *SiteConfigReconciler
-		ctx        = context.Background()
-		siteConfig *v1alpha1.SiteConfig
+		c               client.Client
+		r               *ClusterInstanceReconciler
+		ctx             = context.Background()
+		clusterInstance *v1alpha1.ClusterInstance
 	)
 
 	BeforeEach(func() {
@@ -533,11 +533,11 @@ var _ = Describe("handleRenderTemplates", func() {
 
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&v1alpha1.SiteConfig{}).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder := NewSiteConfigBuilder(testLogger)
-		r = &SiteConfigReconciler{
+		scBuilder := NewClusterInstanceBuilder(testLogger)
+		r = &ClusterInstanceReconciler{
 			Client:    c,
 			Scheme:    scheme.Scheme,
 			Log:       testLogger,
@@ -552,18 +552,18 @@ var _ = Describe("handleRenderTemplates", func() {
 		extraManifest = getMockExtraManifest(extraManifestName, clusterNamespace)
 
 		SetupTestPrereqs(ctx, c, bmc, pullSecret, clusterImageSet, clusterTemplate, nodeTemplate, extraManifest)
-		siteConfig = getMockSNOSiteConfig(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
+		clusterInstance = getMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
 	})
 
 	It("fails to render templates and updates the status correctly", func() {
-		siteConfig.Spec.Nodes[0].TemplateRefs = []v1alpha1.TemplateRef{
+		clusterInstance.Spec.Nodes[0].TemplateRefs = []v1alpha1.TemplateRef{
 			{
 				Name:      "test",
 				Namespace: "default",
 			},
 		}
 
-		siteConfig.Spec.TemplateRefs = []v1alpha1.TemplateRef{
+		clusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{
 				Name:      "test",
 				Namespace: "default",
@@ -588,24 +588,24 @@ spec:
 			Data: map[string]string{"Test": templateStr},
 		}
 		Expect(c.Create(ctx, cm)).To(Succeed())
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.handleValidate(ctx, siteConfig)
+		err := r.handleValidate(ctx, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
-		rendered, err := r.handleRenderTemplates(ctx, siteConfig)
+		rendered, err := r.handleRenderTemplates(ctx, clusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(rendered).To(Equal(false))
 
 		// Verify correct status conditions are set
 		key := types.NamespacedName{
-			Name:      siteConfig.Name,
-			Namespace: siteConfig.Namespace,
+			Name:      clusterInstance.Name,
+			Namespace: clusterInstance.Namespace,
 		}
-		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 
 		matched := false
-		for _, cond := range siteConfig.Status.Conditions {
+		for _, cond := range clusterInstance.Status.Conditions {
 			if cond.Type == string(conditions.RenderedTemplates) && cond.Status == metav1.ConditionFalse {
 				matched = true
 			}
@@ -614,14 +614,14 @@ spec:
 	})
 
 	It("successfully renders templates and updates the status correctly", func() {
-		siteConfig.Spec.Nodes[0].TemplateRefs = []v1alpha1.TemplateRef{
+		clusterInstance.Spec.Nodes[0].TemplateRefs = []v1alpha1.TemplateRef{
 			{
 				Name:      "test",
 				Namespace: "default",
 			},
 		}
 
-		siteConfig.Spec.TemplateRefs = []v1alpha1.TemplateRef{
+		clusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{
 				Name:      "test",
 				Namespace: "default",
@@ -646,25 +646,25 @@ spec:
 			Data: map[string]string{"Test": templateStr},
 		}
 		Expect(c.Create(ctx, cm)).To(Succeed())
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.handleValidate(ctx, siteConfig)
+		err := r.handleValidate(ctx, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
-		rendered, err := r.handleRenderTemplates(ctx, siteConfig)
+		rendered, err := r.handleRenderTemplates(ctx, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(rendered).To(Equal(true))
 
 		// Verify correct status conditions are set
 		key := types.NamespacedName{
-			Name:      siteConfig.Name,
-			Namespace: siteConfig.Namespace,
+			Name:      clusterInstance.Name,
+			Namespace: clusterInstance.Namespace,
 		}
-		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 
 		expectedConditions := []metav1.Condition{
 			{
-				Type:   string(conditions.SiteConfigValidated),
+				Type:   string(conditions.ClusterInstanceValidated),
 				Reason: string(conditions.Completed),
 				Status: metav1.ConditionTrue,
 			},
@@ -687,7 +687,7 @@ spec:
 
 		for _, expCond := range expectedConditions {
 			matched := false
-			for _, cond := range siteConfig.Status.Conditions {
+			for _, cond := range clusterInstance.Status.Conditions {
 				if cond.Type == expCond.Type &&
 					cond.Reason == expCond.Reason &&
 					cond.Status == expCond.Status {
@@ -701,15 +701,15 @@ spec:
 
 var _ = Describe("updateSuppressedManifestsStatus", func() {
 	var (
-		c            client.Client
-		r            *SiteConfigReconciler
-		ctx          = context.Background()
-		siteConfig   *v1alpha1.SiteConfig
-		Manifests    []v1alpha1.ManifestReference
-		aciApiGroup  = "extensions.hive.openshift.io/v1beta1"
-		cdApiGroup   = "hive.openshift.io/v1"
-		bmhApilGroup = "metal3.io/v1alpha1"
-		nmscApiGroup = "agent-install.openshift.io/v1beta1"
+		c               client.Client
+		r               *ClusterInstanceReconciler
+		ctx             = context.Background()
+		clusterInstance *v1alpha1.ClusterInstance
+		Manifests       []v1alpha1.ManifestReference
+		aciApiGroup     = "extensions.hive.openshift.io/v1beta1"
+		cdApiGroup      = "hive.openshift.io/v1"
+		bmhApilGroup    = "metal3.io/v1alpha1"
+		nmscApiGroup    = "agent-install.openshift.io/v1beta1"
 	)
 
 	BeforeEach(func() {
@@ -721,23 +721,23 @@ var _ = Describe("updateSuppressedManifestsStatus", func() {
 
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&v1alpha1.SiteConfig{}).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder := NewSiteConfigBuilder(testLogger)
-		r = &SiteConfigReconciler{
+		scBuilder := NewClusterInstanceBuilder(testLogger)
+		r = &ClusterInstanceReconciler{
 			Client:    c,
 			Scheme:    scheme.Scheme,
 			Log:       testLogger,
 			ScBuilder: scBuilder,
 		}
 
-		siteConfig = &v1alpha1.SiteConfig{
+		clusterInstance = &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clusterName,
 				Namespace: clusterNamespace,
 			},
-			Spec: v1alpha1.SiteConfigSpec{
+			Spec: v1alpha1.ClusterInstanceSpec{
 				ClusterName: clusterName,
 				Nodes: []v1alpha1.NodeSpec{
 					{
@@ -777,20 +777,20 @@ var _ = Describe("updateSuppressedManifestsStatus", func() {
 
 	It("does not suppress manifests if nothing is specified", func() {
 
-		siteConfig.Spec.SuppressedManifests = []string{}
-		siteConfig.Status = v1alpha1.SiteConfigStatus{
+		clusterInstance.Spec.SuppressedManifests = []string{}
+		clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
 			ManifestsRendered: Manifests,
 		}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.updateSuppressedManifestsStatus(ctx, siteConfig)
+		err := r.updateSuppressedManifestsStatus(ctx, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify status.ManifestRendered is unchanged
-		sc := &v1alpha1.SiteConfig{}
+		sc := &v1alpha1.ClusterInstance{}
 		key := types.NamespacedName{
-			Name:      siteConfig.Name,
-			Namespace: siteConfig.Namespace,
+			Name:      clusterInstance.Name,
+			Namespace: clusterInstance.Namespace,
 		}
 		Expect(c.Get(ctx, key, sc)).To(Succeed())
 		for _, expManifest := range Manifests {
@@ -802,13 +802,13 @@ var _ = Describe("updateSuppressedManifestsStatus", func() {
 
 	It("correctly suppresses cluster-level manifests when specified", func() {
 
-		siteConfig.Spec.SuppressedManifests = []string{"ClusterDeployment"}
-		siteConfig.Status = v1alpha1.SiteConfigStatus{
+		clusterInstance.Spec.SuppressedManifests = []string{"ClusterDeployment"}
+		clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
 			ManifestsRendered: Manifests,
 		}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.updateSuppressedManifestsStatus(ctx, siteConfig)
+		err := r.updateSuppressedManifestsStatus(ctx, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify handling of suppression
@@ -838,10 +838,10 @@ var _ = Describe("updateSuppressedManifestsStatus", func() {
 				Status:   v1alpha1.ManifestRenderedSuccess,
 			},
 		}
-		sc := &v1alpha1.SiteConfig{}
+		sc := &v1alpha1.ClusterInstance{}
 		key := types.NamespacedName{
-			Name:      siteConfig.Name,
-			Namespace: siteConfig.Namespace,
+			Name:      clusterInstance.Name,
+			Namespace: clusterInstance.Namespace,
 		}
 		Expect(c.Get(ctx, key, sc)).To(Succeed())
 		for _, expManifest := range expectedManifests {
@@ -853,15 +853,15 @@ var _ = Describe("updateSuppressedManifestsStatus", func() {
 
 	It("correctly suppresses cluster and node level manifests when specified", func() {
 
-		siteConfig.Spec.SuppressedManifests = []string{"ClusterDeployment"}
-		siteConfig.Spec.Nodes[0].SuppressedManifests = []string{"BareMetalHost"}
+		clusterInstance.Spec.SuppressedManifests = []string{"ClusterDeployment"}
+		clusterInstance.Spec.Nodes[0].SuppressedManifests = []string{"BareMetalHost"}
 
-		siteConfig.Status = v1alpha1.SiteConfigStatus{
+		clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
 			ManifestsRendered: Manifests,
 		}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.updateSuppressedManifestsStatus(ctx, siteConfig)
+		err := r.updateSuppressedManifestsStatus(ctx, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify handling of suppression
@@ -891,10 +891,10 @@ var _ = Describe("updateSuppressedManifestsStatus", func() {
 				Status:   v1alpha1.ManifestRenderedSuccess,
 			},
 		}
-		sc := &v1alpha1.SiteConfig{}
+		sc := &v1alpha1.ClusterInstance{}
 		key := types.NamespacedName{
-			Name:      siteConfig.Name,
-			Namespace: siteConfig.Namespace,
+			Name:      clusterInstance.Name,
+			Namespace: clusterInstance.Namespace,
 		}
 		Expect(c.Get(ctx, key, sc)).To(Succeed())
 		for _, expManifest := range expectedManifests {
@@ -981,9 +981,9 @@ var _ = DescribeTable("groupAndSortManifests",
 var _ = Describe("executeRenderedManifests", func() {
 	var (
 		c                client.Client
-		r                *SiteConfigReconciler
+		r                *ClusterInstanceReconciler
 		ctx              = context.Background()
-		siteConfig       *v1alpha1.SiteConfig
+		clusterInstance  *v1alpha1.ClusterInstance
 		clusterName      = "test-cluster"
 		clusterNamespace = "test-cluster"
 		key              = types.NamespacedName{
@@ -1009,27 +1009,27 @@ var _ = Describe("executeRenderedManifests", func() {
 	BeforeEach(func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&v1alpha1.SiteConfig{}).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder := NewSiteConfigBuilder(testLogger)
-		r = &SiteConfigReconciler{
+		scBuilder := NewClusterInstanceBuilder(testLogger)
+		r = &ClusterInstanceReconciler{
 			Client:    c,
 			Scheme:    scheme.Scheme,
 			Log:       testLogger,
 			ScBuilder: scBuilder,
 		}
 
-		siteConfig = &v1alpha1.SiteConfig{
+		clusterInstance = &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clusterName,
 				Namespace: clusterNamespace,
 			},
-			Spec: v1alpha1.SiteConfigSpec{
+			Spec: v1alpha1.ClusterInstanceSpec{
 				ClusterName: clusterName,
 			},
 		}
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 	})
 
 	It("succeeds in creating a manifest", func() {
@@ -1046,14 +1046,14 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}).Build()
 
-		result, err := r.executeRenderedManifests(ctx, testClient, siteConfig, manifestGroup, expManifest.Status)
+		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, manifestGroup, expManifest.Status)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeTrue())
 		Expect(called).To(BeTrue())
 
 		// Verify SiteConfig status
-		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
-		manifest := findManifestRendered(&expManifest, siteConfig.Status.ManifestsRendered)
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 		Expect(manifest).ToNot(Equal(nil))
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 	})
@@ -1073,14 +1073,14 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}).Build()
 
-		result, err := r.executeRenderedManifests(ctx, testClient, siteConfig, manifestGroup, v1alpha1.ManifestRenderedSuccess)
+		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, manifestGroup, v1alpha1.ManifestRenderedSuccess)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeFalse())
 		Expect(called).To(BeTrue())
 
 		// Verify SiteConfig status
-		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
-		manifest := findManifestRendered(&expManifest, siteConfig.Status.ManifestsRendered)
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 		Expect(manifest).ToNot(Equal(nil))
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 		Expect(manifest.Message).To(ContainSubstring(testError))
@@ -1101,14 +1101,14 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}).Build()
 
-		result, err := r.executeRenderedManifests(ctx, testClient, siteConfig, manifestGroup, expManifest.Status)
+		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, manifestGroup, expManifest.Status)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeTrue())
 		Expect(called).To(BeTrue())
 
 		// Verify SiteConfig status
-		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
-		manifest := findManifestRendered(&expManifest, siteConfig.Status.ManifestsRendered)
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 		Expect(manifest).ToNot(Equal(nil))
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 	})
@@ -1128,14 +1128,14 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}).Build()
 
-		result, err := r.executeRenderedManifests(ctx, testClient, siteConfig, manifestGroup, expManifest.Status)
+		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, manifestGroup, expManifest.Status)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeFalse())
 		Expect(called).To(BeTrue())
 
 		// Verify SiteConfig status
-		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
-		manifest := findManifestRendered(&expManifest, siteConfig.Status.ManifestsRendered)
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 		Expect(manifest).ToNot(Equal(nil))
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 		Expect(manifest.Message).To(ContainSubstring(testError))
