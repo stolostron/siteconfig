@@ -13,7 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 */
 
-package controller
+package clusterinstance
 
 import (
 	"context"
@@ -34,8 +34,8 @@ func isValidJsonString(input string) bool {
 	return err == nil
 }
 
-// validateClusterInstance validates the given ClusterInstance, returns an error if validation fails, returns nil if it succeeds
-func validateClusterInstance(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance) error {
+// Validate checks the given ClusterInstance, returns an error if validation fails, returns nil if it succeeds
+func Validate(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance) error {
 
 	if clusterInstance.Spec.ClusterName == "" {
 		return fmt.Errorf("missing cluster name")

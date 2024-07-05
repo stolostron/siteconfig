@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package clusterinstance
 
 import (
 	"bytes"
@@ -37,39 +37,37 @@ const (
 	DefaultWaveAnnotation = "0"
 )
 
-type ClusterInstanceBuilder struct {
+type TemplateEngine struct {
 	Log logr.Logger
 }
 
-func NewClusterInstanceBuilder(pLog logr.Logger) *ClusterInstanceBuilder {
-	scBuilder := ClusterInstanceBuilder{Log: pLog}
-
-	return &scBuilder
+func NewTemplateEngine(pLog logr.Logger) *TemplateEngine {
+	return &TemplateEngine{Log: pLog}
 }
 
-func (cib *ClusterInstanceBuilder) ProcessTemplates(ctx context.Context, c client.Client, clusterInstance v1alpha1.ClusterInstance) ([]interface{}, error) {
-	cib.Log.Info(fmt.Sprintf("Processing cluster-level templates for ClusterInstance %s", clusterInstance.Name))
+func (te *TemplateEngine) ProcessTemplates(ctx context.Context, c client.Client, clusterInstance v1alpha1.ClusterInstance) ([]interface{}, error) {
+	te.Log.Info(fmt.Sprintf("Processing cluster-level templates for ClusterInstance %s", clusterInstance.Name))
 
 	// Render cluster-level templates
-	clusterManifests, err := cib.renderTemplates(ctx, c, &clusterInstance, nil)
+	clusterManifests, err := te.renderTemplates(ctx, c, &clusterInstance, nil)
 	if err != nil {
-		cib.Log.Info(fmt.Sprintf("encountered error while processing cluster-level templates for ClusterInstance %s, err: %s", clusterInstance.Name, err.Error()))
+		te.Log.Info(fmt.Sprintf("encountered error while processing cluster-level templates for ClusterInstance %s, err: %s", clusterInstance.Name, err.Error()))
 		return clusterManifests, err
 	}
-	cib.Log.Info(fmt.Sprintf("Processed cluster-level templates for ClusterInstance %s", clusterInstance.Name))
+	te.Log.Info(fmt.Sprintf("Processed cluster-level templates for ClusterInstance %s", clusterInstance.Name))
 
 	// Process node-level templates
 	numNodes := len(clusterInstance.Spec.Nodes)
 	for nodeId, node := range clusterInstance.Spec.Nodes {
-		cib.Log.Info(fmt.Sprintf("Processing node-level templates for ClusterInstance %s [node: %d of %d]", clusterInstance.Name, nodeId+1, numNodes))
+		te.Log.Info(fmt.Sprintf("Processing node-level templates for ClusterInstance %s [node: %d of %d]", clusterInstance.Name, nodeId+1, numNodes))
 
 		// Render node-level templates
-		nodeManifests, err := cib.renderTemplates(ctx, c, &clusterInstance, &node)
+		nodeManifests, err := te.renderTemplates(ctx, c, &clusterInstance, &node)
 		if err != nil {
-			cib.Log.Info(fmt.Sprintf("encountered error while processing node-level templates for ClusterInstance %s [%d of %d], err: %s", clusterInstance.Name, nodeId+1, numNodes, err.Error()))
+			te.Log.Info(fmt.Sprintf("encountered error while processing node-level templates for ClusterInstance %s [%d of %d], err: %s", clusterInstance.Name, nodeId+1, numNodes, err.Error()))
 			return clusterManifests, err
 		}
-		cib.Log.Info(fmt.Sprintf("Processed node-level templates for ClusterInstance %s [node: %d of %d]", clusterInstance.Name, nodeId+1, numNodes))
+		te.Log.Info(fmt.Sprintf("Processed node-level templates for ClusterInstance %s [node: %d of %d]", clusterInstance.Name, nodeId+1, numNodes))
 
 		for _, nodeCR := range nodeManifests {
 			if nodeCR != nil {
@@ -81,7 +79,7 @@ func (cib *ClusterInstanceBuilder) ProcessTemplates(ctx context.Context, c clien
 	return clusterManifests, nil
 }
 
-func (cib *ClusterInstanceBuilder) renderTemplates(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.NodeSpec) ([]interface{}, error) {
+func (te *TemplateEngine) renderTemplates(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.NodeSpec) ([]interface{}, error) {
 	var (
 		manifests           []interface{}
 		templateRefs        []v1alpha1.TemplateRef
@@ -100,14 +98,14 @@ func (cib *ClusterInstanceBuilder) renderTemplates(ctx context.Context, c client
 	}
 
 	for tId, templateRef := range templateRefs {
-		cib.Log.Info(fmt.Sprintf("renderTemplates: processing templateRef %d of %d", tId+1, len(templateRefs)))
+		te.Log.Info(fmt.Sprintf("renderTemplates: processing templateRef %d of %d", tId+1, len(templateRefs)))
 
 		templatesConfigMap := &corev1.ConfigMap{}
 		if err := c.Get(ctx, types.NamespacedName{
 			Name:      templateRef.Name,
 			Namespace: templateRef.Namespace,
 		}, templatesConfigMap); err != nil {
-			cib.Log.Info(fmt.Sprintf("renderTemplates: failed to get ConfigMap, err: %s", err.Error()))
+			te.Log.Info(fmt.Sprintf("renderTemplates: failed to get ConfigMap, err: %s", err.Error()))
 			return manifests, err
 		}
 
@@ -116,13 +114,13 @@ func (cib *ClusterInstanceBuilder) renderTemplates(ctx context.Context, c client
 
 			clusterData, err := buildClusterData(clusterInstance, node)
 			if err != nil {
-				cib.Log.Error(err, fmt.Sprintf("renderTemplates: failed to build ClusterInstance data for ClusterInstance %s", clusterInstance.Name))
+				te.Log.Error(err, fmt.Sprintf("renderTemplates: failed to build ClusterInstance data for ClusterInstance %s", clusterInstance.Name))
 				return nil, err
 			}
 
-			manifest, err := cib.render(templateKey, template, clusterData)
+			manifest, err := te.render(templateKey, template, clusterData)
 			if err != nil {
-				cib.Log.Error(err, fmt.Sprintf("renderTemplates: failed to render templateRef %s for ClusterInstance %s", templateRef.Name, clusterInstance.Name))
+				te.Log.Error(err, fmt.Sprintf("renderTemplates: failed to render templateRef %s for ClusterInstance %s", templateRef.Name, clusterInstance.Name))
 				return manifests, err
 			}
 
@@ -132,7 +130,7 @@ func (cib *ClusterInstanceBuilder) renderTemplates(ctx context.Context, c client
 
 			kind := manifest["kind"].(string)
 			if suppressManifest(kind, suppressedManifests) {
-				cib.Log.Info(fmt.Sprintf("renderTemplates: suppressing manifest %s for ClusterInstance %s", kind, clusterInstance.Name))
+				te.Log.Info(fmt.Sprintf("renderTemplates: suppressing manifest %s for ClusterInstance %s", kind, clusterInstance.Name))
 				continue
 			}
 			if node == nil {
@@ -152,7 +150,7 @@ func (cib *ClusterInstanceBuilder) renderTemplates(ctx context.Context, c client
 	return manifests, nil
 }
 
-func (cib *ClusterInstanceBuilder) render(templateKey, templateStr string, data *ClusterData) (map[string]interface{}, error) {
+func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterData) (map[string]interface{}, error) {
 	renderedTemplate := make(map[string]interface{})
 	fMap := funcMap()
 	t, err := template.New(templateKey).Funcs(fMap).Parse(templateStr)
@@ -160,16 +158,16 @@ func (cib *ClusterInstanceBuilder) render(templateKey, templateStr string, data 
 		return nil, err
 	}
 
-	var b bytes.Buffer
-	err = t.Execute(&b, data)
+	var buffer bytes.Buffer
+	err = t.Execute(&buffer, data)
 	if err != nil {
 		return nil, err
 	}
 
 	// Ensure there's non-whitespace content
-	for _, r := range b.String() {
+	for _, r := range buffer.String() {
 		if !unicode.IsSpace(r) {
-			if err := yaml.Unmarshal(b.Bytes(), &renderedTemplate); err != nil {
+			if err := yaml.Unmarshal(buffer.Bytes(), &renderedTemplate); err != nil {
 				return renderedTemplate, err
 			}
 			return renderedTemplate, nil

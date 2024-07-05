@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -57,13 +58,13 @@ var _ = Describe("Reconcile", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder := NewClusterInstanceBuilder(testLogger)
+		testLogger := ctrl.Log.WithName("TemplateEngine")
+		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
-			Client:    c,
-			Scheme:    scheme.Scheme,
-			Log:       testLogger,
-			ScBuilder: scBuilder,
+			Client:     c,
+			Scheme:     scheme.Scheme,
+			Log:        testLogger,
+			TmplEngine: tmplEngine,
 		}
 
 		pullSecret = &corev1.Secret{
@@ -98,7 +99,7 @@ var _ = Describe("Reconcile", func() {
 		}
 	})
 
-	It("creates the correct SiteConfig manifest", func() {
+	It("creates the correct ClusterInstance manifest", func() {
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		key := types.NamespacedName{
@@ -110,7 +111,7 @@ var _ = Describe("Reconcile", func() {
 		Expect(res).To(Equal(ctrl.Result{}))
 	})
 
-	It("doesn't error for a missing SiteConfig", func() {
+	It("doesn't error for a missing ClusterInstance", func() {
 		key := types.NamespacedName{
 			Namespace: clusterName,
 			Name:      clusterNamespace,
@@ -135,17 +136,17 @@ var _ = Describe("handleFinalizer", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder := NewClusterInstanceBuilder(testLogger)
+		testLogger := ctrl.Log.WithName("TemplateEngine")
+		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
-			Client:    c,
-			Scheme:    scheme.Scheme,
-			Log:       testLogger,
-			ScBuilder: scBuilder,
+			Client:     c,
+			Scheme:     scheme.Scheme,
+			Log:        testLogger,
+			TmplEngine: tmplEngine,
 		}
 	})
 
-	It("adds the finalizer if the SiteConfig is not being deleted", func() {
+	It("adds the finalizer if the ClusterInstance is not being deleted", func() {
 		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clusterName,
@@ -390,27 +391,27 @@ var _ = Describe("handleValidate", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder := NewClusterInstanceBuilder(testLogger)
+		testLogger := ctrl.Log.WithName("TemplateEngine")
+		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
-			Client:    c,
-			Scheme:    scheme.Scheme,
-			Log:       testLogger,
-			ScBuilder: scBuilder,
+			Client:     c,
+			Scheme:     scheme.Scheme,
+			Log:        testLogger,
+			TmplEngine: tmplEngine,
 		}
 
-		bmc = getMockBmcSecret(bmcCredentialsName, clusterNamespace)
-		clusterImageSet = getMockClusterImageSet(clusterImageSetName)
-		pullSecret = getMockPullSecret("pull-secret", clusterNamespace)
-		clusterTemplate = getMockClusterTemplate(clusterTemplateRef, clusterNamespace)
-		nodeTemplate = getMockNodeTemplate(nodeTemplateRef, clusterNamespace)
-		extraManifest = getMockExtraManifest(extraManifestName, clusterNamespace)
+		bmc = ci.GetMockBmcSecret(bmcCredentialsName, clusterNamespace)
+		clusterImageSet = ci.GetMockClusterImageSet(clusterImageSetName)
+		pullSecret = ci.GetMockPullSecret("pull-secret", clusterNamespace)
+		clusterTemplate = ci.GetMockClusterTemplate(clusterTemplateRef, clusterNamespace)
+		nodeTemplate = ci.GetMockNodeTemplate(nodeTemplateRef, clusterNamespace)
+		extraManifest = ci.GetMockExtraManifest(extraManifestName, clusterNamespace)
 
-		SetupTestPrereqs(ctx, c, bmc, pullSecret, clusterImageSet, clusterTemplate, nodeTemplate, extraManifest)
-		clusterInstance = getMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
+		ci.SetupTestPrereqs(ctx, c, bmc, pullSecret, clusterImageSet, clusterTemplate, nodeTemplate, extraManifest)
+		clusterInstance = ci.GetMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
 	})
 
-	It("successfully sets the SiteConfigValidated condition to true for a valid SiteConfig", func() {
+	It("successfully sets the ClusterInstanceValidated condition to true for a valid ClusterInstance", func() {
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		err := r.handleValidate(ctx, clusterInstance)
@@ -430,7 +431,7 @@ var _ = Describe("handleValidate", func() {
 		Expect(matched).To(BeTrue())
 	})
 
-	It("successfully sets the SiteConfigValidated condition to false for an invalid SiteConfig", func() {
+	It("successfully sets the ClusterInstanceValidated condition to false for an invalid ClusterInstance", func() {
 		clusterInstance.Spec.ClusterName = ""
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
@@ -451,7 +452,7 @@ var _ = Describe("handleValidate", func() {
 		Expect(matched).To(BeTrue())
 	})
 
-	It("does not require a reconcile when the SiteConfigValidated condition remains unchanged", func() {
+	It("does not require a reconcile when the ClusterInstanceValidated condition remains unchanged", func() {
 		clusterInstance.Status.Conditions = []metav1.Condition{
 			{
 				Type:    string(conditions.ClusterInstanceValidated),
@@ -479,7 +480,7 @@ var _ = Describe("handleValidate", func() {
 		Expect(matched).To(BeTrue())
 	})
 
-	It("requires a reconcile when the SiteConfigValidated condition has changed", func() {
+	It("requires a reconcile when the ClusterInstanceValidated condition has changed", func() {
 		clusterInstance.Status.Conditions = []metav1.Condition{
 			{
 				Type:    string(conditions.ClusterInstanceValidated),
@@ -535,24 +536,24 @@ var _ = Describe("handleRenderTemplates", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder := NewClusterInstanceBuilder(testLogger)
+		testLogger := ctrl.Log.WithName("TemplateEngine")
+		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
-			Client:    c,
-			Scheme:    scheme.Scheme,
-			Log:       testLogger,
-			ScBuilder: scBuilder,
+			Client:     c,
+			Scheme:     scheme.Scheme,
+			Log:        testLogger,
+			TmplEngine: tmplEngine,
 		}
 
-		bmc = getMockBmcSecret(bmcCredentialsName, clusterNamespace)
-		clusterImageSet := getMockClusterImageSet(clusterImageSetName)
-		pullSecret = getMockPullSecret("pull-secret", clusterNamespace)
-		clusterTemplate = getMockClusterTemplate(clusterTemplateRef, clusterNamespace)
-		nodeTemplate = getMockNodeTemplate(nodeTemplateRef, clusterNamespace)
-		extraManifest = getMockExtraManifest(extraManifestName, clusterNamespace)
+		bmc = ci.GetMockBmcSecret(bmcCredentialsName, clusterNamespace)
+		clusterImageSet := ci.GetMockClusterImageSet(clusterImageSetName)
+		pullSecret = ci.GetMockPullSecret("pull-secret", clusterNamespace)
+		clusterTemplate = ci.GetMockClusterTemplate(clusterTemplateRef, clusterNamespace)
+		nodeTemplate = ci.GetMockNodeTemplate(nodeTemplateRef, clusterNamespace)
+		extraManifest = ci.GetMockExtraManifest(extraManifestName, clusterNamespace)
 
-		SetupTestPrereqs(ctx, c, bmc, pullSecret, clusterImageSet, clusterTemplate, nodeTemplate, extraManifest)
-		clusterInstance = getMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
+		ci.SetupTestPrereqs(ctx, c, bmc, pullSecret, clusterImageSet, clusterTemplate, nodeTemplate, extraManifest)
+		clusterInstance = ci.GetMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
 	})
 
 	It("fails to render templates and updates the status correctly", func() {
@@ -723,13 +724,13 @@ var _ = Describe("updateSuppressedManifestsStatus", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder := NewClusterInstanceBuilder(testLogger)
+		testLogger := ctrl.Log.WithName("TemplateEngine")
+		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
-			Client:    c,
-			Scheme:    scheme.Scheme,
-			Log:       testLogger,
-			ScBuilder: scBuilder,
+			Client:     c,
+			Scheme:     scheme.Scheme,
+			Log:        testLogger,
+			TmplEngine: tmplEngine,
 		}
 
 		clusterInstance = &v1alpha1.ClusterInstance{
@@ -916,64 +917,64 @@ var _ = DescribeTable("groupAndSortManifests",
 	},
 
 	Entry("missing field 'kind'", []interface{}{
-		map[string]interface{}{"apiVersion": "animal", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
-		map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "0"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
+		map[string]interface{}{"apiVersion": "animal", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
+		map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
+		map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
 	}, nil, true),
 
 	Entry("all wave annotations supplied", []interface{}{
-		map[string]interface{}{"apiVersion": "car", "kind": "mercedez", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "2"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "dog", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
-		map[string]interface{}{"apiVersion": "car", "kind": "mazda", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "2"}}},
-		map[string]interface{}{"apiVersion": "fruit", "kind": "banana", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "0"}}},
-		map[string]interface{}{"apiVersion": "fruit", "kind": "apple", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "0"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "cat", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
-		map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "0"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
+		map[string]interface{}{"apiVersion": "car", "kind": "mercedez", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
+		map[string]interface{}{"apiVersion": "animal", "kind": "dog", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
+		map[string]interface{}{"apiVersion": "car", "kind": "mazda", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
+		map[string]interface{}{"apiVersion": "fruit", "kind": "banana", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
+		map[string]interface{}{"apiVersion": "fruit", "kind": "apple", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
+		map[string]interface{}{"apiVersion": "animal", "kind": "cat", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
+		map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
+		map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
 	}, map[int][]interface{}{
 		0: {
-			map[string]interface{}{"apiVersion": "fruit", "kind": "apple", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "0"}}},
-			map[string]interface{}{"apiVersion": "fruit", "kind": "banana", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "0"}}},
-			map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "0"}}},
+			map[string]interface{}{"apiVersion": "fruit", "kind": "apple", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
+			map[string]interface{}{"apiVersion": "fruit", "kind": "banana", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
+			map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
 		},
 
 		1: {
-			map[string]interface{}{"apiVersion": "animal", "kind": "cat", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
-			map[string]interface{}{"apiVersion": "animal", "kind": "dog", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
-			map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
+			map[string]interface{}{"apiVersion": "animal", "kind": "cat", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
+			map[string]interface{}{"apiVersion": "animal", "kind": "dog", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
+			map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
 		},
 
 		2: {
-			map[string]interface{}{"apiVersion": "car", "kind": "mazda", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "2"}}},
-			map[string]interface{}{"apiVersion": "car", "kind": "mercedez", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "2"}}},
+			map[string]interface{}{"apiVersion": "car", "kind": "mazda", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
+			map[string]interface{}{"apiVersion": "car", "kind": "mercedez", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
 		},
 	}, false),
 
 	Entry("test that default wave annotation is applied if not defined", []interface{}{
 		map[string]interface{}{"apiVersion": "fruit", "kind": "banana"},
 		map[string]interface{}{"apiVersion": "fruit", "kind": "apple"},
-		map[string]interface{}{"apiVersion": "car", "kind": "mercedez", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "2"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "dog", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
-		map[string]interface{}{"apiVersion": "car", "kind": "mazda", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "2"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "cat", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
-		map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "0"}}},
+		map[string]interface{}{"apiVersion": "car", "kind": "mercedez", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
+		map[string]interface{}{"apiVersion": "animal", "kind": "dog", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
+		map[string]interface{}{"apiVersion": "car", "kind": "mazda", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
+		map[string]interface{}{"apiVersion": "animal", "kind": "cat", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
+		map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
+		map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
 	}, map[int][]interface{}{
 		0: {
 			map[string]interface{}{"apiVersion": "fruit", "kind": "apple"},
 			map[string]interface{}{"apiVersion": "fruit", "kind": "banana"},
-			map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "0"}}},
+			map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
 		},
 
 		1: {
-			map[string]interface{}{"apiVersion": "animal", "kind": "cat", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
-			map[string]interface{}{"apiVersion": "animal", "kind": "dog", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
-			map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "1"}}},
+			map[string]interface{}{"apiVersion": "animal", "kind": "cat", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
+			map[string]interface{}{"apiVersion": "animal", "kind": "dog", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
+			map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
 		},
 
 		2: {
-			map[string]interface{}{"apiVersion": "car", "kind": "mazda", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "2"}}},
-			map[string]interface{}{"apiVersion": "car", "kind": "mercedez", "metadata": map[string]interface{}{"annotations": map[string]interface{}{WaveAnnotation: "2"}}},
+			map[string]interface{}{"apiVersion": "car", "kind": "mazda", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
+			map[string]interface{}{"apiVersion": "car", "kind": "mercedez", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
 		},
 	}, false),
 )
@@ -1011,13 +1012,13 @@ var _ = Describe("executeRenderedManifests", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("SiteConfigBuilder")
-		scBuilder := NewClusterInstanceBuilder(testLogger)
+		testLogger := ctrl.Log.WithName("TemplateEngine")
+		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
-			Client:    c,
-			Scheme:    scheme.Scheme,
-			Log:       testLogger,
-			ScBuilder: scBuilder,
+			Client:     c,
+			Scheme:     scheme.Scheme,
+			Log:        testLogger,
+			TmplEngine: tmplEngine,
 		}
 
 		clusterInstance = &v1alpha1.ClusterInstance{
@@ -1051,7 +1052,7 @@ var _ = Describe("executeRenderedManifests", func() {
 		Expect(result).To(BeTrue())
 		Expect(called).To(BeTrue())
 
-		// Verify SiteConfig status
+		// Verify ClusterInstance status
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 		Expect(manifest).ToNot(Equal(nil))
@@ -1078,7 +1079,7 @@ var _ = Describe("executeRenderedManifests", func() {
 		Expect(result).To(BeFalse())
 		Expect(called).To(BeTrue())
 
-		// Verify SiteConfig status
+		// Verify ClusterInstance status
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 		Expect(manifest).ToNot(Equal(nil))
@@ -1106,7 +1107,7 @@ var _ = Describe("executeRenderedManifests", func() {
 		Expect(result).To(BeTrue())
 		Expect(called).To(BeTrue())
 
-		// Verify SiteConfig status
+		// Verify ClusterInstance status
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 		Expect(manifest).ToNot(Equal(nil))
@@ -1133,7 +1134,7 @@ var _ = Describe("executeRenderedManifests", func() {
 		Expect(result).To(BeFalse())
 		Expect(called).To(BeTrue())
 
-		// Verify SiteConfig status
+		// Verify ClusterInstance status
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 		Expect(manifest).ToNot(Equal(nil))

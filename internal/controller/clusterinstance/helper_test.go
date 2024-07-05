@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package clusterinstance
 
 import (
 	"fmt"
@@ -50,7 +50,7 @@ func Test_getInstallConfigOverrides(t *testing.T) {
 			CPUPartitioning:       v1alpha1.CPUPartitioningNone,
 			expected:              "",
 			error:                 fmt.Errorf("invalid json parameter set at installConfigOverride"),
-			name:                  "invalid JSON set in installConfigOverride at SiteConfig",
+			name:                  "invalid JSON set in installConfigOverride at ClusterInstance",
 		},
 
 		{
@@ -175,7 +175,7 @@ func Test_buildClusterData(t *testing.T) {
 				},
 			},
 			error: nil,
-			name:  "single master-node SiteConfig with nodeId undefined",
+			name:  "single master-node ClusterInstance with nodeId undefined",
 		},
 
 		{
@@ -239,7 +239,7 @@ func Test_buildClusterData(t *testing.T) {
 				},
 			},
 			error: nil,
-			name:  "3 node (2 master, 1 worker) SiteConfig with nodeId set to first node",
+			name:  "3 node (2 master, 1 worker) ClusterInstance with nodeId set to first node",
 		},
 	}
 

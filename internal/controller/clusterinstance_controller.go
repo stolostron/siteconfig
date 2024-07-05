@@ -18,12 +18,14 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	"golang.org/x/exp/maps"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -45,10 +47,10 @@ const clusterInstanceFinalizer = "clusterinstance." + v1alpha1.Group + "/finaliz
 // ClusterInstanceReconciler reconciles a ClusterInstance object
 type ClusterInstanceReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	Recorder  record.EventRecorder
-	Log       logr.Logger
-	ScBuilder *ClusterInstanceBuilder
+	Scheme     *runtime.Scheme
+	Recorder   record.EventRecorder
+	Log        logr.Logger
+	TmplEngine *ci.TemplateEngine
 }
 
 //nolint:unused
@@ -234,7 +236,7 @@ func (r *ClusterInstanceReconciler) handleValidate(ctx context.Context, clusterI
 
 	newCond := metav1.Condition{Type: string(conditions.ClusterInstanceValidated)}
 	r.Log.Info("Starting validation", "ClusterInstance", clusterInstance.Name)
-	err := validateClusterInstance(ctx, r.Client, clusterInstance)
+	err := ci.Validate(ctx, r.Client, clusterInstance)
 	if err != nil {
 		r.Log.Error(err, "ClusterInstance validation failed due to error", "ClusterInstance", clusterInstance.Name)
 
@@ -267,7 +269,7 @@ func (r *ClusterInstanceReconciler) renderManifests(ctx context.Context, cluster
 	r.Log.Info(fmt.Sprintf("Rendering templates for ClusterInstance %s", clusterInstance.Name))
 
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
-	renderedManifests, err := r.ScBuilder.ProcessTemplates(ctx, r.Client, *clusterInstance)
+	renderedManifests, err := r.TmplEngine.ProcessTemplates(ctx, r.Client, *clusterInstance)
 	if err != nil {
 		r.Log.Error(err, "Failed to render manifests", "ClusterInstance", clusterInstance.Name)
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
@@ -309,17 +311,17 @@ func groupAndSortManifests(manifests []interface{}) (map[int][]interface{}, erro
 			return nil, fmt.Errorf("missing field `kind` from rendered manifest")
 		}
 
-		syncWaveStr = DefaultWaveAnnotation
+		syncWaveStr = ci.DefaultWaveAnnotation
 		if metadata, ok := manifest["metadata"].(map[string]interface{}); ok {
 			if annotations, ok := metadata["annotations"].(map[string]interface{}); ok {
-				if syncWaveStr, ok = annotations[WaveAnnotation].(string); !ok {
-					syncWaveStr = DefaultWaveAnnotation
+				if syncWaveStr, ok = annotations[ci.WaveAnnotation].(string); !ok {
+					syncWaveStr = ci.DefaultWaveAnnotation
 				}
 			}
 		}
 
 		if syncWave, err := strconv.Atoi(syncWaveStr); err != nil {
-			return nil, fmt.Errorf("failed to extract annotation %s in resource %s", WaveAnnotation, kind)
+			return nil, fmt.Errorf("failed to extract annotation %s in resource %s", ci.WaveAnnotation, kind)
 		} else {
 			// check if the key exists in the map
 			if _, ok := manifestGroups[syncWave]; !ok {
@@ -376,6 +378,17 @@ func createOrPatch(ctx context.Context, c client.Client, obj unstructured.Unstru
 	}
 
 	return controllerutil.OperationResultUpdated, nil
+}
+
+func toUnstructured(obj interface{}) (unstructured.Unstructured, error) {
+	var uObj unstructured.Unstructured
+	// Marshal the input object to JSON
+	if content, err := json.Marshal(obj); err != nil {
+		return uObj, err
+	} else if err = json.Unmarshal(content, &uObj); err != nil {
+		return uObj, err
+	}
+	return uObj, nil
 }
 
 func (r *ClusterInstanceReconciler) executeRenderedManifests(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance, manifestGroups map[int][]interface{}, manifestStatus string) (bool, error) {

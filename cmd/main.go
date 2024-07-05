@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/retry"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -121,19 +122,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	log := ctrl.Log.WithName("controllers").WithName("SiteConfig")
-
 	if err := initConfigMapTemplates(context.TODO(), mgr.GetClient(), setupLog); err != nil {
 		setupLog.Error(err, "unable to initialize default reference ConfigMap templates")
 		os.Exit(1)
 	}
 
+	log := ctrl.Log.WithName("controllers").WithName("ClusterInstance")
 	if err = (&controller.ClusterInstanceReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Recorder:  mgr.GetEventRecorderFor("ClusterInstance-controller"),
-		Log:       log,
-		ScBuilder: controller.NewClusterInstanceBuilder(log.WithName("ClusterInstanceBuilder")),
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Recorder:   mgr.GetEventRecorderFor("ClusterInstance-controller"),
+		Log:        log,
+		TmplEngine: ci.NewTemplateEngine(log.WithName("ClusterInstance.TemplateEngine")),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterInstance")
 		os.Exit(1)

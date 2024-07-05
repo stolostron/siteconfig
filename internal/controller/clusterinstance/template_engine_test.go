@@ -14,11 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package clusterinstance
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"testing"
 
@@ -26,7 +25,6 @@ import (
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	aiv1beta1 "github.com/openshift/assisted-service/api/v1beta1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
-	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -38,142 +36,9 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func getMockAgentClusterInstallTemplate() string {
-	return `apiVersion: extensions.hive.openshift.io/v1beta1
-kind: AgentClusterInstall
-metadata:
-  name: "{{ .Site.ClusterName }}"
-  namespace: "{{ .Site.ClusterName }}"
-  annotations:
-{{ if .SpecialVars.InstallConfigOverrides }}
-    agent-install.openshift.io/install-config-overrides: '{{ .SpecialVars.InstallConfigOverrides }}'
-{{ end }}
-    siteconfig.open-cluster-management.io/sync-wave: "1"
-spec:
-  clusterDeploymentRef:
-    name: "{{ .Site.ClusterName }}"
-  holdInstallation: {{ .Site.HoldInstallation }}
-  imageSetRef:
-    name: "{{ .Site.ClusterImageSetNameRef }}"
-{{ if .Site.ApiVIPs }}
-  apiVIPs:
-{{ .Site.ApiVIPs | toYaml | indent 4 }}
-{{ end }}
-{{ if .Site.IngressVIPs }}
-  ingressVIPs:
-{{ .Site.IngressVIPs | toYaml | indent 4 }}
-{{ end }}
-  networking:
-{{ if .Site.ClusterNetwork }}
-    clusterNetwork:
-{{ .Site.ClusterNetwork | toYaml | indent 6 }}
-{{ end }}
-{{ if .Site.MachineNetwork }}
-    machineNetwork:
-{{ .Site.MachineNetwork | toYaml | indent 6 }}
-{{ end }}
-{{ if .Site.ServiceNetwork }}
-    serviceNetwork:
-{{ $serviceNetworks := list }}
-{{ range .Site.ServiceNetwork }}
-{{ $serviceNetworks = append $serviceNetworks .CIDR }}
-{{ end }}
-{{ $serviceNetworks | toYaml | indent 6 }}
-{{ end }}
-  provisionRequirements:
-    controlPlaneAgents: {{ .SpecialVars.ControlPlaneAgents }}
-    workerAgents: {{ .SpecialVars.WorkerAgents }}
-{{ if (anyFieldDefined .Site.Proxy) }}
-  proxy:
-{{ .Site.Proxy | toYaml | indent 4 }}
-{{ end }}
-  sshPublicKey: "{{ .Site.SSHPublicKey }}"
-  manifestsConfigMapRef:
-    name: "{{ .Site.ClusterName }}"`
-}
+func TestTemplateEngine_render(t *testing.T) {
 
-func getMockNMStateConfigTemplate() string {
-	return `apiVersion: agent-install.openshift.io/v1beta1
-kind: NMStateConfig
-metadata:
-  annotations:
-    siteconfig.open-cluster-management.io/sync-wave: "1"
-  name: "{{ .SpecialVars.CurrentNode.HostName }}"
-  namespace: "{{ .Site.ClusterName }}"
-  labels:
-    nmstate-label: "{{ .Site.ClusterName }}"
-spec:
-  config:
-{{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig  | toYaml | indent 4}}
-  interfaces:
-{{ .SpecialVars.CurrentNode.NodeNetwork.Interfaces | toYaml | indent 4 }}`
-}
-
-type NetConfigData struct {
-	Interfaces []*aiv1beta1.Interface
-	Config     map[string]interface{}
-}
-
-func (nc *NetConfigData) RawNetConfig() string {
-	b, err := yaml.Marshal(nc.Config)
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
-func (nc *NetConfigData) GetInterfaces() []interface{} {
-	interfaces := make([]interface{}, len(nc.Interfaces))
-	for i, intf := range nc.Interfaces {
-		interfaces[i] = map[string]interface{}{"name": intf.Name, "macAddress": intf.MacAddress}
-	}
-	return interfaces
-}
-
-func getMockNetConfig() *NetConfigData {
-	netConf := &NetConfigData{}
-
-	netConf.Config = map[string]interface{}{
-		"interfaces": []interface{}{
-			map[string]interface{}{
-				"name": "eno1",
-				"type": "ethernet",
-				"ipv4": map[string]interface{}{"dhcp": false, "enabled": true, "address": []interface{}{
-					map[string]interface{}{"ip": "10.16.231.3", "prefix-length": 24},
-					map[string]interface{}{"ip": "10.16.231.28", "prefix-length": 24},
-					map[string]interface{}{"ip": "10.16.231.31", "prefix-length": 24},
-				}},
-				"ipv6": map[string]interface{}{"dhcp": false, "enabled": true, "address": []interface{}{
-					map[string]interface{}{"ip": "2620:52:0:10e7:e42:a1ff:fe8a:601", "prefix-length": 64},
-					map[string]interface{}{"ip": "2620:52:0:10e7:e42:a1ff:fe8a:602", "prefix-length": 64},
-					map[string]interface{}{"ip": "2620:52:0:10e7:e42:a1ff:fe8a:603", "prefix-length": 64}},
-				}},
-			map[string]interface{}{
-				"name":  "bond99",
-				"type":  "bond",
-				"state": "up",
-				"ipv6": map[string]interface{}{
-					"enabled":          true,
-					"link-aggregation": map[string]interface{}{"mode": "balance-rr", "options": map[string]interface{}{"miimon": "140"}, "slaves": []interface{}{"eth0", "eth1"}},
-					"address":          []interface{}{map[string]interface{}{"ip": "2620:52:0:1302::100", "prefix-length": 64}}}},
-		},
-		"dns-resolver": map[string]interface{}{"config": map[string]interface{}{"server": []interface{}{"10.19.42.41"}}},
-		"routes": map[string]interface{}{
-			"config": []interface{}{map[string]interface{}{"destination": "0.0.0.0/0", "next-hop-address": "10.16.231.254", "next-hop-interface": "eno1", "table-id": 254}},
-		},
-	}
-
-	netConf.Interfaces = []*aiv1beta1.Interface{
-		{Name: "eno1", MacAddress: "02:00:00:80:12:13"},
-		{Name: "bond99", MacAddress: "02:00:00:80:12:14"},
-	}
-
-	return netConf
-}
-
-func TestClusterInstanceBuilder_render(t *testing.T) {
-
-	NetConfig := getMockNetConfig()
+	NetConfig := GetMockNetConfig()
 	TestClusterInstance := &v1alpha1.ClusterInstance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "site-sno-du-1",
@@ -254,7 +119,7 @@ func TestClusterInstanceBuilder_render(t *testing.T) {
 			name: "Test with a valid AgentClusterInstall-like template",
 			args: args{
 				templateType: "AgentClusterInstall",
-				templateStr:  getMockAgentClusterInstallTemplate(),
+				templateStr:  GetMockAgentClusterInstallTemplate(),
 				data:         TestData,
 			},
 			want: map[string]interface{}{
@@ -287,7 +152,7 @@ func TestClusterInstanceBuilder_render(t *testing.T) {
 			name: "Test with valid NMState-like template",
 			args: args{
 				templateType: "NMStateConfig",
-				templateStr:  getMockNMStateConfigTemplate(),
+				templateStr:  GetMockNMStateConfigTemplate(),
 				data:         TestData,
 			},
 			want: map[string]interface{}{
@@ -310,41 +175,27 @@ func TestClusterInstanceBuilder_render(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scbuilder := &ClusterInstanceBuilder{
+			tmplEngine := &TemplateEngine{
 				Log: tt.fields.Log,
 			}
-			got, err := scbuilder.render(tt.args.templateType, tt.args.templateStr, tt.args.data)
+			got, err := tmplEngine.render(tt.args.templateType, tt.args.templateStr, tt.args.data)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ClusterInstanceBuilder.render() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("TemplateEngine.render() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ClusterInstanceBuilder.render() = %v, want %v", got, tt.want)
+				t.Errorf("TemplateEngine.render() = %v, want %v", got, tt.want)
 			}
 		})
 	}
-}
-
-func getMockBasicClusterTemplate(kind string) string {
-	return fmt.Sprintf(`apiVersion: test.io/v1
-kind: %s
-spec:
-  name: "{{ .Site.ClusterName }}"`, kind)
-}
-
-func getMockBasicNodeTemplate(kind string) string {
-	return fmt.Sprintf(`apiVersion: test.io/v1
-kind: %s
-spec:
-  name: "{{ .SpecialVars.CurrentNode.HostName }}"`, kind)
 }
 
 var _ = Describe("renderTemplates", func() {
 	var (
 		c                   client.Client
 		ctx                 = context.Background()
-		scBuilder           *ClusterInstanceBuilder
+		tmplEngine          *TemplateEngine
 		TestClusterInstance *v1alpha1.ClusterInstance
 	)
 
@@ -354,8 +205,8 @@ var _ = Describe("renderTemplates", func() {
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 
-		testLogger := ctrl.Log.WithName("ClusterInstanceBuilder")
-		scBuilder = NewClusterInstanceBuilder(testLogger)
+		testLogger := ctrl.Log.WithName("TemplateEngine")
+		tmplEngine = NewTemplateEngine(testLogger)
 
 		TestClusterInstance = &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
@@ -374,7 +225,7 @@ var _ = Describe("renderTemplates", func() {
 	It("fails when the template reference cannot be retrieved", func() {
 		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{{Name: "does-not-exist", Namespace: "test"}}
 
-		_, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, nil)
+		_, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).To(HaveOccurred())
 	})
 
@@ -386,13 +237,13 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA": getMockBasicClusterTemplate("TestA"),
+				"TestA": GetMockBasicClusterTemplate("TestA"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
 		TestClusterInstance.Spec.InstallConfigOverrides = "{foobar}"
-		_, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, nil)
+		_, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("invalid json parameter set at installConfigOverride")))
 	})
@@ -410,7 +261,7 @@ var _ = Describe("renderTemplates", func() {
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
-		_, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, nil)
+		_, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("field doesNotExist")))
 	})
@@ -424,15 +275,15 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA_Foobar": getMockBasicClusterTemplate("TestA"),
-				"TestB":        getMockBasicClusterTemplate("TestB"),
+				"TestA_Foobar": GetMockBasicClusterTemplate("TestA"),
+				"TestB":        GetMockBasicClusterTemplate("TestB"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
 		TestClusterInstance.Spec.SuppressedManifests = []string{"TestA", "TestC"}
 
-		got, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, nil)
+		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(1))
@@ -455,15 +306,15 @@ var _ = Describe("renderTemplates", func() {
 		nodeTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "node-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestC": getMockBasicNodeTemplate("TestC"),
-				"TestD": getMockBasicNodeTemplate("TestD"),
+				"TestC": GetMockBasicNodeTemplate("TestC"),
+				"TestD": GetMockBasicNodeTemplate("TestD"),
 			},
 		}
 		Expect(c.Create(ctx, nodeTemplates)).To(Succeed())
 
 		node.SuppressedManifests = []string{"TestA", "TestC"}
 
-		got, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, node)
+		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(1))
@@ -485,7 +336,7 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"Cluster": getMockBasicClusterTemplate("Cluster"),
+				"Cluster": GetMockBasicClusterTemplate("Cluster"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
@@ -496,7 +347,7 @@ var _ = Describe("renderTemplates", func() {
 				"extra-annotation-l2": "test",
 			},
 		}
-		got, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, nil)
+		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(1))
@@ -524,7 +375,7 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "node-level", Namespace: "test"},
 			Data: map[string]string{
-				"Node": getMockBasicNodeTemplate("Node"),
+				"Node": GetMockBasicNodeTemplate("Node"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
@@ -536,7 +387,7 @@ var _ = Describe("renderTemplates", func() {
 				"extra-node-annotation-l2": "test",
 			},
 		}
-		got, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, node)
+		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(1))
@@ -564,7 +415,7 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "node-level", Namespace: "test"},
 			Data: map[string]string{
-				"Node": getMockBasicNodeTemplate("Node"),
+				"Node": GetMockBasicNodeTemplate("Node"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
@@ -576,7 +427,7 @@ var _ = Describe("renderTemplates", func() {
 				"extra-node-annotation-l2": "test",
 			},
 		}
-		got, err := scBuilder.renderTemplates(ctx, c, TestClusterInstance, node)
+		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(1))
@@ -601,7 +452,7 @@ var _ = Describe("ProcessTemplates", func() {
 	var (
 		c                   client.Client
 		ctx                 = context.Background()
-		scBuilder           *ClusterInstanceBuilder
+		tmplEngine          *TemplateEngine
 		TestClusterInstance v1alpha1.ClusterInstance
 	)
 
@@ -611,8 +462,8 @@ var _ = Describe("ProcessTemplates", func() {
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 
-		testLogger := ctrl.Log.WithName("ClusterInstanceBuilder")
-		scBuilder = NewClusterInstanceBuilder(testLogger)
+		testLogger := ctrl.Log.WithName("TemplateEngine")
+		tmplEngine = NewTemplateEngine(testLogger)
 
 		TestClusterInstance = v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
@@ -633,7 +484,7 @@ var _ = Describe("ProcessTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA": getMockBasicClusterTemplate("TestA"),
+				"TestA": GetMockBasicClusterTemplate("TestA"),
 				"TestB": `{{.foobar}}`,
 			},
 		}
@@ -643,7 +494,7 @@ var _ = Describe("ProcessTemplates", func() {
 			{Name: "cluster-level", Namespace: "test"},
 		}
 
-		_, err := scBuilder.ProcessTemplates(ctx, c, TestClusterInstance)
+		_, err := tmplEngine.ProcessTemplates(ctx, c, TestClusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("can't evaluate field")))
 	})
@@ -653,7 +504,7 @@ var _ = Describe("ProcessTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA": getMockBasicClusterTemplate("TestA"),
+				"TestA": GetMockBasicClusterTemplate("TestA"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
@@ -667,7 +518,7 @@ var _ = Describe("ProcessTemplates", func() {
 		nodeTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "node-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestC": getMockBasicNodeTemplate("TestC"),
+				"TestC": GetMockBasicNodeTemplate("TestC"),
 				"TestD": `{{.foobar}}`,
 			},
 		}
@@ -676,7 +527,7 @@ var _ = Describe("ProcessTemplates", func() {
 			{Name: "node-level", Namespace: "test"},
 		}
 
-		_, err := scBuilder.ProcessTemplates(ctx, c, TestClusterInstance)
+		_, err := tmplEngine.ProcessTemplates(ctx, c, TestClusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("can't evaluate field")))
 	})
@@ -687,8 +538,8 @@ var _ = Describe("ProcessTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA": getMockBasicClusterTemplate("TestA"),
-				"TestB": getMockBasicClusterTemplate("TestB"),
+				"TestA": GetMockBasicClusterTemplate("TestA"),
+				"TestB": GetMockBasicClusterTemplate("TestB"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
@@ -705,8 +556,8 @@ var _ = Describe("ProcessTemplates", func() {
 		nodeTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "node-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestC": getMockBasicNodeTemplate("TestC"),
-				"TestD": getMockBasicNodeTemplate("TestD"),
+				"TestC": GetMockBasicNodeTemplate("TestC"),
+				"TestD": GetMockBasicNodeTemplate("TestD"),
 			},
 		}
 		Expect(c.Create(ctx, nodeTemplates)).To(Succeed())
@@ -727,7 +578,7 @@ var _ = Describe("ProcessTemplates", func() {
 			},
 		}
 
-		got, err := scBuilder.ProcessTemplates(ctx, c, TestClusterInstance)
+		got, err := tmplEngine.ProcessTemplates(ctx, c, TestClusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify manifest suppression
