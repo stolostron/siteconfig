@@ -18,12 +18,14 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	"golang.org/x/exp/maps"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -40,15 +42,15 @@ import (
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 )
 
-const siteConfigFinalizer = "siteconfig.open-cluster-management.io/finalizer"
+const clusterInstanceFinalizer = "clusterinstance." + v1alpha1.Group + "/finalizer"
 
-// SiteConfigReconciler reconciles a SiteConfig object
-type SiteConfigReconciler struct {
+// ClusterInstanceReconciler reconciles a ClusterInstance object
+type ClusterInstanceReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	Recorder  record.EventRecorder
-	Log       logr.Logger
-	ScBuilder *SiteConfigBuilder
+	Scheme     *runtime.Scheme
+	Recorder   record.EventRecorder
+	Log        logr.Logger
+	TmplEngine *ci.TemplateEngine
 }
 
 //nolint:unused
@@ -88,9 +90,9 @@ func requeueWithCustomInterval(interval time.Duration) ctrl.Result {
 	return ctrl.Result{RequeueAfter: interval}
 }
 
-//+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=siteconfigs,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=siteconfigs/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=siteconfigs/finalizers,verbs=update
+//+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;create;update;patch;delete
@@ -110,62 +112,62 @@ func requeueWithCustomInterval(interval time.Duration) ctrl.Result {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-func (r *SiteConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	defer func() {
-		r.Log.Info("Finish reconciling SiteConfig", "name", req.NamespacedName)
+		r.Log.Info("Finish reconciling ClusterInstance", "name", req.NamespacedName)
 	}()
 
-	r.Log.Info("Start reconciling SiteConfig", "name", req.NamespacedName)
+	r.Log.Info("Start reconciling ClusterInstance", "name", req.NamespacedName)
 
-	// Get the SiteConfig CR
-	siteConfig := &v1alpha1.SiteConfig{}
-	if err := r.Get(ctx, req.NamespacedName, siteConfig); err != nil {
+	// Get the ClusterInstance CR
+	clusterInstance := &v1alpha1.ClusterInstance{}
+	if err := r.Get(ctx, req.NamespacedName, clusterInstance); err != nil {
 		if errors.IsNotFound(err) {
-			r.Log.Info("SiteConfig not found", "name", req.NamespacedName)
+			r.Log.Info("ClusterInstance not found", "name", req.NamespacedName)
 			return doNotRequeue(), nil
 		}
-		r.Log.Error(err, "Failed to get SiteConfig")
+		r.Log.Error(err, "Failed to get ClusterInstance")
 		// This is likely a case where the API is down, so requeue and try again shortly
 		return requeueWithError(err)
 	}
 
-	r.Log.Info("Loaded SiteConfig", "name", req.NamespacedName, "version", siteConfig.GetResourceVersion())
+	r.Log.Info("Loaded ClusterInstance", "name", req.NamespacedName, "version", clusterInstance.GetResourceVersion())
 
-	if res, stop, err := r.handleFinalizer(ctx, siteConfig); !res.IsZero() || stop || err != nil {
+	if res, stop, err := r.handleFinalizer(ctx, clusterInstance); !res.IsZero() || stop || err != nil {
 		if err != nil {
-			r.Log.Error(err, "Encountered error while handling finalizer", "SiteConfig", req.NamespacedName)
+			r.Log.Error(err, "Encountered error while handling finalizer", "ClusterInstance", req.NamespacedName)
 		}
 		return res, err
 	}
 
-	// Validate SiteConfig
-	if err := r.handleValidate(ctx, siteConfig); err != nil {
+	// Validate ClusterInstance
+	if err := r.handleValidate(ctx, clusterInstance); err != nil {
 		return requeueWithError(err)
 	}
 
 	// Render, validate and apply templates
-	if rendered, err := r.handleRenderTemplates(ctx, siteConfig); err != nil {
+	if rendered, err := r.handleRenderTemplates(ctx, clusterInstance); err != nil {
 		return requeueWithError(err)
 	} else if rendered {
-		r.Log.Info("SiteConfig templates are rendered", "name", req.NamespacedName)
+		r.Log.Info("ClusterInstance templates are rendered", "name", req.NamespacedName)
 	} else {
-		r.Log.Info("Failed to render templates for SiteConfig", "name", req.NamespacedName)
+		r.Log.Info("Failed to render templates for ClusterInstance", "name", req.NamespacedName)
 	}
 
 	// Update manifests' status that have been flagged for suppression
-	if err := r.updateSuppressedManifestsStatus(ctx, siteConfig); err != nil {
+	if err := r.updateSuppressedManifestsStatus(ctx, clusterInstance); err != nil {
 		return requeueWithError(err)
 	}
 
 	return doNotRequeue(), nil
 }
 
-func (r *SiteConfigReconciler) finalizeSiteConfig(ctx context.Context, siteConfig *v1alpha1.SiteConfig) error {
+func (r *ClusterInstanceReconciler) finalizeClusterInstance(ctx context.Context, clusterInstance *v1alpha1.ClusterInstance) error {
 
 	// Group the manifests by the sync-wave
 	// This is so that the manifests can be deleted in descending order of sync-wave
 	manifestGroups := map[int][]v1alpha1.ManifestReference{}
-	for _, manifest := range siteConfig.Status.ManifestsRendered {
+	for _, manifest := range clusterInstance.Status.ManifestsRendered {
 		// check if the key exists in the map
 		if _, ok := manifestGroups[manifest.SyncWave]; !ok {
 			// if key doesn't exist, initialize the slice
@@ -194,68 +196,68 @@ func (r *SiteConfigReconciler) finalizeSiteConfig(ctx context.Context, siteConfi
 			}
 		}
 	}
-	r.Log.Info("Successfully finalized SiteConfig", "name", siteConfig.Name)
+	r.Log.Info("Successfully finalized ClusterInstance", "name", clusterInstance.Name)
 	return nil
 }
 
-func (r *SiteConfigReconciler) handleFinalizer(ctx context.Context, siteConfig *v1alpha1.SiteConfig) (ctrl.Result, bool, error) {
-	// Check if the SiteConfig instance is marked to be deleted, which is
+func (r *ClusterInstanceReconciler) handleFinalizer(ctx context.Context, clusterInstance *v1alpha1.ClusterInstance) (ctrl.Result, bool, error) {
+	// Check if the ClusterInstance is marked to be deleted, which is
 	// indicated by the deletion timestamp being set.
-	if siteConfig.DeletionTimestamp.IsZero() {
+	if clusterInstance.DeletionTimestamp.IsZero() {
 		// Check and add finalizer for this CR.
-		if !controllerutil.ContainsFinalizer(siteConfig, siteConfigFinalizer) {
-			controllerutil.AddFinalizer(siteConfig, siteConfigFinalizer)
+		if !controllerutil.ContainsFinalizer(clusterInstance, clusterInstanceFinalizer) {
+			controllerutil.AddFinalizer(clusterInstance, clusterInstanceFinalizer)
 			// update and requeue since the finalizer is added
-			return ctrl.Result{Requeue: true}, true, r.Update(ctx, siteConfig)
+			return ctrl.Result{Requeue: true}, true, r.Update(ctx, clusterInstance)
 		}
 		return ctrl.Result{}, false, nil
-	} else if controllerutil.ContainsFinalizer(siteConfig, siteConfigFinalizer) {
-		// Run finalization logic for siteConfigFinalizer. If the
+	} else if controllerutil.ContainsFinalizer(clusterInstance, clusterInstanceFinalizer) {
+		// Run finalization logic for clusterInstanceFinalizer. If the
 		// finalization logic fails, don't remove the finalizer so
 		// that we can retry during the next reconciliation.
-		if err := r.finalizeSiteConfig(ctx, siteConfig); err != nil {
+		if err := r.finalizeClusterInstance(ctx, clusterInstance); err != nil {
 			return ctrl.Result{}, true, err
 		}
 
-		// Remove siteConfigFinalizer. Once all finalizers have been
+		// Remove clusterInstanceFinalizer. Once all finalizers have been
 		// removed, the object will be deleted.
-		r.Log.Info("Removing SiteConfig finalizer", "name", siteConfig.Name)
-		patch := client.MergeFrom(siteConfig.DeepCopy())
-		if controllerutil.RemoveFinalizer(siteConfig, siteConfigFinalizer) {
-			return ctrl.Result{}, true, r.Patch(ctx, siteConfig, patch)
+		r.Log.Info("Removing ClusterInstance finalizer", "name", clusterInstance.Name)
+		patch := client.MergeFrom(clusterInstance.DeepCopy())
+		if controllerutil.RemoveFinalizer(clusterInstance, clusterInstanceFinalizer) {
+			return ctrl.Result{}, true, r.Patch(ctx, clusterInstance, patch)
 		}
 	}
 	return ctrl.Result{}, false, nil
 }
 
-func (r *SiteConfigReconciler) handleValidate(ctx context.Context, siteConfig *v1alpha1.SiteConfig) error {
+func (r *ClusterInstanceReconciler) handleValidate(ctx context.Context, clusterInstance *v1alpha1.ClusterInstance) error {
 
-	patch := client.MergeFrom(siteConfig.DeepCopy())
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
 
-	newCond := metav1.Condition{Type: string(conditions.SiteConfigValidated)}
-	r.Log.Info("Starting validation", "SiteConfig", siteConfig.Name)
-	err := validateSiteConfig(ctx, r.Client, siteConfig)
+	newCond := metav1.Condition{Type: string(conditions.ClusterInstanceValidated)}
+	r.Log.Info("Starting validation", "ClusterInstance", clusterInstance.Name)
+	err := ci.Validate(ctx, r.Client, clusterInstance)
 	if err != nil {
-		r.Log.Error(err, "SiteConfig validation failed due to error", "SiteConfig", siteConfig.Name)
+		r.Log.Error(err, "ClusterInstance validation failed due to error", "ClusterInstance", clusterInstance.Name)
 
 		newCond.Reason = string(conditions.Failed)
 		newCond.Status = metav1.ConditionFalse
 		newCond.Message = fmt.Sprintf("Validation failed: %s", err.Error())
 
 	} else {
-		r.Log.Info("Validation succeeded", "SiteConfig", siteConfig.Name)
+		r.Log.Info("Validation succeeded", "ClusterInstance", clusterInstance.Name)
 
 		newCond.Reason = string(conditions.Completed)
 		newCond.Status = metav1.ConditionTrue
 		newCond.Message = "Validation succeeded"
 	}
-	r.Log.Info("Finished validation", "SiteConfig", siteConfig.Name)
+	r.Log.Info("Finished validation", "ClusterInstance", clusterInstance.Name)
 
-	conditions.SetStatusCondition(&siteConfig.Status.Conditions, conditions.ConditionType(newCond.Type), conditions.ConditionReason(newCond.Reason), newCond.Status, newCond.Message)
+	conditions.SetStatusCondition(&clusterInstance.Status.Conditions, conditions.ConditionType(newCond.Type), conditions.ConditionReason(newCond.Reason), newCond.Status, newCond.Message)
 
-	if updateErr := conditions.PatchStatus(ctx, r.Client, siteConfig, patch); updateErr != nil {
+	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			r.Log.Info(fmt.Sprintf("Failed to update SiteConfig %s status after validating SiteConfig, err: %s", siteConfig.Name, updateErr.Error()))
+			r.Log.Info(fmt.Sprintf("Failed to update ClusterInstance %s status after validating ClusterInstance, err: %s", clusterInstance.Name, updateErr.Error()))
 			err = updateErr
 		}
 	}
@@ -263,29 +265,29 @@ func (r *SiteConfigReconciler) handleValidate(ctx context.Context, siteConfig *v
 	return err
 }
 
-func (r *SiteConfigReconciler) renderManifests(ctx context.Context, siteConfig *v1alpha1.SiteConfig) ([]interface{}, error) {
-	r.Log.Info(fmt.Sprintf("Rendering templates for SiteConfig %s", siteConfig.Name))
+func (r *ClusterInstanceReconciler) renderManifests(ctx context.Context, clusterInstance *v1alpha1.ClusterInstance) ([]interface{}, error) {
+	r.Log.Info(fmt.Sprintf("Rendering templates for ClusterInstance %s", clusterInstance.Name))
 
-	patch := client.MergeFrom(siteConfig.DeepCopy())
-	renderedManifests, err := r.ScBuilder.ProcessTemplates(ctx, r.Client, *siteConfig)
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
+	renderedManifests, err := r.TmplEngine.ProcessTemplates(ctx, r.Client, *clusterInstance)
 	if err != nil {
-		r.Log.Error(err, "Failed to render manifests", "SiteConfig", siteConfig.Name)
-		conditions.SetStatusCondition(&siteConfig.Status.Conditions,
+		r.Log.Error(err, "Failed to render manifests", "ClusterInstance", clusterInstance.Name)
+		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
 			conditions.RenderedTemplates,
 			conditions.Failed,
 			metav1.ConditionFalse,
 			fmt.Sprintf("Failed to render templates, err= %s", err))
 	} else {
-		conditions.SetStatusCondition(&siteConfig.Status.Conditions,
+		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
 			conditions.RenderedTemplates,
 			conditions.Completed,
 			metav1.ConditionTrue,
 			"Rendered templates successfully")
 	}
 
-	if updateErr := conditions.PatchStatus(ctx, r.Client, siteConfig, patch); updateErr != nil {
+	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			r.Log.Info(fmt.Sprintf("Failed to update SiteConfig %s status after rendering templates, err: %s", siteConfig.Name, updateErr.Error()))
+			r.Log.Info(fmt.Sprintf("Failed to update ClusterInstance %s status after rendering templates, err: %s", clusterInstance.Name, updateErr.Error()))
 			err = updateErr
 		}
 	}
@@ -309,17 +311,17 @@ func groupAndSortManifests(manifests []interface{}) (map[int][]interface{}, erro
 			return nil, fmt.Errorf("missing field `kind` from rendered manifest")
 		}
 
-		syncWaveStr = DefaultWaveAnnotation
+		syncWaveStr = ci.DefaultWaveAnnotation
 		if metadata, ok := manifest["metadata"].(map[string]interface{}); ok {
 			if annotations, ok := metadata["annotations"].(map[string]interface{}); ok {
-				if syncWaveStr, ok = annotations[WaveAnnotation].(string); !ok {
-					syncWaveStr = DefaultWaveAnnotation
+				if syncWaveStr, ok = annotations[ci.WaveAnnotation].(string); !ok {
+					syncWaveStr = ci.DefaultWaveAnnotation
 				}
 			}
 		}
 
 		if syncWave, err := strconv.Atoi(syncWaveStr); err != nil {
-			return nil, fmt.Errorf("failed to extract annotation %s in resource %s", WaveAnnotation, kind)
+			return nil, fmt.Errorf("failed to extract annotation %s in resource %s", ci.WaveAnnotation, kind)
 		} else {
 			// check if the key exists in the map
 			if _, ok := manifestGroups[syncWave]; !ok {
@@ -378,10 +380,21 @@ func createOrPatch(ctx context.Context, c client.Client, obj unstructured.Unstru
 	return controllerutil.OperationResultUpdated, nil
 }
 
-func (r *SiteConfigReconciler) executeRenderedManifests(ctx context.Context, c client.Client, siteConfig *v1alpha1.SiteConfig, manifestGroups map[int][]interface{}, manifestStatus string) (bool, error) {
+func toUnstructured(obj interface{}) (unstructured.Unstructured, error) {
+	var uObj unstructured.Unstructured
+	// Marshal the input object to JSON
+	if content, err := json.Marshal(obj); err != nil {
+		return uObj, err
+	} else if err = json.Unmarshal(content, &uObj); err != nil {
+		return uObj, err
+	}
+	return uObj, nil
+}
+
+func (r *ClusterInstanceReconciler) executeRenderedManifests(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance, manifestGroups map[int][]interface{}, manifestStatus string) (bool, error) {
 
 	successfulExecution := true
-	patch := client.MergeFrom(siteConfig.DeepCopy())
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
 	// Get the syncWaves of the map
 	syncWaves := make([]int, 0, len(manifestGroups))
 	for syncWave := range manifestGroups {
@@ -412,8 +425,8 @@ func (r *SiteConfigReconciler) executeRenderedManifests(ctx context.Context, c c
 				manifestRef.Message = err.Error()
 			} else {
 				setOwnerRef := func() error {
-					if namespaceOk && namespace == siteConfig.Namespace {
-						return ctrl.SetControllerReference(siteConfig, &obj, r.Scheme)
+					if namespaceOk && namespace == clusterInstance.Namespace {
+						return ctrl.SetControllerReference(clusterInstance, &obj, r.Scheme)
 					}
 					return nil
 				}
@@ -428,19 +441,19 @@ func (r *SiteConfigReconciler) executeRenderedManifests(ctx context.Context, c c
 				}
 			}
 
-			if found := findManifestRendered(manifestRef, siteConfig.Status.ManifestsRendered); found != nil {
+			if found := findManifestRendered(manifestRef, clusterInstance.Status.ManifestsRendered); found != nil {
 				if found.Status != manifestRef.Status || found.Message != manifestRef.Message {
 					found.LastAppliedTime = manifestRef.LastAppliedTime
 					found.Status = manifestRef.Status
 					found.Message = manifestRef.Message
 				}
 			} else {
-				siteConfig.Status.ManifestsRendered = append(siteConfig.Status.ManifestsRendered, *manifestRef)
+				clusterInstance.Status.ManifestsRendered = append(clusterInstance.Status.ManifestsRendered, *manifestRef)
 			}
 		}
 	}
 
-	return successfulExecution, conditions.PatchStatus(ctx, r.Client, siteConfig, patch)
+	return successfulExecution, conditions.PatchStatus(ctx, r.Client, clusterInstance, patch)
 }
 
 func findManifestRendered(manifest *v1alpha1.ManifestReference, manifestList []v1alpha1.ManifestReference) *v1alpha1.ManifestReference {
@@ -452,7 +465,7 @@ func findManifestRendered(manifest *v1alpha1.ManifestReference, manifestList []v
 	return nil
 }
 
-func (r *SiteConfigReconciler) handleRenderTemplates(ctx context.Context, siteConfig *v1alpha1.SiteConfig) (rendered bool, err error) {
+func (r *ClusterInstanceReconciler) handleRenderTemplates(ctx context.Context, clusterInstance *v1alpha1.ClusterInstance) (rendered bool, err error) {
 	rendered = false
 
 	var (
@@ -461,48 +474,48 @@ func (r *SiteConfigReconciler) handleRenderTemplates(ctx context.Context, siteCo
 	)
 
 	// Render templates manifests
-	r.Log.Info(fmt.Sprintf("Rendering templates for SiteConfig %s", siteConfig.Name))
-	unsortedManifests, err = r.renderManifests(ctx, siteConfig)
+	r.Log.Info(fmt.Sprintf("Rendering templates for ClusterInstance %s", clusterInstance.Name))
+	unsortedManifests, err = r.renderManifests(ctx, clusterInstance)
 	if err != nil {
-		r.Log.Info(fmt.Sprintf("encountered error while rendering templates for SiteConfig %s, err: %v", siteConfig.Name, err))
+		r.Log.Info(fmt.Sprintf("encountered error while rendering templates for ClusterInstance %s, err: %v", clusterInstance.Name, err))
 		return
 	}
 
 	// Organize rendered manifests by sync-wave and sort groups by manifest type
 	manifestGroups, err = groupAndSortManifests(unsortedManifests)
 	if err != nil {
-		r.Log.Info(fmt.Sprintf("encountered error while rendering templates for SiteConfig %s, err: %v", siteConfig.Name, err))
+		r.Log.Info(fmt.Sprintf("encountered error while rendering templates for ClusterInstance %s, err: %v", clusterInstance.Name, err))
 		return
 	}
 
 	// Validate rendered manifests using kubernetes dry-run
-	r.Log.Info(fmt.Sprintf("Validating rendered manifests for SiteConfig %s", siteConfig.Name))
+	r.Log.Info(fmt.Sprintf("Validating rendered manifests for ClusterInstance %s", clusterInstance.Name))
 	dryRunClient := client.NewDryRunClient(r.Client)
-	patch := client.MergeFrom(siteConfig.DeepCopy())
-	rendered, err = r.executeRenderedManifests(ctx, dryRunClient, siteConfig, manifestGroups, v1alpha1.ManifestRenderedValidated)
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
+	rendered, err = r.executeRenderedManifests(ctx, dryRunClient, clusterInstance, manifestGroups, v1alpha1.ManifestRenderedValidated)
 	if err != nil || !rendered {
-		msg := fmt.Sprintf("failed to validate rendered manifests for SiteConfig %s using dry-run validation", siteConfig.Name)
+		msg := fmt.Sprintf("failed to validate rendered manifests for ClusterInstance %s using dry-run validation", clusterInstance.Name)
 		if err != nil {
 			msg = fmt.Sprintf(", err: %v", err)
 		}
 		r.Log.Info(msg)
 
-		conditions.SetStatusCondition(&siteConfig.Status.Conditions,
+		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
 			conditions.RenderedTemplatesValidated,
 			conditions.Failed,
 			metav1.ConditionFalse,
 			"Rendered manifests failed dry-run validation")
 	} else {
-		conditions.SetStatusCondition(&siteConfig.Status.Conditions,
+		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
 			conditions.RenderedTemplatesValidated,
 			conditions.Completed,
 			metav1.ConditionTrue,
 			"Rendered templates validation succeeded")
 	}
 
-	if updateErr := conditions.PatchStatus(ctx, r.Client, siteConfig, patch); updateErr != nil {
+	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			r.Log.Info(fmt.Sprintf("failed to update SiteConfig %s status post validation of rendered templates, err: %s", siteConfig.Name, updateErr.Error()))
+			r.Log.Info(fmt.Sprintf("failed to update ClusterInstance %s status post validation of rendered templates, err: %s", clusterInstance.Name, updateErr.Error()))
 			err = updateErr
 		}
 	}
@@ -511,69 +524,69 @@ func (r *SiteConfigReconciler) handleRenderTemplates(ctx context.Context, siteCo
 	}
 
 	// Apply the rendered manifests
-	r.Log.Info(fmt.Sprintf("Applying rendered manifests for SiteConfig %s", siteConfig.Name))
-	patch = client.MergeFrom(siteConfig.DeepCopy())
-	rendered, err = r.executeRenderedManifests(ctx, r.Client, siteConfig, manifestGroups, v1alpha1.ManifestRenderedSuccess)
+	r.Log.Info(fmt.Sprintf("Applying rendered manifests for ClusterInstance %s", clusterInstance.Name))
+	patch = client.MergeFrom(clusterInstance.DeepCopy())
+	rendered, err = r.executeRenderedManifests(ctx, r.Client, clusterInstance, manifestGroups, v1alpha1.ManifestRenderedSuccess)
 	if err != nil || !rendered {
-		msg := fmt.Sprintf("failed to apply rendered manifests for SiteConfig %s", siteConfig.Name)
+		msg := fmt.Sprintf("failed to apply rendered manifests for ClusterInstance %s", clusterInstance.Name)
 		if err != nil {
 			msg = fmt.Sprintf(", err: %v", err)
 		}
 		r.Log.Info(msg)
 
-		conditions.SetStatusCondition(&siteConfig.Status.Conditions,
+		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
 			conditions.RenderedTemplatesApplied,
 			conditions.Failed,
 			metav1.ConditionFalse,
 			"Failed to apply site config manifests")
 	} else {
-		conditions.SetStatusCondition(&siteConfig.Status.Conditions,
+		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
 			conditions.RenderedTemplatesApplied,
 			conditions.Completed,
 			metav1.ConditionTrue,
 			"Applied site config manifests")
 	}
 
-	if updateErr := conditions.PatchStatus(ctx, r.Client, siteConfig, patch); updateErr != nil {
+	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			r.Log.Info(fmt.Sprintf("Failed to update SiteConfig %s status post creation of rendered templates, err: %s", siteConfig.Name, updateErr.Error()))
+			r.Log.Info(fmt.Sprintf("Failed to update ClusterInstance %s status post creation of rendered templates, err: %s", clusterInstance.Name, updateErr.Error()))
 			err = updateErr
 		}
 	}
 	return
 }
 
-func (r *SiteConfigReconciler) updateSuppressedManifestsStatus(ctx context.Context, siteConfig *v1alpha1.SiteConfig) error {
-	patch := client.MergeFrom(siteConfig.DeepCopy())
+func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(ctx context.Context, clusterInstance *v1alpha1.ClusterInstance) error {
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
 
 	suppressFn := func(suppressedManifests []string) {
 		for _, kind := range suppressedManifests {
-			for index, manifest := range siteConfig.Status.ManifestsRendered {
+			for index, manifest := range clusterInstance.Status.ManifestsRendered {
 				if manifest.Kind == kind {
-					siteConfig.Status.ManifestsRendered[index].Status = v1alpha1.ManifestSuppressed
-					siteConfig.Status.ManifestsRendered[index].Message = ""
+					clusterInstance.Status.ManifestsRendered[index].Status = v1alpha1.ManifestSuppressed
+					clusterInstance.Status.ManifestsRendered[index].Message = ""
 				}
 			}
 		}
 	}
 
 	// Suppress cluster-level manifests
-	suppressFn(siteConfig.Spec.SuppressedManifests)
+	suppressFn(clusterInstance.Spec.SuppressedManifests)
 
 	// Suppress node-level manifests
-	for _, node := range siteConfig.Spec.Nodes {
+	for _, node := range clusterInstance.Spec.Nodes {
 		suppressFn(node.SuppressedManifests)
 	}
 
-	return conditions.PatchStatus(ctx, r.Client, siteConfig, patch)
+	return conditions.PatchStatus(ctx, r.Client, clusterInstance, patch)
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *SiteConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.Recorder = mgr.GetEventRecorderFor("SiteConfig")
+func (r *ClusterInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.Recorder = mgr.GetEventRecorderFor("ClusterInstance")
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.SiteConfig{}).
+		For(&v1alpha1.ClusterInstance{}).
 		WithEventFilter(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{})).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(r)

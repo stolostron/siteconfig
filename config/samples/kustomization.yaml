@@ -1,4 +1,4 @@
 ## Append samples of your project ##
 resources:
-- siteconfig_v1alpha1_siteconfig.yaml
+- siteconfig_v1alpha1_clusterinstance.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples

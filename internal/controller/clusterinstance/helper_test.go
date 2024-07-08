@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package clusterinstance
 
 import (
 	"fmt"
@@ -50,7 +50,7 @@ func Test_getInstallConfigOverrides(t *testing.T) {
 			CPUPartitioning:       v1alpha1.CPUPartitioningNone,
 			expected:              "",
 			error:                 fmt.Errorf("invalid json parameter set at installConfigOverride"),
-			name:                  "invalid JSON set in installConfigOverride at SiteConfig",
+			name:                  "invalid JSON set in installConfigOverride at ClusterInstance",
 		},
 
 		{
@@ -101,18 +101,18 @@ func Test_getInstallConfigOverrides(t *testing.T) {
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-			siteConfig := &v1alpha1.SiteConfig{
+			clusterInstance := &v1alpha1.ClusterInstance{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-cluster",
 					Namespace: "test-cluster",
 				},
-				Spec: v1alpha1.SiteConfigSpec{
+				Spec: v1alpha1.ClusterInstanceSpec{
 					NetworkType:            tc.networkType,
 					InstallConfigOverrides: tc.installConfigOverride,
 					CPUPartitioning:        tc.CPUPartitioning,
 				},
 			}
-			actual, err := getInstallConfigOverrides(siteConfig)
+			actual, err := getInstallConfigOverrides(clusterInstance)
 			if err != nil {
 				assert.Equal(t, tc.error, err, "The expected and actual value should be the same.")
 			}
@@ -123,26 +123,26 @@ func Test_getInstallConfigOverrides(t *testing.T) {
 
 }
 
-func Test_buildSiteData(t *testing.T) {
+func Test_buildClusterData(t *testing.T) {
 	NetworkType := "OVNKubernetes"
 	InstallConfigOverrides := "{\"controlPlane\":{\"hyperthreading\":\"Disabled\"}}"
 	CPUPartitioning := v1alpha1.CPUPartitioningNone
 	expectedInstallConfigOverrides := "{\"networking\":{\"networkType\":\"OVNKubernetes\"},\"controlPlane\":{\"hyperthreading\":\"Disabled\"}}"
 
 	testcases := []struct {
-		siteConfig *v1alpha1.SiteConfig
-		node       *v1alpha1.NodeSpec
-		expected   SiteData
-		error      error
-		name       string
+		clusterInstance *v1alpha1.ClusterInstance
+		node            *v1alpha1.NodeSpec
+		expected        ClusterData
+		error           error
+		name            string
 	}{
 		{
-			siteConfig: &v1alpha1.SiteConfig{
+			clusterInstance: &v1alpha1.ClusterInstance{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-cluster",
 					Namespace: "test-cluster",
 				},
-				Spec: v1alpha1.SiteConfigSpec{
+				Spec: v1alpha1.ClusterInstanceSpec{
 					NetworkType:            NetworkType,
 					InstallConfigOverrides: InstallConfigOverrides,
 					CPUPartitioning:        CPUPartitioning,
@@ -155,8 +155,8 @@ func Test_buildSiteData(t *testing.T) {
 				},
 			},
 			node: nil,
-			expected: SiteData{
-				Site: v1alpha1.SiteConfigSpec{
+			expected: ClusterData{
+				Site: v1alpha1.ClusterInstanceSpec{
 					NetworkType:            NetworkType,
 					InstallConfigOverrides: InstallConfigOverrides,
 					CPUPartitioning:        CPUPartitioning,
@@ -175,16 +175,16 @@ func Test_buildSiteData(t *testing.T) {
 				},
 			},
 			error: nil,
-			name:  "single master-node SiteConfig with nodeId undefined",
+			name:  "single master-node ClusterInstance with nodeId undefined",
 		},
 
 		{
-			siteConfig: &v1alpha1.SiteConfig{
+			clusterInstance: &v1alpha1.ClusterInstance{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-cluster",
 					Namespace: "test-cluster",
 				},
-				Spec: v1alpha1.SiteConfigSpec{
+				Spec: v1alpha1.ClusterInstanceSpec{
 					NetworkType:            NetworkType,
 					InstallConfigOverrides: InstallConfigOverrides,
 					CPUPartitioning:        CPUPartitioning,
@@ -208,8 +208,8 @@ func Test_buildSiteData(t *testing.T) {
 				HostName: "node1",
 				Role:     "master",
 			},
-			expected: SiteData{
-				Site: v1alpha1.SiteConfigSpec{
+			expected: ClusterData{
+				Site: v1alpha1.ClusterInstanceSpec{
 					NetworkType:            NetworkType,
 					InstallConfigOverrides: InstallConfigOverrides,
 					CPUPartitioning:        CPUPartitioning,
@@ -239,14 +239,14 @@ func Test_buildSiteData(t *testing.T) {
 				},
 			},
 			error: nil,
-			name:  "3 node (2 master, 1 worker) SiteConfig with nodeId set to first node",
+			name:  "3 node (2 master, 1 worker) ClusterInstance with nodeId set to first node",
 		},
 	}
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 
-			actual, err := buildSiteData(tc.siteConfig, tc.node)
+			actual, err := buildClusterData(tc.clusterInstance, tc.node)
 			if err != nil {
 				assert.Equal(t, tc.error, err, "The expected and actual value should be the same.")
 			}

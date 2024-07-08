@@ -17,7 +17,7 @@ resources:
   controller: true
   domain: open-cluster-management.io
   group: siteconfig
-  kind: SiteConfig
+  kind: ClusterInstance
   path: github.com/stolostron/siteconfig/api/v1alpha1
   version: v1alpha1
 version: "3"

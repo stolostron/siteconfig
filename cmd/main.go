@@ -26,13 +26,15 @@ import (
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	"github.com/openshift/assisted-service/api/v1beta1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
-	"github.com/stolostron/siteconfig/internal/controller/retry"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sretry "k8s.io/client-go/util/retry"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/retry"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -102,7 +104,7 @@ func main() {
 		//Port:                   9443,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "siteconfig.open-cluster-management.io",
+		LeaderElectionID:       "manager." + v1alpha1.Group,
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -120,21 +122,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	log := ctrl.Log.WithName("controllers").WithName("SiteConfig")
-
 	if err := initConfigMapTemplates(context.TODO(), mgr.GetClient(), setupLog); err != nil {
 		setupLog.Error(err, "unable to initialize default reference ConfigMap templates")
 		os.Exit(1)
 	}
 
-	if err = (&controller.SiteConfigReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Recorder:  mgr.GetEventRecorderFor("siteconfig-controller"),
-		Log:       log,
-		ScBuilder: controller.NewSiteConfigBuilder(log.WithName("SiteConfigBuilder")),
+	log := ctrl.Log.WithName("controllers").WithName("ClusterInstance")
+	if err = (&controller.ClusterInstanceReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Recorder:   mgr.GetEventRecorderFor("ClusterInstance-controller"),
+		Log:        log,
+		TmplEngine: ci.NewTemplateEngine(log.WithName("ClusterInstance.TemplateEngine")),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SiteConfig")
+		setupLog.Error(err, "unable to create controller", "controller", "ClusterInstance")
 		os.Exit(1)
 	}
 
@@ -146,7 +147,6 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterDeploymentReconciler")
 		os.Exit(1)
 	}
-
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

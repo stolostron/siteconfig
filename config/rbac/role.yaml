@@ -169,7 +169,7 @@ rules:
 - apiGroups:
   - siteconfig.open-cluster-management.io
   resources:
-  - siteconfigs
+  - clusterinstances
   verbs:
   - create
   - delete
@@ -181,13 +181,13 @@ rules:
 - apiGroups:
   - siteconfig.open-cluster-management.io
   resources:
-  - siteconfigs/finalizers
+  - clusterinstances/finalizers
   verbs:
   - update
 - apiGroups:
   - siteconfig.open-cluster-management.io
   resources:
-  - siteconfigs/status
+  - clusterinstances/status
   verbs:
   - get
   - patch

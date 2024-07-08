@@ -10,10 +10,10 @@ spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
     owned:
-    - description: SiteConfig is the Schema for the siteconfigs API
-      displayName: Site Config
-      kind: SiteConfig
-      name: siteconfigs.siteconfig.open-cluster-management.io
+    - description: ClusterInstance is the Schema for the clusterinstances API
+      displayName: Cluster Instance
+      kind: ClusterInstance
+      name: clusterinstances.siteconfig.open-cluster-management.io
       statusDescriptors:
       - displayName: Conditions
         path: conditions

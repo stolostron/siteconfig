@@ -40,12 +40,12 @@ var _ = Describe("Reconcile", func() {
 		ctx              = context.Background()
 		clusterName      = "test-cluster"
 		clusterNamespace = "test-namespace"
-		siteConfig       *v1alpha1.SiteConfig
+		clusterInstance  *v1alpha1.ClusterInstance
 	)
 	BeforeEach(func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&v1alpha1.SiteConfig{}).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 		testLogger := ctrl.Log.WithName("ClusterDeploymentReconciler")
 		r = &ClusterDeploymentReconciler{
@@ -54,13 +54,13 @@ var _ = Describe("Reconcile", func() {
 			Log:    testLogger,
 		}
 
-		siteConfig = &v1alpha1.SiteConfig{
+		clusterInstance = &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       clusterName,
 				Namespace:  clusterNamespace,
-				Finalizers: []string{siteConfigFinalizer},
+				Finalizers: []string{clusterInstanceFinalizer},
 			},
-			Spec: v1alpha1.SiteConfigSpec{
+			Spec: v1alpha1.ClusterInstanceSpec{
 				ClusterName:            clusterName,
 				PullSecretRef:          &corev1.LocalObjectReference{Name: "pull-secret"},
 				ClusterImageSetNameRef: "testimage:foobar",
@@ -82,7 +82,7 @@ var _ = Describe("Reconcile", func() {
 			},
 		}
 		Expect(c.Create(ctx, ns)).To(Succeed())
-		Expect(c.Create(ctx, siteConfig)).To(Succeed())
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 	})
 
 	It("doesn't error for a missing ClusterDeployment", func() {
@@ -96,7 +96,7 @@ var _ = Describe("Reconcile", func() {
 		Expect(res).To(Equal(ctrl.Result{}))
 	})
 
-	It("doesn't reconcile a ClusterDeployment that is not owned by SiteConfig", func() {
+	It("doesn't reconcile a ClusterDeployment that is not owned by ClusterInstance", func() {
 		key := types.NamespacedName{
 			Namespace: clusterNamespace,
 			Name:      clusterName,
@@ -129,13 +129,13 @@ var _ = Describe("Reconcile", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(Equal(ctrl.Result{}))
 
-		// Fetch SiteConfig and verify that the status is unchanged
-		sc := &v1alpha1.SiteConfig{}
+		// Fetch ClusterInstance and verify that the status is unchanged
+		sc := &v1alpha1.ClusterInstance{}
 		Expect(c.Get(ctx, key, sc)).To(Succeed())
-		Expect(sc.Status).To(Equal(siteConfig.Status))
+		Expect(sc.Status).To(Equal(clusterInstance.Status))
 	})
 
-	It("tests that ClusterDeploymentReconciler initializes SiteConfig ClusterDeployment correctly", func() {
+	It("tests that ClusterDeploymentReconciler initializes ClusterInstance ClusterDeployment correctly", func() {
 		key := types.NamespacedName{
 			Namespace: clusterNamespace,
 			Name:      clusterName,
@@ -147,7 +147,7 @@ var _ = Describe("Reconcile", func() {
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion: "siteconfig.open-cluster-management.io/v1alpha1",
-						Kind:       v1alpha1.SiteConfigKind,
+						Kind:       v1alpha1.ClusterInstanceKind,
 						Name:       clusterName,
 					},
 				},
@@ -182,7 +182,7 @@ var _ = Describe("Reconcile", func() {
 			},
 		}
 
-		sc := &v1alpha1.SiteConfig{}
+		sc := &v1alpha1.ClusterInstance{}
 		Expect(c.Get(ctx, key, sc)).To(Succeed())
 		Expect(sc.Status.ClusterDeploymentRef.Name).To(Equal(clusterName))
 		Expect(len(sc.Status.DeploymentConditions)).To(Equal(len(expectedConditions)))
@@ -199,7 +199,7 @@ var _ = Describe("Reconcile", func() {
 		}
 	})
 
-	It("tests that ClusterDeploymentReconciler updates SiteConfig deploymentConditions", func() {
+	It("tests that ClusterDeploymentReconciler updates ClusterInstance deploymentConditions", func() {
 		key := types.NamespacedName{
 			Namespace: clusterNamespace,
 			Name:      clusterName,
@@ -211,7 +211,7 @@ var _ = Describe("Reconcile", func() {
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion: "siteconfig.open-cluster-management.io/v1alpha1",
-						Kind:       v1alpha1.SiteConfigKind,
+						Kind:       v1alpha1.ClusterInstanceKind,
 						Name:       clusterName,
 					},
 				},
@@ -219,16 +219,16 @@ var _ = Describe("Reconcile", func() {
 		}
 		Expect(c.Create(ctx, clusterDeployment)).To(Succeed())
 
-		Expect(c.Get(ctx, key, siteConfig)).To(Succeed())
-		conditions.SetStatusCondition(&siteConfig.Status.Conditions,
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
 			conditions.Provisioned,
 			conditions.InProgress,
 			metav1.ConditionTrue,
 			"Provisioning cluster")
-		err := conditions.UpdateStatus(ctx, c, siteConfig)
+		err := conditions.UpdateStatus(ctx, c, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
-		sc := &v1alpha1.SiteConfig{}
+		sc := &v1alpha1.ClusterInstance{}
 		Expect(c.Get(ctx, key, sc)).To(Succeed())
 
 		DeploymentConditions := [][]hivev1.ClusterDeploymentCondition{
@@ -295,7 +295,7 @@ var _ = Describe("Reconcile", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res).To(Equal(doNotRequeue()))
 
-			sc := &v1alpha1.SiteConfig{}
+			sc := &v1alpha1.ClusterInstance{}
 			Expect(c.Get(ctx, key, sc)).To(Succeed())
 
 			for _, cond := range deploymentCondition {
@@ -313,7 +313,7 @@ var _ = Describe("Reconcile", func() {
 		}
 	})
 
-	It("tests that SiteConfig status condition is set to provisioned when cluster is installed", func() {
+	It("tests that ClusterInstance status condition is set to provisioned when cluster is installed", func() {
 		key := types.NamespacedName{
 			Namespace: clusterNamespace,
 			Name:      clusterName,
@@ -325,7 +325,7 @@ var _ = Describe("Reconcile", func() {
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion: "siteconfig.open-cluster-management.io/v1alpha1",
-						Kind:       v1alpha1.SiteConfigKind,
+						Kind:       v1alpha1.ClusterInstanceKind,
 						Name:       clusterName,
 					},
 				},
@@ -344,7 +344,7 @@ var _ = Describe("Reconcile", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(Equal(ctrl.Result{}))
 
-		sc := &v1alpha1.SiteConfig{}
+		sc := &v1alpha1.ClusterInstance{}
 		Expect(c.Get(ctx, key, sc)).To(Succeed())
 
 		found := false

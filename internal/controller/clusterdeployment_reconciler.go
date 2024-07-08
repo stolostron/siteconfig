@@ -41,7 +41,7 @@ import (
 )
 
 // ClusterDeploymentReconciler reconciles a ClusterDeployment object to
-// update the SiteConfig cluster deployment status conditions
+// update the ClusterInstance cluster deployment status conditions
 type ClusterDeploymentReconciler struct {
 	client.Client
 	Log    logr.Logger
@@ -61,24 +61,24 @@ func (r *ClusterDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return requeueWithError(err)
 	}
 
-	// Fetch SiteConfig associated with ClusterDeployment object
-	siteConfig, err := r.getSiteConfig(ctx, clusterDeployment)
-	if siteConfig == nil {
+	// Fetch ClusterInstance associated with ClusterDeployment object
+	clusterInstance, err := r.getClusterInstance(ctx, clusterDeployment)
+	if clusterInstance == nil {
 		return doNotRequeue(), nil
 	} else if err != nil {
 		return requeueWithError(err)
 	}
 
-	patch := client.MergeFrom(siteConfig.DeepCopy())
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
 
-	// Initialize siteconfig clusterdeployment reference if unset
-	if siteConfig.Status.ClusterDeploymentRef == nil || siteConfig.Status.ClusterDeploymentRef.Name == "" {
-		siteConfig.Status.ClusterDeploymentRef = &corev1.LocalObjectReference{Name: clusterDeployment.Name}
+	// Initialize ClusterInstance clusterdeployment reference if unset
+	if clusterInstance.Status.ClusterDeploymentRef == nil || clusterInstance.Status.ClusterDeploymentRef.Name == "" {
+		clusterInstance.Status.ClusterDeploymentRef = &corev1.LocalObjectReference{Name: clusterDeployment.Name}
 	}
 
-	updateSCProvisionedStatus(clusterDeployment, siteConfig)
-	updateSCDeploymentConditions(clusterDeployment, siteConfig)
-	if updateErr := conditions.PatchStatus(ctx, r.Client, siteConfig, patch); updateErr != nil {
+	updateSCProvisionedStatus(clusterDeployment, clusterInstance)
+	updateSCDeploymentConditions(clusterDeployment, clusterInstance)
+	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		return requeueWithError(updateErr)
 	}
 
@@ -94,8 +94,8 @@ func clusterInstallConditionTypes() []hivev1.ClusterDeploymentConditionType {
 	}
 }
 
-func updateSCProvisionedStatus(cd *hivev1.ClusterDeployment, sc *v1alpha1.SiteConfig) {
-	// Check if cluster has finished installing, if it has -> update siteConfig.Status.Conditions(Provisioned -> Completed)
+func updateSCProvisionedStatus(cd *hivev1.ClusterDeployment, sc *v1alpha1.ClusterInstance) {
+	// Check if cluster has finished installing, if it has -> update ClusterInstance.Status.Conditions(Provisioned -> Completed)
 	if cd.Spec.Installed {
 		conditions.SetStatusCondition(&sc.Status.Conditions,
 			conditions.Provisioned,
@@ -103,7 +103,7 @@ func updateSCProvisionedStatus(cd *hivev1.ClusterDeployment, sc *v1alpha1.SiteCo
 			metav1.ConditionTrue,
 			"Provision completed")
 	} else if installStopped := conditions.FindConditionType(cd.Status.Conditions, hivev1.ClusterInstallStoppedClusterDeploymentCondition); installStopped != nil {
-		// Check if siteconfig.Status Provisioned -> InProgress condition
+		// Check if ClusterInstance.Status Provisioned -> InProgress condition
 		if found := meta.FindStatusCondition(sc.Status.Conditions, string(conditions.Provisioned)); found == nil {
 			if !cd.Spec.Installed && installStopped.Status == corev1.ConditionStatus(metav1.ConditionFalse) {
 				conditions.SetStatusCondition(&sc.Status.Conditions,
@@ -116,8 +116,8 @@ func updateSCProvisionedStatus(cd *hivev1.ClusterDeployment, sc *v1alpha1.SiteCo
 	}
 }
 
-func updateSCDeploymentConditions(cd *hivev1.ClusterDeployment, sc *v1alpha1.SiteConfig) {
-	// Compare siteConfig.Status.installConditions to clusterDeployment.Conditions
+func updateSCDeploymentConditions(cd *hivev1.ClusterDeployment, sc *v1alpha1.ClusterInstance) {
+	// Compare ClusterInstance.Status.installConditions to clusterDeployment.Conditions
 	for _, cond := range clusterInstallConditionTypes() {
 		installCond := conditions.FindConditionType(cd.Status.Conditions, cond)
 		if installCond == nil {
@@ -131,7 +131,7 @@ func updateSCDeploymentConditions(cd *hivev1.ClusterDeployment, sc *v1alpha1.Sit
 
 		now := metav1.NewTime(time.Now())
 
-		// Search SiteConfig status DeploymentConditions for the installCond
+		// Search ClusterInstance status DeploymentConditions for the installCond
 		scCond := conditions.FindConditionType(sc.Status.DeploymentConditions, installCond.Type)
 		if scCond == nil {
 			installCond.LastTransitionTime = now
@@ -150,49 +150,49 @@ func updateSCDeploymentConditions(cd *hivev1.ClusterDeployment, sc *v1alpha1.Sit
 	}
 }
 
-func siteConfigOwner(ownerRefs []metav1.OwnerReference) string {
+func clusterInstanceOwner(ownerRefs []metav1.OwnerReference) string {
 	for _, ownerRef := range ownerRefs {
-		if ownerRef.Kind == v1alpha1.SiteConfigKind {
+		if ownerRef.Kind == v1alpha1.ClusterInstanceKind {
 			return ownerRef.Name
 		}
 	}
 	return ""
 }
-func isOwnedBySiteConfig(ownerRefs []metav1.OwnerReference) bool {
-	return siteConfigOwner(ownerRefs) != ""
+func isOwnedByClusterInstance(ownerRefs []metav1.OwnerReference) bool {
+	return clusterInstanceOwner(ownerRefs) != ""
 }
 
-func (r *ClusterDeploymentReconciler) getSiteConfig(ctx context.Context, cd *hivev1.ClusterDeployment) (*v1alpha1.SiteConfig, error) {
-	siteConfigRef := siteConfigOwner(cd.GetOwnerReferences())
-	if siteConfigRef == "" {
-		r.Log.Info("SiteConfig owner-reference not found for ClusterDeployment", "name", cd.Name)
+func (r *ClusterDeploymentReconciler) getClusterInstance(ctx context.Context, cd *hivev1.ClusterDeployment) (*v1alpha1.ClusterInstance, error) {
+	clusterInstanceRef := clusterInstanceOwner(cd.GetOwnerReferences())
+	if clusterInstanceRef == "" {
+		r.Log.Info("ClusterInstance owner-reference not found for ClusterDeployment", "name", cd.Name)
 		return nil, nil
 	}
 
-	siteConfig := &v1alpha1.SiteConfig{}
-	if err := r.Get(ctx, types.NamespacedName{Name: siteConfigRef, Namespace: cd.Namespace}, siteConfig); err != nil {
+	clusterInstance := &v1alpha1.ClusterInstance{}
+	if err := r.Get(ctx, types.NamespacedName{Name: clusterInstanceRef, Namespace: cd.Namespace}, clusterInstance); err != nil {
 		if errors.IsNotFound(err) {
-			r.Log.Info("SiteConfig not found", "name", siteConfigRef)
+			r.Log.Info("ClusterInstance not found", "name", clusterInstanceRef)
 			return nil, nil
 		}
-		r.Log.Info("Failed to get SiteConfig", "name", siteConfigRef, "ClusterDeployment", cd.Name)
+		r.Log.Info("Failed to get ClusterInstance", "name", clusterInstanceRef, "ClusterDeployment", cd.Name)
 		return nil, err
 	}
-	return siteConfig, nil
+	return clusterInstance, nil
 }
 
-func (r *ClusterDeploymentReconciler) mapSiteConfigToCD(ctx context.Context, obj client.Object) []reconcile.Request {
-	siteConfig := &v1alpha1.SiteConfig{}
-	if err := r.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, siteConfig); err != nil {
+func (r *ClusterDeploymentReconciler) mapClusterInstanceToCD(ctx context.Context, obj client.Object) []reconcile.Request {
+	clusterInstance := &v1alpha1.ClusterInstance{}
+	if err := r.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, clusterInstance); err != nil {
 		return []reconcile.Request{}
 	}
 
-	if siteConfig.Status.ClusterDeploymentRef != nil &&
-		siteConfig.Status.ClusterDeploymentRef.Name != "" {
+	if clusterInstance.Status.ClusterDeploymentRef != nil &&
+		clusterInstance.Status.ClusterDeploymentRef.Name != "" {
 		return []reconcile.Request{{
 			NamespacedName: types.NamespacedName{
 				Namespace: obj.GetNamespace(),
-				Name:      siteConfig.Status.ClusterDeploymentRef.Name,
+				Name:      clusterInstance.Status.ClusterDeploymentRef.Name,
 			},
 		}}
 	}
@@ -209,13 +209,13 @@ func (r *ClusterDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			builder.WithPredicates(predicate.Funcs{
 				GenericFunc: func(e event.GenericEvent) bool { return false },
 				CreateFunc: func(e event.CreateEvent) bool {
-					return isOwnedBySiteConfig(e.Object.GetOwnerReferences())
+					return isOwnedByClusterInstance(e.Object.GetOwnerReferences())
 				},
 				DeleteFunc: func(e event.DeleteEvent) bool { return false },
 				UpdateFunc: func(e event.UpdateEvent) bool {
-					return isOwnedBySiteConfig(e.ObjectNew.GetOwnerReferences())
+					return isOwnedByClusterInstance(e.ObjectNew.GetOwnerReferences())
 				},
 			})).
-		WatchesRawSource(source.Kind(mgr.GetCache(), &v1alpha1.SiteConfig{}), handler.EnqueueRequestsFromMapFunc(r.mapSiteConfigToCD)).
+		WatchesRawSource(source.Kind(mgr.GetCache(), &v1alpha1.ClusterInstance{}), handler.EnqueueRequestsFromMapFunc(r.mapClusterInstanceToCD)).
 		Complete(r)
 }

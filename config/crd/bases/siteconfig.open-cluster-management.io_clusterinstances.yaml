@@ -1,17 +1,17 @@
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.13.0
-  creationTimestamp: null
-  name: siteconfigs.siteconfig.open-cluster-management.io
+  name: clusterinstances.siteconfig.open-cluster-management.io
 spec:
   group: siteconfig.open-cluster-management.io
   names:
-    kind: SiteConfig
-    listKind: SiteConfigList
-    plural: siteconfigs
-    singular: siteconfig
+    kind: ClusterInstance
+    listKind: ClusterInstanceList
+    plural: clusterinstances
+    singular: clusterinstance
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -27,7 +27,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: SiteConfig is the Schema for the siteconfigs API
+        description: ClusterInstance is the Schema for the clusterinstances API
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -42,7 +42,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: SiteConfigSpec defines the desired state of SiteConfig
+            description: ClusterInstanceSpec defines the desired state of ClusterInstance
             properties:
               additionalNTPSources:
                 description: AdditionalNTPSources is a list of NTP sources (hostname
@@ -153,7 +153,7 @@ spec:
                 description: Additional cluster-wide annotations to be applied to
                   the rendered templates
                 type: object
-              extraManifestsRef:
+              extraManifestsRefs:
                 description: ExtraManifestsRefs is list of config map references containing
                   additional manifests to be applied to the cluster.
                 items:
@@ -395,7 +395,7 @@ spec:
                         templates. A node-level template consists of a ConfigMap in
                         which the keys of the data field represent the kind of the
                         installation manifest(s). Node-level templates are instantiated
-                        once for each node in the SiteConfig CR.
+                        once for each node in the ClusterInstance CR.
                       items:
                         description: TemplateRef is used to specify the installation
                           CR templates
@@ -463,7 +463,7 @@ spec:
                   templates. A cluster-level template consists of a ConfigMap in which
                   the keys of the data field represent the kind of the installation
                   manifest(s). Cluster-level templates are instantiated once per cluster
-                  (SiteConfig CR).
+                  (ClusterInstance CR).
                 items:
                   description: TemplateRef is used to specify the installation CR
                     templates
@@ -476,7 +476,7 @@ spec:
                 type: array
             type: object
           status:
-            description: SiteConfigStatus defines the observed state of SiteConfig
+            description: ClusterInstanceStatus defines the observed state of ClusterInstance
             properties:
               clusterDeploymentRef:
                 description: ClusterDeploymentRef is a reference to the ClusterDeployment.
@@ -640,9 +640,3 @@ spec:
     storage: true
     subresources:
       status: {}
-status:
-  acceptedNames:
-    kind: ""
-    plural: ""
-  conditions: null
-  storedVersions: null

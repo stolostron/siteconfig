@@ -6,7 +6,7 @@ metadata:
       [
         {
           "apiVersion": "siteconfig.open-cluster-management.io/v1alpha1",
-          "kind": "SiteConfig",
+          "kind": "ClusterInstance",
           "metadata": {
             "name": "site-sno-du-1",
             "namespace": "site-sno-du-1"
@@ -191,7 +191,9 @@ metadata:
               "name": "pullSecretName"
             },
             "serviceNetwork": [
-              "172.30.0.0/16"
+              {
+                "cidr": "172.30.0.0/16"
+              }
             ],
             "sshPublicKey": "ssh-rsa ",
             "templateRefs": [
@@ -212,10 +214,10 @@ spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
     owned:
-    - description: SiteConfig is the Schema for the siteconfigs API
-      displayName: Site Config
-      kind: SiteConfig
-      name: siteconfigs.siteconfig.open-cluster-management.io
+    - description: ClusterInstance is the Schema for the clusterinstances API
+      displayName: Cluster Instance
+      kind: ClusterInstance
+      name: clusterinstances.siteconfig.open-cluster-management.io
       statusDescriptors:
       - displayName: Conditions
         path: conditions
@@ -396,7 +398,7 @@ spec:
         - apiGroups:
           - siteconfig.open-cluster-management.io
           resources:
-          - siteconfigs
+          - clusterinstances
           verbs:
           - create
           - delete
@@ -408,13 +410,13 @@ spec:
         - apiGroups:
           - siteconfig.open-cluster-management.io
           resources:
-          - siteconfigs/finalizers
+          - clusterinstances/finalizers
           verbs:
           - update
         - apiGroups:
           - siteconfig.open-cluster-management.io
           resources:
-          - siteconfigs/status
+          - clusterinstances/status
           verbs:
           - get
           - patch
