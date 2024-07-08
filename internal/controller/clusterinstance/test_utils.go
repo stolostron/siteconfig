@@ -121,8 +121,8 @@ func GetMockAgentClusterInstallTemplate() string {
 	return `apiVersion: extensions.hive.openshift.io/v1beta1
 kind: AgentClusterInstall
 metadata:
-  name: "{{ .Site.ClusterName }}"
-  namespace: "{{ .Site.ClusterName }}"
+  name: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
   annotations:
 {{ if .SpecialVars.InstallConfigOverrides }}
     agent-install.openshift.io/install-config-overrides: '{{ .SpecialVars.InstallConfigOverrides }}'
@@ -130,31 +130,31 @@ metadata:
     siteconfig.open-cluster-management.io/sync-wave: "1"
 spec:
   clusterDeploymentRef:
-    name: "{{ .Site.ClusterName }}"
-  holdInstallation: {{ .Site.HoldInstallation }}
+    name: "{{ .Spec.ClusterName }}"
+  holdInstallation: {{ .Spec.HoldInstallation }}
   imageSetRef:
-    name: "{{ .Site.ClusterImageSetNameRef }}"
-{{ if .Site.ApiVIPs }}
+    name: "{{ .Spec.ClusterImageSetNameRef }}"
+{{ if .Spec.ApiVIPs }}
   apiVIPs:
-{{ .Site.ApiVIPs | toYaml | indent 4 }}
+{{ .Spec.ApiVIPs | toYaml | indent 4 }}
 {{ end }}
-{{ if .Site.IngressVIPs }}
+{{ if .Spec.IngressVIPs }}
   ingressVIPs:
-{{ .Site.IngressVIPs | toYaml | indent 4 }}
+{{ .Spec.IngressVIPs | toYaml | indent 4 }}
 {{ end }}
   networking:
-{{ if .Site.ClusterNetwork }}
+{{ if .Spec.ClusterNetwork }}
     clusterNetwork:
-{{ .Site.ClusterNetwork | toYaml | indent 6 }}
+{{ .Spec.ClusterNetwork | toYaml | indent 6 }}
 {{ end }}
-{{ if .Site.MachineNetwork }}
+{{ if .Spec.MachineNetwork }}
     machineNetwork:
-{{ .Site.MachineNetwork | toYaml | indent 6 }}
+{{ .Spec.MachineNetwork | toYaml | indent 6 }}
 {{ end }}
-{{ if .Site.ServiceNetwork }}
+{{ if .Spec.ServiceNetwork }}
     serviceNetwork:
 {{ $serviceNetworks := list }}
-{{ range .Site.ServiceNetwork }}
+{{ range .Spec.ServiceNetwork }}
 {{ $serviceNetworks = append $serviceNetworks .CIDR }}
 {{ end }}
 {{ $serviceNetworks | toYaml | indent 6 }}
@@ -162,13 +162,13 @@ spec:
   provisionRequirements:
     controlPlaneAgents: {{ .SpecialVars.ControlPlaneAgents }}
     workerAgents: {{ .SpecialVars.WorkerAgents }}
-{{ if (anyFieldDefined .Site.Proxy) }}
+{{ if (anyFieldDefined .Spec.Proxy) }}
   proxy:
-{{ .Site.Proxy | toYaml | indent 4 }}
+{{ .Spec.Proxy | toYaml | indent 4 }}
 {{ end }}
-  sshPublicKey: "{{ .Site.SSHPublicKey }}"
+  sshPublicKey: "{{ .Spec.SSHPublicKey }}"
   manifestsConfigMapRef:
-    name: "{{ .Site.ClusterName }}"`
+    name: "{{ .Spec.ClusterName }}"`
 }
 
 func GetMockNMStateConfigTemplate() string {
@@ -178,9 +178,9 @@ metadata:
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
-  namespace: "{{ .Site.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
   labels:
-    nmstate-label: "{{ .Site.ClusterName }}"
+    nmstate-label: "{{ .Spec.ClusterName }}"
 spec:
   config:
 {{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig  | toYaml | indent 4}}
@@ -254,7 +254,7 @@ func GetMockBasicClusterTemplate(kind string) string {
 	return fmt.Sprintf(`apiVersion: test.io/v1
 kind: %s
 spec:
-  name: "{{ .Site.ClusterName }}"`, kind)
+  name: "{{ .Spec.ClusterName }}"`, kind)
 }
 
 func GetMockBasicNodeTemplate(kind string) string {

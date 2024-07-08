@@ -18,8 +18,8 @@ package assistedinstaller
 const AgentClusterInstall = `apiVersion: extensions.hive.openshift.io/v1beta1
 kind: AgentClusterInstall
 metadata:
-  name: "{{ .Site.ClusterName }}"
-  namespace: "{{ .Site.ClusterName }}"
+  name: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
   annotations:
 {{ if .SpecialVars.InstallConfigOverrides }}
     agent-install.openshift.io/install-config-overrides: '{{ .SpecialVars.InstallConfigOverrides }}'
@@ -27,31 +27,31 @@ metadata:
     siteconfig.open-cluster-management.io/sync-wave: "1"
 spec:
   clusterDeploymentRef:
-    name: "{{ .Site.ClusterName }}"
-  holdInstallation: {{ .Site.HoldInstallation }}
+    name: "{{ .Spec.ClusterName }}"
+  holdInstallation: {{ .Spec.HoldInstallation }}
   imageSetRef:
-    name: "{{ .Site.ClusterImageSetNameRef }}"
-{{ if .Site.ApiVIPs }}
+    name: "{{ .Spec.ClusterImageSetNameRef }}"
+{{ if .Spec.ApiVIPs }}
   apiVIPs:
-{{ .Site.ApiVIPs | toYaml | indent 4 }}
+{{ .Spec.ApiVIPs | toYaml | indent 4 }}
 {{ end }}
-{{ if .Site.IngressVIPs }}
+{{ if .Spec.IngressVIPs }}
   ingressVIPs:
-{{ .Site.IngressVIPs | toYaml | indent 4 }}
+{{ .Spec.IngressVIPs | toYaml | indent 4 }}
 {{ end }}
   networking:
-{{ if .Site.ClusterNetwork }}
+{{ if .Spec.ClusterNetwork }}
     clusterNetwork:
-{{ .Site.ClusterNetwork | toYaml | indent 6 }}
+{{ .Spec.ClusterNetwork | toYaml | indent 6 }}
 {{ end }}
-{{ if .Site.MachineNetwork }}
+{{ if .Spec.MachineNetwork }}
     machineNetwork:
-{{ .Site.MachineNetwork | toYaml | indent 6 }}
+{{ .Spec.MachineNetwork | toYaml | indent 6 }}
 {{ end }}
-{{ if .Site.ServiceNetwork }}
+{{ if .Spec.ServiceNetwork }}
     serviceNetwork:
 {{ $serviceNetworks := list }}
-{{ range .Site.ServiceNetwork }}
+{{ range .Spec.ServiceNetwork }}
 {{ $serviceNetworks = append $serviceNetworks .CIDR }}
 {{ end }}
 {{ $serviceNetworks | toYaml | indent 6 }}
@@ -59,72 +59,72 @@ spec:
   provisionRequirements:
     controlPlaneAgents: {{ .SpecialVars.ControlPlaneAgents }}
     workerAgents: {{ .SpecialVars.WorkerAgents }}
-{{ if (anyFieldDefined .Site.Proxy) }}
+{{ if (anyFieldDefined .Spec.Proxy) }}
   proxy:
-{{ .Site.Proxy | toYaml | indent 4 }}
+{{ .Spec.Proxy | toYaml | indent 4 }}
 {{ end }}
-  sshPublicKey: "{{ .Site.SSHPublicKey }}"
+  sshPublicKey: "{{ .Spec.SSHPublicKey }}"
   manifestsConfigMapRef:
-    name: "{{ .Site.ClusterName }}"`
+    name: "{{ .Spec.ClusterName }}"`
 
 const ClusterDeployment = `apiVersion: hive.openshift.io/v1
 kind: ClusterDeployment
 metadata:
-  name: "{{ .Site.ClusterName }}"
-  namespace: "{{ .Site.ClusterName }}"
+  name: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
 spec:
-  baseDomain: "{{ .Site.BaseDomain }}"
+  baseDomain: "{{ .Spec.BaseDomain }}"
   clusterInstallRef:
     group: extensions.hive.openshift.io
     kind: AgentClusterInstall
-    name: "{{ .Site.ClusterName }}"
+    name: "{{ .Spec.ClusterName }}"
     version: v1beta1
-  clusterName: "{{ .Site.ClusterName }}"
+  clusterName: "{{ .Spec.ClusterName }}"
   platform:
     agentBareMetal:
       agentSelector:
         matchLabels:
-          cluster-name: "{{ .Site.ClusterName }}"
+          cluster-name: "{{ .Spec.ClusterName }}"
   pullSecretRef:
-    name: "{{ .Site.PullSecretRef.Name }}"`
+    name: "{{ .Spec.PullSecretRef.Name }}"`
 
 const InfraEnv = `apiVersion: agent-install.openshift.io/v1beta1
 kind: InfraEnv
 metadata:
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
-  name: "{{ .Site.ClusterName }}"
-  namespace: "{{ .Site.ClusterName }}"
+  name: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
 spec:
   clusterRef:
-    name: "{{ .Site.ClusterName }}"
-    namespace: "{{ .Site.ClusterName }}"
-  sshAuthorizedKey: "{{ .Site.SSHPublicKey }}"
-{{ if (anyFieldDefined .Site.Proxy) }}
+    name: "{{ .Spec.ClusterName }}"
+    namespace: "{{ .Spec.ClusterName }}"
+  sshAuthorizedKey: "{{ .Spec.SSHPublicKey }}"
+{{ if (anyFieldDefined .Spec.Proxy) }}
   proxy:
-{{ .Site.Proxy | toYaml | indent 4 }}
+{{ .Spec.Proxy | toYaml | indent 4 }}
 {{ end }}
   pullSecretRef:
-    name: "{{ .Site.PullSecretRef.Name }}"
-  ignitionConfigOverride: {{ .Site.IgnitionConfigOverride }}
+    name: "{{ .Spec.PullSecretRef.Name }}"
+  ignitionConfigOverride: {{ .Spec.IgnitionConfigOverride }}
   nmStateConfigLabelSelector:
     matchLabels:
-      nmstate-label: "{{ .Site.ClusterName }}"
+      nmstate-label: "{{ .Spec.ClusterName }}"
   additionalNTPSources:
-{{ .Site.AdditionalNTPSources | toYaml | indent 4 }}`
+{{ .Spec.AdditionalNTPSources | toYaml | indent 4 }}`
 
 const KlusterletAddonConfig = `apiVersion: agent.open-cluster-management.io/v1
 kind: KlusterletAddonConfig
 metadata:
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "2"
-  name: "{{ .Site.ClusterName }}"
-  namespace: "{{ .Site.ClusterName }}"
+  name: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
 spec:
-  clusterName: "{{ .Site.ClusterName }}"
-  clusterNamespace: "{{ .Site.ClusterName }}"
+  clusterName: "{{ .Spec.ClusterName }}"
+  clusterNamespace: "{{ .Spec.ClusterName }}"
   clusterLabels:
     cloud: auto-detect
     vendor: auto-detect
@@ -145,9 +145,9 @@ metadata:
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
-  namespace: "{{ .Site.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
   labels:
-    nmstate-label: "{{ .Site.ClusterName }}"
+    nmstate-label: "{{ .Spec.ClusterName }}"
 spec:
   config:
 {{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig | toYaml | indent 4}}
@@ -157,9 +157,9 @@ spec:
 const ManagedCluster = `apiVersion: cluster.open-cluster-management.io/v1
 kind: ManagedCluster
 metadata:
-  name: "{{ .Site.ClusterName }}"
+  name: "{{ .Spec.ClusterName }}"
   labels:
-{{ .Site.ClusterLabels | toYaml | indent 4 }}
+{{ .Spec.ClusterLabels | toYaml | indent 4 }}
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "2"
 spec:
@@ -169,7 +169,7 @@ const BareMetalHost = `apiVersion: metal3.io/v1alpha1
 kind: BareMetalHost
 metadata:
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
-  namespace: "{{ .Site.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
     inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
@@ -186,7 +186,7 @@ metadata:
 {{ end }}
     bmac.agent-install.openshift.io/role: "{{ .SpecialVars.CurrentNode.Role }}"
   labels:
-    infraenvs.agent-install.openshift.io: "{{ .Site.ClusterName }}"
+    infraenvs.agent-install.openshift.io: "{{ .Spec.ClusterName }}"
 spec:
   bootMode: "{{ .SpecialVars.CurrentNode.BootMode }}"
   bmc:
