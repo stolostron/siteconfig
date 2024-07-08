@@ -573,13 +573,13 @@ var _ = Describe("handleRenderTemplates", func() {
 
 		templateStr := `apiVersion: test.io/v1
 metadata:
-  name: "{{ .Site.ClusterName }}"
-  namespace: "{{ .Site.ClusterName }}"
+  name: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
 kind: Test
 spec:
-  name: "{{ .Site.ClusterNamee }}"`
+  name: "{{ .Spec.ClusterNamee }}"`
 
 		cm := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
@@ -631,13 +631,13 @@ spec:
 
 		templateStr := `apiVersion: test.io/v1
 metadata:
-  name: "{{ .Site.ClusterName }}"
-  namespace: "{{ .Site.ClusterName }}"
+  name: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
 kind: Test
 spec:
-  name: "{{ .Site.ClusterName }}"`
+  name: "{{ .Spec.ClusterName }}"`
 
 		cm := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{

@@ -256,7 +256,7 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA": "{{.Site.doesNotExist}}",
+				"TestA": "{{.Spec.doesNotExist}}",
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())

@@ -156,7 +156,7 @@ func Test_buildClusterData(t *testing.T) {
 			},
 			node: nil,
 			expected: ClusterData{
-				Site: v1alpha1.ClusterInstanceSpec{
+				Spec: v1alpha1.ClusterInstanceSpec{
 					NetworkType:            NetworkType,
 					InstallConfigOverrides: InstallConfigOverrides,
 					CPUPartitioning:        CPUPartitioning,
@@ -209,7 +209,7 @@ func Test_buildClusterData(t *testing.T) {
 				Role:     "master",
 			},
 			expected: ClusterData{
-				Site: v1alpha1.ClusterInstanceSpec{
+				Spec: v1alpha1.ClusterInstanceSpec{
 					NetworkType:            NetworkType,
 					InstallConfigOverrides: InstallConfigOverrides,
 					CPUPartitioning:        CPUPartitioning,

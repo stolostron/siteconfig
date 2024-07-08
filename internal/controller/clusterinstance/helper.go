@@ -40,7 +40,7 @@ type SpecialVars struct {
 
 // ClusterData is a special object that provides an interface to the ClusterInstance spec fields for use in rendering templates
 type ClusterData struct {
-	Site        v1alpha1.ClusterInstanceSpec
+	Spec        v1alpha1.ClusterInstanceSpec
 	SpecialVars SpecialVars
 }
 
@@ -147,7 +147,7 @@ func buildClusterData(clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.
 	}
 
 	data = &ClusterData{
-		Site: clusterInstance.Spec,
+		Spec: clusterInstance.Spec,
 		SpecialVars: SpecialVars{
 			CurrentNode:            currentNode,
 			InstallConfigOverrides: installConfigOverrides,
