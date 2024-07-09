@@ -29,6 +29,7 @@ import (
 // MachineNetworkEntry is a single IP address block for node IP blocks.
 type MachineNetworkEntry struct {
 	// CIDR is the IP block address pool for machines within the cluster.
+	// +required
 	CIDR string `json:"cidr"`
 }
 
@@ -36,6 +37,7 @@ type MachineNetworkEntry struct {
 // are allocated with size 2^HostSubnetLength.
 type ClusterNetworkEntry struct {
 	// CIDR is the IP block address pool.
+	// +required
 	CIDR string `json:"cidr"`
 
 	// HostPrefix is the prefix size to allocate to each node from the CIDR.
@@ -48,12 +50,14 @@ type ClusterNetworkEntry struct {
 // ServiceNetworkEntry is a single IP address block for node IP blocks.
 type ServiceNetworkEntry struct {
 	// CIDR is the IP block address pool for machines within the cluster.
+	// +required
 	CIDR string `json:"cidr"`
 }
 
 // BmcCredentialsName
 type BmcCredentialsName struct {
-	Name string `json:"name,omitempty"`
+	// +required
+	Name string `json:"name"`
 }
 
 // IronicInspect
@@ -81,31 +85,32 @@ const (
 
 // TemplateRef is used to specify the installation CR templates
 type TemplateRef struct {
-	Name      string `json:"name,omitempty"`
-	Namespace string `json:"namespace,omitempty"`
+	// +required
+	Name string `json:"name"`
+	// +required
+	Namespace string `json:"namespace"`
 }
 
 // NodeSpec
 type NodeSpec struct {
 	// BmcAddress holds the URL for accessing the controller on the network.
 	// +required
-	BmcAddress string `json:"bmcAddress,omitempty"`
+	BmcAddress string `json:"bmcAddress"`
 
 	// BmcCredentialsName is the name of the secret containing the BMC credentials (requires keys "username" and "password").
 	// +required
-	BmcCredentialsName BmcCredentialsName `json:"bmcCredentialsName,omitempty"`
+	BmcCredentialsName BmcCredentialsName `json:"bmcCredentialsName"`
 
 	// Which MAC address will PXE boot? This is optional for some
 	// types, but required for libvirt VMs driven by vbmc.
 	// +kubebuilder:validation:Pattern=`[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}`
 	// +required
-	BootMACAddress string `json:"bootMACAddress,omitempty"`
+	BootMACAddress string `json:"bootMACAddress"`
 
 	// When set to disabled, automated cleaning will be avoided during provisioning and deprovisioning.
 	// Set the value to metadata to enable the removal of the disk’s partitioning table only, without fully wiping the disk. The default value is disabled.
 	// +optional
 	// +kubebuilder:default:=disabled
-	// +kubebuilder:validation:Optional
 	AutomatedCleaningMode bmh_v1alpha1.AutomatedCleaningMode `json:"automatedCleaningMode,omitempty"`
 
 	// RootDeviceHints specifies the device for deployment.
@@ -127,10 +132,11 @@ type NodeSpec struct {
 
 	// Hostname is the desired hostname for the host
 	// +required
-	HostName string `json:"hostName,omitempty"`
+	HostName string `json:"hostName"`
 
 	// Provide guidance about how to choose the device for the image being provisioned.
 	// +kubebuilder:default:=UEFI
+	// +optional
 	BootMode bmh_v1alpha1.BootMode `json:"bootMode,omitempty"`
 
 	// Json formatted string containing the user overrides for the host's coreos installer args
@@ -145,6 +151,7 @@ type NodeSpec struct {
 
 	// +kubebuilder:validation:Enum=master;worker
 	// +kubebuilder:default:=master
+	// +optional
 	Role string `json:"role,omitempty"`
 
 	// Additional node-level annotations to be applied to the rendered templates
@@ -164,7 +171,7 @@ type NodeSpec struct {
 	// in which the keys of the data field represent the kind of the installation manifest(s).
 	// Node-level templates are instantiated once for each node in the ClusterInstance CR.
 	// +required
-	TemplateRefs []TemplateRef `json:"templateRefs,omitempty"`
+	TemplateRefs []TemplateRef `json:"templateRefs"`
 }
 
 // ClusterType is a string representing the cluster type
@@ -182,16 +189,16 @@ type ClusterInstanceSpec struct {
 
 	// ClusterName is the name of the cluster.
 	// +required
-	ClusterName string `json:"clusterName,omitempty"`
+	ClusterName string `json:"clusterName"`
 
 	// PullSecretRef is the reference to the secret to use when pulling images.
 	// +required
-	PullSecretRef *corev1.LocalObjectReference `json:"pullSecretRef,omitempty"`
+	PullSecretRef *corev1.LocalObjectReference `json:"pullSecretRef"`
 
 	// ClusterImageSetNameRef is the name of the ClusterImageSet resource indicating which
 	// OpenShift version to deploy.
 	// +required
-	ClusterImageSetNameRef string `json:"clusterImageSetNameRef,omitempty"`
+	ClusterImageSetNameRef string `json:"clusterImageSetNameRef"`
 
 	// SSHPublicKey is the public Secure Shell (SSH) key to provide access to instances.
 	// This key will be added to the host to allow ssh access
@@ -200,7 +207,7 @@ type ClusterInstanceSpec struct {
 
 	// BaseDomain is the base domain to use for the deployed cluster.
 	// +required
-	BaseDomain string `json:"baseDomain,omitempty"`
+	BaseDomain string `json:"baseDomain"`
 
 	// APIVIPs are the virtual IPs used to reach the OpenShift cluster's API.
 	// Enter one IP address for single-stack clusters, or up to two for dual-stack clusters (at
@@ -292,13 +299,14 @@ type ClusterInstanceSpec struct {
 	CPUPartitioning CPUPartitioningMode `json:"cpuPartitioningMode,omitempty"`
 
 	// +kubebuilder:validation:Enum=SNO;HighlyAvailable
+	// +optional
 	ClusterType ClusterType `json:"clusterType,omitempty"`
 
 	// TemplateRefs is a list of references to cluster-level templates. A cluster-level template consists of a ConfigMap
 	// in which the keys of the data field represent the kind of the installation manifest(s).
 	// Cluster-level templates are instantiated once per cluster (ClusterInstance CR).
 	// +required
-	TemplateRefs []TemplateRef `json:"templateRefs,omitempty"`
+	TemplateRefs []TemplateRef `json:"templateRefs"`
 
 	// CABundle is a reference to a config map containing the new bundle of trusted certificates for the host.
 	// The tls-ca-bundle.pem entry in the config map will be written to /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
@@ -306,7 +314,7 @@ type ClusterInstanceSpec struct {
 	CaBundleRef corev1.LocalObjectReference `json:"caBundleRef,omitempty"`
 
 	// +required
-	Nodes []NodeSpec `json:"nodes,omitempty"`
+	Nodes []NodeSpec `json:"nodes"`
 }
 
 const (
@@ -323,26 +331,33 @@ type ManifestReference struct {
 	// APIGroup is the group for the resource being referenced.
 	// If APIGroup is not specified, the specified Kind must be in the core API group.
 	// For any other third-party types, APIGroup is required.
-	// +optional
-	APIGroup *string `json:"apiGroup,omitempty"`
+	// +required
+	APIGroup *string `json:"apiGroup"`
 	// Kind is the type of resource being referenced
-	Kind string `json:"kind,omitempty"`
+	// +required
+	Kind string `json:"kind"`
 	// Name is the name of the resource being referenced
-	Name string `json:"name,omitempty"`
+	// +required
+	Name string `json:"name"`
 	// Namespace is the namespace of the resource being referenced
+	// +optional
 	Namespace string `json:"namespace,omitempty"`
 	//SyncWave is the order in which the resource should be processed: created in ascending order, deleted in descending order.
-	SyncWave int `json:"syncWave,omitempty"`
+	// +required
+	SyncWave int `json:"syncWave"`
 	// Status is the status of the manifest
-	Status string `json:"status,omitempty"`
+	// +required
+	Status string `json:"status"`
 	// lastAppliedTime is the last time the manifest was applied.
-	// This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+	// This should be when the underlying manifest changed.  If that is not known, then using the time when the API field changed is acceptable.
 	// +kubebuilder:validation:Type=string
 	// +kubebuilder:validation:Format=date-time
-	LastAppliedTime metav1.Time `json:"lastAppliedTime,omitempty"`
+	// +required
+	LastAppliedTime metav1.Time `json:"lastAppliedTime"`
 	// message is a human readable message indicating details about the transition.
 	// This may be an empty string.
 	// +kubebuilder:validation:MaxLength=32768
+	// +optional
 	Message string `json:"message,omitempty"`
 }
 
@@ -352,16 +367,18 @@ type ClusterInstanceStatus struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// +operator-sdk:csv:customresourcedefinitions:type=status,displayName="Conditions",xDescriptors={"urn:alm:descriptor:io.kubernetes.conditions"}
+	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// ClusterDeploymentRef is a reference to the ClusterDeployment.
 	// +optional
-	ClusterDeploymentRef *corev1.LocalObjectReference `json:"clusterDeploymentRef"`
+	ClusterDeploymentRef *corev1.LocalObjectReference `json:"clusterDeploymentRef,omitempty"`
 
 	// Conditions is a list of conditions associated with syncing to the cluster.
 	// +optional
 	DeploymentConditions []hivev1.ClusterDeploymentCondition `json:"deploymentConditions,omitempty"`
 
+	// List of manifests that have been rendered along with their status.
 	// +optional
 	ManifestsRendered []ManifestReference `json:"manifestsRendered,omitempty"`
 }
