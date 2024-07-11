@@ -64,8 +64,10 @@ spec:
 {{ .Spec.Proxy | toYaml | indent 4 }}
 {{ end }}
   sshPublicKey: "{{ .Spec.SSHPublicKey }}"
-  manifestsConfigMapRef:
-    name: "{{ .Spec.ClusterName }}"`
+{{ if gt (len .Spec.ExtraManifestsRefs) 0 }}
+  manifestsConfigMapRefs:
+{{ .Spec.ExtraManifestsRefs | toYaml | indent 4 }}
+{{ end }}`
 
 const ClusterDeployment = `apiVersion: hive.openshift.io/v1
 kind: ClusterDeployment
