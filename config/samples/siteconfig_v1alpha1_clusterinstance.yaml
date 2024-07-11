@@ -41,13 +41,13 @@ spec:
   clusterType: SNO
   templateRefs:
     - name: aci-cluster-crs-v1
-      namespace: siteconfig-system
+      namespace: siteconfig-operator
   nodes:
     - hostName: "node1"
       role: "master"
       templateRefs:
         - name: aci-node-crs-v1
-          namespace: siteconfig-system
+          namespace: siteconfig-operator
       ironicInspect: ""
       bmcAddress: "idrac-virtualmedia+https://10.16.231.87/redfish/v1/Systems/System.Embedded.1"
       bmcCredentialsName:

@@ -34,22 +34,22 @@ import (
 
 func TestMain(t *testing.T) {
 	RegisterFailHandler(Fail)
+	t.Setenv("POD_NAMESPACE", "siteconfig-operator")
 	RunSpecs(t, "Main Suite")
 }
 
 var _ = Describe("initConfigMapTemplates", func() {
 	var (
-		c   client.Client
-		ctx = context.Background()
-		log logr.Logger
+		c                   client.Client
+		ctx                             = context.Background()
+		log                 logr.Logger = ctrl.Log.WithName("controllers").WithName("SiteConfig")
+		SiteConfigNamespace             = getSiteConfigNamespace(log)
 	)
 
 	BeforeEach(func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme).
 			Build()
-
-		log = ctrl.Log.WithName("controllers").WithName("SiteConfig")
 
 		siteConfigNS := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
