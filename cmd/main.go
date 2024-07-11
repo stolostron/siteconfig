@@ -60,7 +60,6 @@ var (
 )
 
 const (
-	SiteConfigNamespace               = "siteconfig-system"
 	AssistedInstallerClusterTemplates = "ai-cluster-templates-v1"
 	AssistedInstallerNodeTemplates    = "ai-node-templates-v1"
 	ImageBasedInstallClusterTemplates = "ibi-cluster-templates-v1"
@@ -122,6 +121,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Check that the SiteConfig namespace value is defined
+	if getSiteConfigNamespace(setupLog) == "" {
+		setupLog.Info("unable to retrieve SiteConfig namespace")
+		os.Exit(1)
+	}
+
 	if err := initConfigMapTemplates(context.TODO(), mgr.GetClient(), setupLog); err != nil {
 		setupLog.Error(err, "unable to initialize default reference ConfigMap templates")
 		os.Exit(1)
@@ -165,6 +170,14 @@ func main() {
 	}
 }
 
+func getSiteConfigNamespace(log logr.Logger) string {
+	namespace := os.Getenv("POD_NAMESPACE")
+	if namespace == "" {
+		log.Info("POD_NAMESPACE environment variable is not defined")
+	}
+	return namespace
+}
+
 func initConfigMapTemplates(ctx context.Context, c client.Client, log logr.Logger) error {
 	templates := make(map[string]map[string]string, 4)
 	templates[AssistedInstallerClusterTemplates] = assistedinstaller.GetClusterTemplates()
@@ -172,12 +185,14 @@ func initConfigMapTemplates(ctx context.Context, c client.Client, log logr.Logge
 	templates[ImageBasedInstallClusterTemplates] = imagebasedinstall.GetClusterTemplates()
 	templates[ImageBasedInstallNodeTemplates] = imagebasedinstall.GetNodeTemplates()
 
+	siteConfigNamespace := getSiteConfigNamespace(log)
+
 	for k, v := range templates {
 		immutable := true
 		configMap := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      k,
-				Namespace: SiteConfigNamespace,
+				Namespace: siteConfigNamespace,
 			},
 			Immutable: &immutable,
 			Data:      v,
@@ -186,10 +201,10 @@ func initConfigMapTemplates(ctx context.Context, c client.Client, log logr.Logge
 		if err := retry.RetryOnConflictOrRetriable(k8sretry.DefaultBackoff, func() error {
 			return client.IgnoreAlreadyExists(c.Create(ctx, configMap))
 		}); err != nil {
-			return fmt.Errorf("failed to create default reference template ConfigMap %s/%s during init, error: %w", SiteConfigNamespace, k, err)
+			return fmt.Errorf("failed to create default reference template ConfigMap %s/%s during init, error: %w", siteConfigNamespace, k, err)
 		}
 
-		log.Info(fmt.Sprintf("created default reference template ConfigMap %s/%s", SiteConfigNamespace, k))
+		log.Info(fmt.Sprintf("created default reference template ConfigMap %s/%s", siteConfigNamespace, k))
 	}
 
 	return nil
