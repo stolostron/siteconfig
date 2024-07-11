@@ -106,7 +106,7 @@ var _ = Describe("Validate", func() {
 	})
 
 	It("fails validation due to missing pull secret", func() {
-		clusterInstance.Spec.PullSecretRef = &corev1.LocalObjectReference{Name: "does-not-exist"}
+		clusterInstance.Spec.PullSecretRef = corev1.LocalObjectReference{Name: "does-not-exist"}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		err := Validate(ctx, c, clusterInstance)

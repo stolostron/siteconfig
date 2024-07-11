@@ -97,7 +97,7 @@ func GetMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret, bmcCre
 		},
 		Spec: v1alpha1.ClusterInstanceSpec{
 			ClusterName:            clusterName,
-			PullSecretRef:          &corev1.LocalObjectReference{Name: pullSecret},
+			PullSecretRef:          corev1.LocalObjectReference{Name: pullSecret},
 			ClusterImageSetNameRef: clusterImageSetName,
 			SSHPublicKey:           "test-ssh",
 			BaseDomain:             "abcd",
@@ -162,7 +162,7 @@ spec:
   provisionRequirements:
     controlPlaneAgents: {{ .SpecialVars.ControlPlaneAgents }}
     workerAgents: {{ .SpecialVars.WorkerAgents }}
-{{ if (anyFieldDefined .Spec.Proxy) }}
+{{ if .Spec.Proxy }}
   proxy:
 {{ .Spec.Proxy | toYaml | indent 4 }}
 {{ end }}
