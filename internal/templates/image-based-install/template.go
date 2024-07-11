@@ -142,7 +142,7 @@ metadata:
     bmac.agent-install.openshift.io/installer-args: {{ .SpecialVars.CurrentNode.InstallerArgs  }}
 {{ end }}
 {{ if .SpecialVars.CurrentNode.IgnitionConfigOverride }}
-    bmac.agent-install.openshift.io/ignition-config-overrides: {{ .SpecialVars.CurrentNode.IgnitionConfigOverride }}
+    bmac.agent-install.openshift.io/ignition-config-overrides: '{{ .SpecialVars.CurrentNode.IgnitionConfigOverride }}'
 {{ end }}
     bmac.agent-install.openshift.io/role: "{{ .SpecialVars.CurrentNode.Role }}"
   labels:
