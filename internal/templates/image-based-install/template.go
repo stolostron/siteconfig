@@ -46,7 +46,7 @@ spec:
 machineNetwork:
 {{ .Spec.MachineNetwork | toYaml | indent 4 }}
 {{ end }}
-{{ if (anyFieldDefined .Spec.Proxy) }}
+{{ if .Spec.Proxy }}
   proxy:
 {{ .Spec.Proxy | toYaml | indent 4 }}
 {{ end }}
@@ -156,7 +156,7 @@ spec:
   bootMACAddress: "{{ .SpecialVars.CurrentNode.BootMACAddress }}"
   automatedCleaningMode: "{{ .SpecialVars.CurrentNode.AutomatedCleaningMode }}"
   online: true
-{{ if (anyFieldDefined .SpecialVars.CurrentNode.RootDeviceHints) }}
+{{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:
 {{ .SpecialVars.CurrentNode.RootDeviceHints | toYaml | indent 4 }}
 {{ end }}`

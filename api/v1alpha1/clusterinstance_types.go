@@ -116,11 +116,11 @@ type NodeSpec struct {
 	// RootDeviceHints specifies the device for deployment.
 	// Identifiers that are stable across reboots are recommended, for example, wwn: <disk_wwn> or deviceName: /dev/disk/by-path/<device_path>
 	// +optional
-	RootDeviceHints bmh_v1alpha1.RootDeviceHints `json:"rootDeviceHints,omitempty"`
+	RootDeviceHints *bmh_v1alpha1.RootDeviceHints `json:"rootDeviceHints,omitempty"`
 
 	// NodeNetwork is a set of configurations pertaining to the network settings for the node.
 	// +optional
-	NodeNetwork aiv1beta1.NMStateConfigSpec `json:"nodeNetwork,omitempty"`
+	NodeNetwork *aiv1beta1.NMStateConfigSpec `json:"nodeNetwork,omitempty"`
 
 	// NodeLabels allows the specification of custom roles for your nodes in your managed clusters.
 	// These are additional roles are not used by any OpenShift Container Platform components, only by the user.
@@ -193,7 +193,7 @@ type ClusterInstanceSpec struct {
 
 	// PullSecretRef is the reference to the secret to use when pulling images.
 	// +required
-	PullSecretRef *corev1.LocalObjectReference `json:"pullSecretRef"`
+	PullSecretRef corev1.LocalObjectReference `json:"pullSecretRef"`
 
 	// ClusterImageSetNameRef is the name of the ClusterImageSet resource indicating which
 	// OpenShift version to deploy.
@@ -275,11 +275,11 @@ type ClusterInstanceSpec struct {
 
 	// DiskEncryption is the configuration to enable/disable disk encryption for cluster nodes.
 	// +optional
-	DiskEncryption DiskEncryption `json:"diskEncryption,omitempty"`
+	DiskEncryption *DiskEncryption `json:"diskEncryption,omitempty"`
 
 	// Proxy defines the proxy settings used for the install config
 	// +optional
-	Proxy aiv1beta1.Proxy `json:"proxy,omitempty"`
+	Proxy *aiv1beta1.Proxy `json:"proxy,omitempty"`
 
 	// ExtraManifestsRefs is list of config map references containing additional manifests to be applied to the cluster.
 	// +optional
@@ -311,7 +311,7 @@ type ClusterInstanceSpec struct {
 	// CABundle is a reference to a config map containing the new bundle of trusted certificates for the host.
 	// The tls-ca-bundle.pem entry in the config map will be written to /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
 	// +optional
-	CaBundleRef corev1.LocalObjectReference `json:"caBundleRef,omitempty"`
+	CaBundleRef *corev1.LocalObjectReference `json:"caBundleRef,omitempty"`
 
 	// +required
 	Nodes []NodeSpec `json:"nodes"`

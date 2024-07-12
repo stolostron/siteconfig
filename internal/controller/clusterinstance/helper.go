@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"reflect"
 	"strings"
 
 	sprig "github.com/go-task/slim-sprig"
@@ -256,29 +255,9 @@ func toYaml(v interface{}) string {
 	return strings.TrimSuffix(string(data), "\n")
 }
 
-// anyFieldDefined checks to see if an object has at least 1 field defined in a struct-like object
-func anyFieldDefined(v interface{}) bool {
-	rv := reflect.ValueOf(v)
-	if rv.Kind() == reflect.Ptr {
-		rv = rv.Elem()
-	}
-	if rv.Kind() != reflect.Struct {
-		return false
-	}
-	for i := 0; i < rv.NumField(); i++ {
-		field := rv.Field(i)
-		zero := reflect.Zero(field.Type()).Interface()
-		if !reflect.DeepEqual(field.Interface(), zero) {
-			return true
-		}
-	}
-	return false
-}
-
 // funcMap provides additional useful functions for template rendering
 func funcMap() template.FuncMap {
 	f := sprig.TxtFuncMap()
 	f["toYaml"] = toYaml
-	f["anyFieldDefined"] = anyFieldDefined
 	return f
 }

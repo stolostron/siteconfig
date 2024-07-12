@@ -46,7 +46,7 @@ func TestTemplateEngine_render(t *testing.T) {
 		},
 		Spec: v1alpha1.ClusterInstanceSpec{
 			ClusterName:            "site-sno-du-1",
-			PullSecretRef:          &corev1.LocalObjectReference{Name: "pullSecretName"},
+			PullSecretRef:          corev1.LocalObjectReference{Name: "pullSecretName"},
 			ClusterImageSetNameRef: "openshift-test",
 			SSHPublicKey:           "ssh-rsa",
 			BaseDomain:             "example.com",
@@ -60,10 +60,10 @@ func TestTemplateEngine_render(t *testing.T) {
 			ClusterLabels:          map[string]string{"group-du-sno": "test", "common": "true", "sites": "site-sno-du-1"},
 			InstallConfigOverrides: "{\"capabilities\":{\"baselineCapabilitySet\": \"None\", \"additionalEnabledCapabilities\": [ \"marketplace\", \"NodeTuning\" ] }}",
 			IgnitionConfigOverride: "igen",
-			DiskEncryption: v1alpha1.DiskEncryption{
+			DiskEncryption: &v1alpha1.DiskEncryption{
 				Type: "nbde",
 				Tang: []v1alpha1.TangConfig{{URL: "http://10.0.0.1:7500", Thumbprint: "1234567890"}}},
-			Proxy:              aiv1beta1.Proxy{NoProxy: "foobar"},
+			Proxy:              &aiv1beta1.Proxy{NoProxy: "foobar"},
 			ExtraManifestsRefs: []corev1.LocalObjectReference{{Name: "foobar1"}, {Name: "foobar2"}},
 			TemplateRefs:       []v1alpha1.TemplateRef{{Name: "cluster-v1", Namespace: "site-sno-du-1"}},
 			Nodes: []v1alpha1.NodeSpec{{
@@ -71,7 +71,7 @@ func TestTemplateEngine_render(t *testing.T) {
 				BmcCredentialsName:     v1alpha1.BmcCredentialsName{Name: "bmc-secret"},
 				BootMACAddress:         "00:00:00:01:20:30",
 				AutomatedCleaningMode:  "disabled",
-				RootDeviceHints:        bmh_v1alpha1.RootDeviceHints{HCTL: "1:2:0:0"},
+				RootDeviceHints:        &bmh_v1alpha1.RootDeviceHints{HCTL: "1:2:0:0"},
 				HostName:               "node1",
 				Role:                   "master",
 				IronicInspect:          "enabled",
@@ -79,7 +79,7 @@ func TestTemplateEngine_render(t *testing.T) {
 				InstallerArgs:          "[\"--append-karg\", \"nameserver=8.8.8.8\", \"-n\"]",
 				IgnitionConfigOverride: "{\"ignition\": {\"version\": \"3.1.0\"}, \"storage\": {\"files\": [{\"path\": \"/etc/containers/registries.conf\", \"overwrite\": true, \"contents\": {\"source\": \"data:text/plain;base64,aGVsbG8gZnJvbSB6dHAgcG9saWN5IGdlbmVyYXRvcg==\"}}]}}",
 				TemplateRefs:           []v1alpha1.TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
-				NodeNetwork: aiv1beta1.NMStateConfigSpec{
+				NodeNetwork: &aiv1beta1.NMStateConfigSpec{
 					NetConfig:  aiv1beta1.NetConfig{Raw: []byte(NetConfig.RawNetConfig())},
 					Interfaces: NetConfig.Interfaces,
 				},

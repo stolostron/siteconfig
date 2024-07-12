@@ -62,7 +62,7 @@ var _ = Describe("Reconcile", func() {
 			},
 			Spec: v1alpha1.ClusterInstanceSpec{
 				ClusterName:            clusterName,
-				PullSecretRef:          &corev1.LocalObjectReference{Name: "pull-secret"},
+				PullSecretRef:          corev1.LocalObjectReference{Name: "pull-secret"},
 				ClusterImageSetNameRef: "testimage:foobar",
 				SSHPublicKey:           "test-ssh",
 				BaseDomain:             "abcd",
