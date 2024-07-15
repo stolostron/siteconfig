@@ -76,5 +76,10 @@ spec:
           requests:
             cpu: 100m
             memory: 256Mi
+            ephemeral-storage: "1Gi"
+          limits:
+            cpu: "2"
+            memory: 16Gi
+            ephemeral-storage: 10Gi
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

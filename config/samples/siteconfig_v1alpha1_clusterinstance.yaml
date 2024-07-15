@@ -23,20 +23,20 @@ spec:
     common: "true"
     sites : "site-sno-du-1"
   clusterNetwork:
-    - cidr: 10.128.0.0/14
+    - cidr: 203.0.113.0/24
       hostPrefix: 23
   machineNetwork:
-    - cidr: 10.16.231.0/24
+    - cidr: 203.0.113.0/24
   serviceNetwork:
-    - cidr: 172.30.0.0/16
+    - cidr: 203.0.113.0/24
   additionalNTPSources:
     - NTP.server1
-    - 10.16.231.22
+    - 198.51.100.100
   ignitionConfigOverride: "igen"
   diskEncryption:
     type: "nbde"
     tang:
-      - url: "http://10.0.0.1:7500"
+      - url: "http://192.0.2.5:7500"
         thumbprint: "1234567890"
   clusterType: SNO
   templateRefs:
@@ -49,24 +49,24 @@ spec:
         - name: aci-node-crs-v1
           namespace: siteconfig-operator
       ironicInspect: ""
-      bmcAddress: "idrac-virtualmedia+https://10.16.231.87/redfish/v1/Systems/System.Embedded.1"
+      bmcAddress: "idrac-virtualmedia+https://203.0.113.100/redfish/v1/Systems/System.Embedded.1"
       bmcCredentialsName:
         name: "name of bmcCredentials secret"
-      bootMACAddress: "00:00:00:01:20:30"
+      bootMACAddress: "00:00:5E:00:53:00"
       bootMode: "UEFI"
       rootDeviceHints:
         hctl: "1:2:0:0"
       cpuset: "2-19,22-39"
       installerArgs: '["--append-karg", "nameserver=8.8.8.8", "-n"]'
-      ignitionConfigOverride: '{"ignition": {"version": "3.1.0"}, "storage": {"files": [{"path": "/etc/containers/registries.conf", "overwrite": true, "contents": {"source": "data:text/plain;base64,aGVsbG8gZnJvbSB6dHAgcG9saWN5IGdlbmVyYXRvcg=="}}]}}'
+      ignitionConfigOverride: '{"ignition": {"version": "3.1.0"}, "storage": {"files": [{"path": "/etc/containers/registries.conf", "overwrite": true, "contents": {"source": "data:text/plain;base64,foobar=="}}]}}'
       nodeNetwork:
         interfaces:
           - name: eno1
-            macAddress: "00:00:00:01:20:30"
+            macAddress: "00:00:5E:00:53:01"
           - name: eth0
-            macAddress: "02:00:00:80:12:14"
+            macAddress: "00:00:5E:00:53:02"
           - name: eth1
-            macAddress: "02:00:00:80:12:15"
+            macAddress: "00:00:5E:00:53:03"
         config:
           interfaces:
             - name: eno1
@@ -75,29 +75,29 @@ spec:
                 enabled: true
                 dhcp: false
                 address:
-                  - ip: 10.16.231.3
+                  - ip: 192.0.2.1
                     prefix-length: 24
-                  - ip: 10.16.231.28
+                  - ip: 192.0.2.2
                     prefix-length: 24
-                  - ip: 10.16.231.31
+                  - ip: 192.0.2.3
                     prefix-length: 24
               ipv6:
                 enabled: true
                 dhcp: false
                 address:
-                  - ip: "2620:52:0:10e7:e42:a1ff:fe8a:601"
-                    prefix-length: 64
-                  - ip: "2620:52:0:10e7:e42:a1ff:fe8a:602"
-                    prefix-length: 64
-                  - ip: "2620:52:0:10e7:e42:a1ff:fe8a:603"
-                    prefix-length: 64
+                  - ip: "2001:0DB8:0:0:0:0:0:1"
+                    prefix-length: 32
+                  - ip: "2001:0DB8:0:0:0:0:0:2"
+                    prefix-length: 32
+                  - ip: "2001:0DB8:0:0:0:0:0:3"
+                    prefix-length: 32
             - name: bond99
               type: bond
               state: up
               ipv6:
                 address:
-                  - ip: "2620:52:0:1302::100"
-                prefix-length: 64
+                  - ip: "2001:0DB8:0:0:0:0:0:4"
+                prefix-length: 32
                 enabled: true
                 link-aggregation:
                   mode: balance-rr
@@ -109,11 +109,11 @@ spec:
           dns-resolver:
             config:
               server:
-                - 10.19.42.41
+                - 198.51.100.1
           routes:
             config:
               - destination: 0.0.0.0/0
-                next-hop-address: 10.16.231.254
+                next-hop-address: 203.0.113.255
                 next-hop-interface: eno1
                 table-id: 254
 

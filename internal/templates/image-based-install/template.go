@@ -139,7 +139,7 @@ metadata:
 {{ end }}
     bmac.agent-install.openshift.io/hostname: "{{ .SpecialVars.CurrentNode.HostName }}"
 {{ if .SpecialVars.CurrentNode.InstallerArgs  }}
-    bmac.agent-install.openshift.io/installer-args: {{ .SpecialVars.CurrentNode.InstallerArgs  }}
+    bmac.agent-install.openshift.io/installer-args: '{{ .SpecialVars.CurrentNode.InstallerArgs  }}'
 {{ end }}
 {{ if .SpecialVars.CurrentNode.IgnitionConfigOverride }}
     bmac.agent-install.openshift.io/ignition-config-overrides: '{{ .SpecialVars.CurrentNode.IgnitionConfigOverride }}'

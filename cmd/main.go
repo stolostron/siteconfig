@@ -138,7 +138,7 @@ func main() {
 		Scheme:     mgr.GetScheme(),
 		Recorder:   mgr.GetEventRecorderFor("ClusterInstance-controller"),
 		Log:        log,
-		TmplEngine: ci.NewTemplateEngine(log.WithName("ClusterInstance.TemplateEngine")),
+		TmplEngine: ci.NewTemplateEngine(log.WithName("TemplateEngine")),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterInstance")
 		os.Exit(1)
@@ -201,7 +201,8 @@ func initConfigMapTemplates(ctx context.Context, c client.Client, log logr.Logge
 		if err := retry.RetryOnConflictOrRetriable(k8sretry.DefaultBackoff, func() error {
 			return client.IgnoreAlreadyExists(c.Create(ctx, configMap))
 		}); err != nil {
-			return fmt.Errorf("failed to create default reference template ConfigMap %s/%s during init, error: %w", siteConfigNamespace, k, err)
+			return fmt.Errorf("failed to create default reference template ConfigMap %s/%s during init, error: %w",
+				siteConfigNamespace, k, err)
 		}
 
 		log.Info(fmt.Sprintf("created default reference template ConfigMap %s/%s", siteConfigNamespace, k))

@@ -97,7 +97,8 @@ type NodeSpec struct {
 	// +required
 	BmcAddress string `json:"bmcAddress"`
 
-	// BmcCredentialsName is the name of the secret containing the BMC credentials (requires keys "username" and "password").
+	// BmcCredentialsName is the name of the secret containing the BMC credentials (requires keys "username"
+	// and "password").
 	// +required
 	BmcCredentialsName BmcCredentialsName `json:"bmcCredentialsName"`
 
@@ -108,13 +109,15 @@ type NodeSpec struct {
 	BootMACAddress string `json:"bootMACAddress"`
 
 	// When set to disabled, automated cleaning will be avoided during provisioning and deprovisioning.
-	// Set the value to metadata to enable the removal of the disk’s partitioning table only, without fully wiping the disk. The default value is disabled.
+	// Set the value to metadata to enable the removal of the disk’s partitioning table only, without fully wiping
+	// the disk. The default value is disabled.
 	// +optional
 	// +kubebuilder:default:=disabled
 	AutomatedCleaningMode bmh_v1alpha1.AutomatedCleaningMode `json:"automatedCleaningMode,omitempty"`
 
 	// RootDeviceHints specifies the device for deployment.
-	// Identifiers that are stable across reboots are recommended, for example, wwn: <disk_wwn> or deviceName: /dev/disk/by-path/<device_path>
+	// Identifiers that are stable across reboots are recommended, for example, wwn: <disk_wwn> or
+	// deviceName: /dev/disk/by-path/<device_path>
 	// +optional
 	RootDeviceHints *bmh_v1alpha1.RootDeviceHints `json:"rootDeviceHints,omitempty"`
 
@@ -123,10 +126,11 @@ type NodeSpec struct {
 	NodeNetwork *aiv1beta1.NMStateConfigSpec `json:"nodeNetwork,omitempty"`
 
 	// NodeLabels allows the specification of custom roles for your nodes in your managed clusters.
-	// These are additional roles are not used by any OpenShift Container Platform components, only by the user.
-	// When you add a custom role, it can be associated with a custom machine config pool that references a specific configuration for that role.
-	// Adding custom labels or roles during installation makes the deployment process more effective and prevents the need for additional reboots
-	// after the installation is complete.
+	// These are additional roles that are not used by any OpenShift Container Platform components, only by the user.
+	// When you add a custom role, it can be associated with a custom machine config pool that references a specific
+	// configuration for that role.
+	// Adding custom labels or roles during installation makes the deployment process more effective and prevents the
+	// need for additional reboots after the installation is complete.
 	// +optional
 	NodeLabels map[string]string `json:"nodeLabels,omitempty"`
 
@@ -162,7 +166,8 @@ type NodeSpec struct {
 	// +optional
 	SuppressedManifests []string `json:"suppressedManifests,omitempty"`
 
-	// IronicInspect is used to specify if automatic introspection carried out during registration of BMH is enabled or disabled
+	// IronicInspect is used to specify if automatic introspection carried out during registration of BMH is enabled or
+	// disabled
 	// +kubebuilder:default:=""
 	// +optional
 	IronicInspect IronicInspect `json:"ironicInspect,omitempty"`
@@ -291,7 +296,8 @@ type ClusterInstanceSpec struct {
 
 	// CPUPartitioning determines if a cluster should be setup for CPU workload partitioning at install time.
 	// When this field is set the cluster will be flagged for CPU Partitioning allowing users to segregate workloads to
-	// specific CPU Sets. This does not make any decisions on workloads it only configures the nodes to allow CPU Partitioning.
+	// specific CPU Sets. This does not make any decisions on workloads it only configures the nodes to allow CPU
+	// Partitioning.
 	// The "AllNodes" value will setup all nodes for CPU Partitioning, the default is "None".
 	// +kubebuilder:validation:Enum=None;AllNodes
 	// +kubebuilder:default=None
@@ -309,7 +315,6 @@ type ClusterInstanceSpec struct {
 	TemplateRefs []TemplateRef `json:"templateRefs"`
 
 	// CABundle is a reference to a config map containing the new bundle of trusted certificates for the host.
-	// The tls-ca-bundle.pem entry in the config map will be written to /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
 	// +optional
 	CaBundleRef *corev1.LocalObjectReference `json:"caBundleRef,omitempty"`
 
@@ -342,14 +347,16 @@ type ManifestReference struct {
 	// Namespace is the namespace of the resource being referenced
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
-	//SyncWave is the order in which the resource should be processed: created in ascending order, deleted in descending order.
+	// SyncWave is the order in which the resource should be processed: created in ascending order, deleted in
+	// descending order.
 	// +required
 	SyncWave int `json:"syncWave"`
 	// Status is the status of the manifest
 	// +required
 	Status string `json:"status"`
 	// lastAppliedTime is the last time the manifest was applied.
-	// This should be when the underlying manifest changed.  If that is not known, then using the time when the API field changed is acceptable.
+	// This should be when the underlying manifest changed.  If that is not known, then using the time when the API
+	// field changed is acceptable.
 	// +kubebuilder:validation:Type=string
 	// +kubebuilder:validation:Format=date-time
 	// +required
@@ -366,15 +373,15 @@ type ClusterInstanceStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// +operator-sdk:csv:customresourcedefinitions:type=status,displayName="Conditions",xDescriptors={"urn:alm:descriptor:io.kubernetes.conditions"}
+	// List of conditions pertaining to actions performed on the ClusterInstance resource.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// ClusterDeploymentRef is a reference to the ClusterDeployment.
+	// Reference to the associated ClusterDeployment resource.
 	// +optional
 	ClusterDeploymentRef *corev1.LocalObjectReference `json:"clusterDeploymentRef,omitempty"`
 
-	// Conditions is a list of conditions associated with syncing to the cluster.
+	// List of hive status conditions associated with the ClusterDeployment resource.
 	// +optional
 	DeploymentConditions []hivev1.ClusterDeploymentCondition `json:"deploymentConditions,omitempty"`
 

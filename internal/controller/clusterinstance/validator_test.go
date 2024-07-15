@@ -18,7 +18,6 @@ package clusterinstance
 import (
 	"context"
 
-	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,21 +29,25 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+const (
+	doesNotExist = "does-not-exist"
+)
+
 var _ = Describe("Validate", func() {
 	var (
-		bmcCredentialsName                           = "bmh-secret"
-		bmc, pullSecret                              *corev1.Secret
-		c                                            client.Client
-		ctx                                          = context.Background()
-		clusterName                                  = "test-cluster"
-		clusterNamespace                             = "test-cluster"
-		clusterImageSetName                          = "testimage:foobar"
-		clusterImageSet                              *hivev1.ClusterImageSet
-		clusterTemplateRef                           = "cluster-template-ref"
-		clusterTemplate, nodeTemplate, extraManifest *corev1.ConfigMap
-		extraManifestName                            = "extra-manifest"
-		nodeTemplateRef                              = "node-template-ref"
-		clusterInstance                              *v1alpha1.ClusterInstance
+		c          client.Client
+		ctx        = context.Background()
+		testParams = &TestParams{
+			BmcCredentialsName:  "bmh-secret",
+			ClusterName:         "test-cluster",
+			ClusterNamespace:    "test-cluster",
+			ClusterImageSetName: "testimage:foobar",
+			ExtraManifestName:   "extra-manifest",
+			ClusterTemplateRef:  "cluster-template-ref",
+			NodeTemplateRef:     "node-template-ref",
+			PullSecret:          "pull-secret",
+		}
+		clusterInstance *v1alpha1.ClusterInstance
 	)
 
 	BeforeEach(func() {
@@ -53,17 +56,12 @@ var _ = Describe("Validate", func() {
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 
-		bmc = GetMockBmcSecret(bmcCredentialsName, clusterNamespace)
-		clusterImageSet = GetMockClusterImageSet(clusterImageSetName)
-		pullSecret = GetMockPullSecret("pull-secret", clusterNamespace)
-		clusterTemplate = GetMockClusterTemplate(clusterTemplateRef, clusterNamespace)
-		nodeTemplate = GetMockNodeTemplate(nodeTemplateRef, clusterNamespace)
-		extraManifest = GetMockExtraManifest(extraManifestName, clusterNamespace)
+		SetupTestResources(ctx, c, testParams)
+		clusterInstance = testParams.GenerateSNOClusterInstance()
+	})
 
-		SetupTestPrereqs(ctx, c, bmc, pullSecret, clusterImageSet, clusterTemplate, nodeTemplate, extraManifest)
-
-		clusterInstance = GetMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
-
+	AfterEach(func() {
+		TeardownTestResources(ctx, c, testParams)
 	})
 
 	It("successfully validates a well-defined ClusterInstance", func() {
@@ -90,7 +88,7 @@ var _ = Describe("Validate", func() {
 	})
 
 	It("fails validation when clusterImageSet resource does not exist", func() {
-		clusterInstance.Spec.ClusterImageSetNameRef = "does-not-exist"
+		clusterInstance.Spec.ClusterImageSetNameRef = doesNotExist
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		err := Validate(ctx, c, clusterInstance)
@@ -106,7 +104,7 @@ var _ = Describe("Validate", func() {
 	})
 
 	It("fails validation due to missing pull secret", func() {
-		clusterInstance.Spec.PullSecretRef = corev1.LocalObjectReference{Name: "does-not-exist"}
+		clusterInstance.Spec.PullSecretRef = corev1.LocalObjectReference{Name: doesNotExist}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		err := Validate(ctx, c, clusterInstance)
@@ -128,7 +126,7 @@ var _ = Describe("Validate", func() {
 	})
 
 	It("fails validation when an ExtraManifest reference does not exist", func() {
-		clusterInstance.Spec.ExtraManifestsRefs = []corev1.LocalObjectReference{{Name: "does-not-exist"}}
+		clusterInstance.Spec.ExtraManifestsRefs = []corev1.LocalObjectReference{{Name: doesNotExist}}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 		err := Validate(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("failed to retrieve ExtraManifest")))
@@ -144,7 +142,7 @@ var _ = Describe("Validate", func() {
 
 	It("fails validation when a node-level template ref does not exist", func() {
 		clusterInstance.Spec.Nodes[0].TemplateRefs = []v1alpha1.TemplateRef{
-			{Name: "does-not-exist", Namespace: clusterName}}
+			{Name: doesNotExist, Namespace: testParams.ClusterName}}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		err := Validate(ctx, c, clusterInstance)
@@ -152,7 +150,7 @@ var _ = Describe("Validate", func() {
 	})
 
 	It("fails validation due to missing BMC credential secret", func() {
-		clusterInstance.Spec.Nodes[0].BmcCredentialsName = v1alpha1.BmcCredentialsName{Name: "does-not-exist"}
+		clusterInstance.Spec.Nodes[0].BmcCredentialsName = v1alpha1.BmcCredentialsName{Name: doesNotExist}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		err := Validate(ctx, c, clusterInstance)
@@ -183,23 +181,23 @@ var _ = Describe("Validate", func() {
 		Expect(err).To(MatchError(ContainSubstring("at least 1 ControlPlane agent is required")))
 	})
 
-	It("fails validation when worker agents are defined for SNO-based cluster-type", func() {
+	It("fails validation when more than 1 ControlPlane agent is defined for SNO-based cluster-type", func() {
 		clusterInstance.Spec.Nodes = []v1alpha1.NodeSpec{
 			{
 				Role:               "master",
-				BmcAddress:         "1:2:3:4",
-				BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: bmcCredentialsName},
+				BmcAddress:         "192.0.2.1",
+				BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: testParams.BmcCredentialsName},
 				TemplateRefs: []v1alpha1.TemplateRef{
-					{Name: nodeTemplateRef, Namespace: clusterName}}},
+					{Name: testParams.NodeTemplateRef, Namespace: testParams.ClusterName}}},
 			{
-				Role:               "worker",
-				BmcAddress:         "4:5:6:7",
-				BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: bmcCredentialsName},
+				Role:               "master",
+				BmcAddress:         "192.0.2.2",
+				BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: testParams.BmcCredentialsName},
 				TemplateRefs: []v1alpha1.TemplateRef{
-					{Name: nodeTemplateRef, Namespace: clusterName}}}}
+					{Name: testParams.NodeTemplateRef, Namespace: testParams.ClusterName}}}}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		err := Validate(ctx, c, clusterInstance)
-		Expect(err).To(MatchError(ContainSubstring("sno cluster-type requires 1 control-plane agent and no worker agents")))
+		Expect(err).To(MatchError(ContainSubstring("sno cluster-type can only have 1 control-plane agent")))
 	})
 })

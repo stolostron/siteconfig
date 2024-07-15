@@ -67,8 +67,7 @@ spec:
                 type: string
               caBundleRef:
                 description: CABundle is a reference to a config map containing the
-                  new bundle of trusted certificates for the host. The tls-ca-bundle.pem
-                  entry in the config map will be written to /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+                  new bundle of trusted certificates for the host.
                 properties:
                   name:
                     description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
@@ -288,13 +287,13 @@ spec:
                         type: string
                       description: NodeLabels allows the specification of custom roles
                         for your nodes in your managed clusters. These are additional
-                        roles are not used by any OpenShift Container Platform components,
-                        only by the user. When you add a custom role, it can be associated
-                        with a custom machine config pool that references a specific
-                        configuration for that role. Adding custom labels or roles
-                        during installation makes the deployment process more effective
-                        and prevents the need for additional reboots after the installation
-                        is complete.
+                        roles that are not used by any OpenShift Container Platform
+                        components, only by the user. When you add a custom role,
+                        it can be associated with a custom machine config pool that
+                        references a specific configuration for that role. Adding
+                        custom labels or roles during installation makes the deployment
+                        process more effective and prevents the need for additional
+                        reboots after the installation is complete.
                       type: object
                     nodeNetwork:
                       description: NodeNetwork is a set of configurations pertaining
@@ -500,7 +499,7 @@ spec:
             description: ClusterInstanceStatus defines the observed state of ClusterInstance
             properties:
               clusterDeploymentRef:
-                description: ClusterDeploymentRef is a reference to the ClusterDeployment.
+                description: Reference to the associated ClusterDeployment resource.
                 properties:
                   name:
                     description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
@@ -509,6 +508,8 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               conditions:
+                description: List of conditions pertaining to actions performed on
+                  the ClusterInstance resource.
                 items:
                   description: "Condition contains details for one aspect of the current
                     state of this API Resource. --- This struct is intended for direct
@@ -577,8 +578,8 @@ spec:
                   type: object
                 type: array
               deploymentConditions:
-                description: Conditions is a list of conditions associated with syncing
-                  to the cluster.
+                description: List of hive status conditions associated with the ClusterDeployment
+                  resource.
                 items:
                   description: ClusterDeploymentCondition contains details for the
                     current condition of a cluster deployment

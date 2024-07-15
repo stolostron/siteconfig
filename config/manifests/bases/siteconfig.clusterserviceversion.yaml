@@ -14,11 +14,6 @@ spec:
       displayName: Cluster Instance
       kind: ClusterInstance
       name: clusterinstances.siteconfig.open-cluster-management.io
-      statusDescriptors:
-      - displayName: Conditions
-        path: conditions
-        x-descriptors:
-        - urn:alm:descriptor:io.kubernetes.conditions
       version: v1alpha1
   description: Manage SiteConfig
   displayName: siteconfig
