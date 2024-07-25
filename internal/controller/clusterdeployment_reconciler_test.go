@@ -33,6 +33,16 @@ import (
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+const ClusterInstanceApiVersion = v1alpha1.Group + "/" + v1alpha1.Version
+
+// compareToExpectedCondition compares the observed condition to the expected condition
+func compareToExpectedCondition(observed, expected *metav1.Condition) {
+	Expect(observed).ToNot(BeNil())
+	Expect(observed.Type).To(Equal(expected.Type))
+	Expect(observed.Status).To(Equal(expected.Status))
+	Expect(observed.Reason).To(Equal(expected.Reason))
+}
+
 var _ = Describe("Reconcile", func() {
 	var (
 		c                client.Client
@@ -70,7 +80,7 @@ var _ = Describe("Reconcile", func() {
 				TemplateRefs: []v1alpha1.TemplateRef{
 					{Name: "test-cluster-template", Namespace: "default"}},
 				Nodes: []v1alpha1.NodeSpec{{
-					BmcAddress:         "1:2:3:4",
+					BmcAddress:         "192.0.2.0",
 					BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: "bmc"},
 					TemplateRefs: []v1alpha1.TemplateRef{
 						{Name: "test-node-template", Namespace: "default"}}}}},
@@ -117,7 +127,7 @@ var _ = Describe("Reconcile", func() {
 				Conditions: []hivev1.ClusterDeploymentCondition{
 					{
 						Type:    hivev1.ClusterInstallFailedClusterDeploymentCondition,
-						Status:  corev1.ConditionStatus(metav1.ConditionFalse),
+						Status:  corev1.ConditionFalse,
 						Reason:  "InstallationNotFailed",
 						Message: "The installation has not failed"},
 				},
@@ -130,9 +140,9 @@ var _ = Describe("Reconcile", func() {
 		Expect(res).To(Equal(ctrl.Result{}))
 
 		// Fetch ClusterInstance and verify that the status is unchanged
-		sc := &v1alpha1.ClusterInstance{}
-		Expect(c.Get(ctx, key, sc)).To(Succeed())
-		Expect(sc.Status).To(Equal(clusterInstance.Status))
+		ci := &v1alpha1.ClusterInstance{}
+		Expect(c.Get(ctx, key, ci)).To(Succeed())
+		Expect(ci.Status).To(Equal(clusterInstance.Status))
 	})
 
 	It("tests that ClusterDeploymentReconciler initializes ClusterInstance ClusterDeployment correctly", func() {
@@ -146,7 +156,7 @@ var _ = Describe("Reconcile", func() {
 				Namespace: clusterNamespace,
 				OwnerReferences: []metav1.OwnerReference{
 					{
-						APIVersion: "siteconfig.open-cluster-management.io/v1alpha1",
+						APIVersion: ClusterInstanceApiVersion,
 						Kind:       v1alpha1.ClusterInstanceKind,
 						Name:       clusterName,
 					},
@@ -162,40 +172,35 @@ var _ = Describe("Reconcile", func() {
 		expectedConditions := []hivev1.ClusterDeploymentCondition{
 			{
 				Type:    hivev1.ClusterInstallRequirementsMetClusterDeploymentCondition,
-				Status:  corev1.ConditionStatus(metav1.ConditionUnknown),
+				Status:  corev1.ConditionUnknown,
 				Message: "Unknown",
 			},
 			{
 				Type:    hivev1.ClusterInstallStoppedClusterDeploymentCondition,
-				Status:  corev1.ConditionStatus(metav1.ConditionUnknown),
+				Status:  corev1.ConditionUnknown,
 				Message: "Unknown",
 			},
 			{
 				Type:    hivev1.ClusterInstallCompletedClusterDeploymentCondition,
-				Status:  corev1.ConditionStatus(metav1.ConditionUnknown),
+				Status:  corev1.ConditionUnknown,
 				Message: "Unknown",
 			},
 			{
 				Type:    hivev1.ClusterInstallFailedClusterDeploymentCondition,
-				Status:  corev1.ConditionStatus(metav1.ConditionUnknown),
+				Status:  corev1.ConditionUnknown,
 				Message: "Unknown",
 			},
 		}
 
-		sc := &v1alpha1.ClusterInstance{}
-		Expect(c.Get(ctx, key, sc)).To(Succeed())
-		Expect(sc.Status.ClusterDeploymentRef.Name).To(Equal(clusterName))
-		Expect(len(sc.Status.DeploymentConditions)).To(Equal(len(expectedConditions)))
+		ci := &v1alpha1.ClusterInstance{}
+		Expect(c.Get(ctx, key, ci)).To(Succeed())
+		Expect(ci.Status.ClusterDeploymentRef.Name).To(Equal(clusterName))
+		Expect(len(ci.Status.DeploymentConditions)).To(Equal(len(expectedConditions)))
 
 		for _, cond := range expectedConditions {
-			matched := false
-			for i := range sc.Status.DeploymentConditions {
-				if sc.Status.DeploymentConditions[i].Type == cond.Type &&
-					sc.Status.DeploymentConditions[i].Status == cond.Status {
-					matched = true
-				}
-			}
-			Expect(matched).To(Equal(true), "Condition %s was not found", cond.Type)
+			found := conditions.FindConditionType(ci.Status.DeploymentConditions, cond.Type)
+			Expect(found).ToNot(BeNil(), "Condition %s was not found", cond.Type)
+			Expect(found.Status).To(Equal(cond.Status))
 		}
 	})
 
@@ -210,7 +215,7 @@ var _ = Describe("Reconcile", func() {
 				Namespace: clusterNamespace,
 				OwnerReferences: []metav1.OwnerReference{
 					{
-						APIVersion: "siteconfig.open-cluster-management.io/v1alpha1",
+						APIVersion: ClusterInstanceApiVersion,
 						Kind:       v1alpha1.ClusterInstanceKind,
 						Name:       clusterName,
 					},
@@ -228,32 +233,32 @@ var _ = Describe("Reconcile", func() {
 		err := conditions.UpdateStatus(ctx, c, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
-		sc := &v1alpha1.ClusterInstance{}
-		Expect(c.Get(ctx, key, sc)).To(Succeed())
+		ci := &v1alpha1.ClusterInstance{}
+		Expect(c.Get(ctx, key, ci)).To(Succeed())
 
 		DeploymentConditions := [][]hivev1.ClusterDeploymentCondition{
 			{
 				{
 					Type:    hivev1.ClusterInstallRequirementsMetClusterDeploymentCondition,
-					Status:  corev1.ConditionStatus(metav1.ConditionFalse),
+					Status:  corev1.ConditionFalse,
 					Reason:  "ClusterNotReady",
 					Message: "The cluster is not ready to begin the installation",
 				},
 				{
 					Type:    hivev1.ClusterInstallStoppedClusterDeploymentCondition,
-					Status:  corev1.ConditionStatus(metav1.ConditionFalse),
+					Status:  corev1.ConditionFalse,
 					Reason:  "InstallationNotStopped",
 					Message: "The installation is waiting to start or in progress",
 				},
 				{
 					Type:    hivev1.ClusterInstallCompletedClusterDeploymentCondition,
-					Status:  corev1.ConditionStatus(metav1.ConditionTrue),
+					Status:  corev1.ConditionTrue,
 					Reason:  "InstallationNotFailed",
 					Message: "The installation has not started",
 				},
 				{
 					Type:    hivev1.ClusterInstallFailedClusterDeploymentCondition,
-					Status:  corev1.ConditionStatus(metav1.ConditionFalse),
+					Status:  corev1.ConditionFalse,
 					Reason:  "InstallationNotFailed",
 					Message: "The installation has not started",
 				},
@@ -262,25 +267,25 @@ var _ = Describe("Reconcile", func() {
 			{
 				{
 					Type:    hivev1.ClusterInstallRequirementsMetClusterDeploymentCondition,
-					Status:  corev1.ConditionStatus(metav1.ConditionTrue),
+					Status:  corev1.ConditionTrue,
 					Reason:  "ClusterInstallationStopped",
 					Message: "The cluster installation stopped",
 				},
 				{
 					Type:    hivev1.ClusterInstallStoppedClusterDeploymentCondition,
-					Status:  corev1.ConditionStatus(metav1.ConditionTrue),
+					Status:  corev1.ConditionTrue,
 					Reason:  "ClusterInstallStopped",
 					Message: "The installation has stopped because it completed successfully",
 				},
 				{
 					Type:    hivev1.ClusterInstallCompletedClusterDeploymentCondition,
-					Status:  corev1.ConditionStatus(metav1.ConditionTrue),
+					Status:  corev1.ConditionTrue,
 					Reason:  "InstallationCompleted",
 					Message: "The installation has completed: Cluster is installed",
 				},
 				{
 					Type:    hivev1.ClusterInstallFailedClusterDeploymentCondition,
-					Status:  corev1.ConditionStatus(metav1.ConditionFalse),
+					Status:  corev1.ConditionFalse,
 					Reason:  "InstallationNotFailed",
 					Message: "The installation has not failed",
 				},
@@ -295,42 +300,211 @@ var _ = Describe("Reconcile", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res).To(Equal(doNotRequeue()))
 
-			sc := &v1alpha1.ClusterInstance{}
-			Expect(c.Get(ctx, key, sc)).To(Succeed())
+			ci := &v1alpha1.ClusterInstance{}
+			Expect(c.Get(ctx, key, ci)).To(Succeed())
 
 			for _, cond := range deploymentCondition {
-				matched := false
-				for i := range sc.Status.DeploymentConditions {
-					if sc.Status.DeploymentConditions[i].Type == cond.Type &&
-						sc.Status.DeploymentConditions[i].Status == cond.Status &&
-						sc.Status.DeploymentConditions[i].Message == cond.Message &&
-						sc.Status.DeploymentConditions[i].Reason == cond.Reason {
-						matched = true
-					}
-				}
-				Expect(matched).To(Equal(true), "Condition %s was not found", cond.Type)
+				found := conditions.FindConditionType(ci.Status.DeploymentConditions, cond.Type)
+				Expect(found).ToNot(BeNil(), "Condition %s was not found", cond.Type)
+				Expect(found.Status).To(Equal(cond.Status))
+				Expect(found.Message).To(Equal(cond.Message))
+				Expect(found.Reason).To(Equal(cond.Reason))
 			}
 		}
 	})
 
-	It("tests that ClusterInstance status condition is set to provisioned when cluster is installed", func() {
+	It("tests that ClusterInstance provisioned status condition is set to True with reason set to Completed when provisioning succeeded", func() {
 		key := types.NamespacedName{
 			Namespace: clusterNamespace,
 			Name:      clusterName,
 		}
+
 		clusterDeployment := &hivev1.ClusterDeployment{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clusterName,
 				Namespace: clusterNamespace,
 				OwnerReferences: []metav1.OwnerReference{
 					{
-						APIVersion: "siteconfig.open-cluster-management.io/v1alpha1",
+						APIVersion: ClusterInstanceApiVersion,
 						Kind:       v1alpha1.ClusterInstanceKind,
 						Name:       clusterName,
 					},
 				},
 			},
+			Spec: hivev1.ClusterDeploymentSpec{
+				Installed: true,
+			},
+			Status: hivev1.ClusterDeploymentStatus{
+				Conditions: []hivev1.ClusterDeploymentCondition{
+					{
+						Type:    hivev1.ClusterInstallRequirementsMetClusterDeploymentCondition,
+						Status:  corev1.ConditionTrue,
+						Reason:  "ClusterInstallationStopped",
+						Message: "The cluster installation stopped",
+					},
+					{
+						Type:    hivev1.ClusterInstallStoppedClusterDeploymentCondition,
+						Status:  corev1.ConditionTrue,
+						Reason:  "ClusterInstallStopped",
+						Message: "The installation has stopped because it completed successfully",
+					},
+					{
+						Type:    hivev1.ClusterInstallCompletedClusterDeploymentCondition,
+						Status:  corev1.ConditionTrue,
+						Reason:  "InstallationCompleted",
+						Message: "The installation has completed: Cluster is installed",
+					},
+					{
+						Type:    hivev1.ClusterInstallFailedClusterDeploymentCondition,
+						Status:  corev1.ConditionFalse,
+						Reason:  "InstallationNotFailed",
+						Message: "The installation has not failed",
+					},
+				},
+			},
 		}
+
+		Expect(c.Create(ctx, clusterDeployment)).To(Succeed())
+
+		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(Equal(ctrl.Result{}))
+
+		ci := &v1alpha1.ClusterInstance{}
+		Expect(c.Get(ctx, key, ci)).To(Succeed())
+
+		expectedCondition := &metav1.Condition{
+			Type:   string(conditions.Provisioned),
+			Status: metav1.ConditionTrue,
+			Reason: string(conditions.Completed),
+		}
+
+		found := conditions.FindStatusCondition(ci.Status.Conditions, expectedCondition.Type)
+		compareToExpectedCondition(found, expectedCondition)
+	})
+
+	It("tests that ClusterInstance provisioned status condition is set to False with reason set to Failed when provisioning failed", func() {
+		key := types.NamespacedName{
+			Namespace: clusterNamespace,
+			Name:      clusterName,
+		}
+
+		clusterDeployment := &hivev1.ClusterDeployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      clusterName,
+				Namespace: clusterNamespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: ClusterInstanceApiVersion,
+						Kind:       v1alpha1.ClusterInstanceKind,
+						Name:       clusterName,
+					},
+				},
+			},
+			Spec: hivev1.ClusterDeploymentSpec{
+				Installed: false,
+			},
+			Status: hivev1.ClusterDeploymentStatus{
+				Conditions: []hivev1.ClusterDeploymentCondition{
+					{
+						Type:    hivev1.ClusterInstallRequirementsMetClusterDeploymentCondition,
+						Status:  corev1.ConditionTrue,
+						Reason:  "ClusterInstallationStopped",
+						Message: "The cluster installation stopped",
+					},
+					{
+						Type:    hivev1.ClusterInstallStoppedClusterDeploymentCondition,
+						Status:  corev1.ConditionTrue,
+						Reason:  "ClusterInstallStopped",
+						Message: "The installation has stopped because it failed",
+					},
+					{
+						Type:    hivev1.ClusterInstallCompletedClusterDeploymentCondition,
+						Status:  corev1.ConditionFalse,
+						Reason:  "InstallationCompleted",
+						Message: "The installation has completed: Cluster failed to install",
+					},
+					{
+						Type:    hivev1.ClusterInstallFailedClusterDeploymentCondition,
+						Status:  corev1.ConditionTrue,
+						Reason:  "InstallationFailed",
+						Message: "The installation has failed",
+					},
+				},
+			},
+		}
+
+		Expect(c.Create(ctx, clusterDeployment)).To(Succeed())
+
+		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(Equal(ctrl.Result{}))
+
+		ci := &v1alpha1.ClusterInstance{}
+		Expect(c.Get(ctx, key, ci)).To(Succeed())
+
+		expectedCondition := &metav1.Condition{
+			Type:   string(conditions.Provisioned),
+			Status: metav1.ConditionFalse,
+			Reason: string(conditions.Failed),
+		}
+
+		found := conditions.FindStatusCondition(ci.Status.Conditions, expectedCondition.Type)
+		compareToExpectedCondition(found, expectedCondition)
+	})
+
+	It("tests that ClusterInstance provisioned status condition is set to Unknown with reason set to StaleConditions "+
+		"when ClusterDeployment.Spec.Installed=true and the deployment conditions have not been updated", func() {
+		key := types.NamespacedName{
+			Namespace: clusterNamespace,
+			Name:      clusterName,
+		}
+
+		clusterDeployment := &hivev1.ClusterDeployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      clusterName,
+				Namespace: clusterNamespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: ClusterInstanceApiVersion,
+						Kind:       v1alpha1.ClusterInstanceKind,
+						Name:       clusterName,
+					},
+				},
+			},
+			Spec: hivev1.ClusterDeploymentSpec{
+				Installed: false,
+			},
+			Status: hivev1.ClusterDeploymentStatus{
+				Conditions: []hivev1.ClusterDeploymentCondition{
+					{
+						Type:    hivev1.ClusterInstallRequirementsMetClusterDeploymentCondition,
+						Status:  corev1.ConditionFalse,
+						Reason:  "ClusterNotReady",
+						Message: "The cluster is not ready to begin the installation",
+					},
+					{
+						Type:    hivev1.ClusterInstallStoppedClusterDeploymentCondition,
+						Status:  corev1.ConditionFalse,
+						Reason:  "InstallationNotStopped",
+						Message: "The installation is waiting to start or in progress",
+					},
+					{
+						Type:    hivev1.ClusterInstallCompletedClusterDeploymentCondition,
+						Status:  corev1.ConditionTrue,
+						Reason:  "InstallationNotFailed",
+						Message: "The installation has not started",
+					},
+					{
+						Type:    hivev1.ClusterInstallFailedClusterDeploymentCondition,
+						Status:  corev1.ConditionFalse,
+						Reason:  "InstallationNotFailed",
+						Message: "The installation has not started",
+					},
+				},
+			},
+		}
+
 		Expect(c.Create(ctx, clusterDeployment)).To(Succeed())
 
 		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
@@ -344,16 +518,17 @@ var _ = Describe("Reconcile", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(Equal(ctrl.Result{}))
 
-		sc := &v1alpha1.ClusterInstance{}
-		Expect(c.Get(ctx, key, sc)).To(Succeed())
+		ci := &v1alpha1.ClusterInstance{}
+		Expect(c.Get(ctx, key, ci)).To(Succeed())
 
-		found := false
-		for i := range sc.Status.Conditions {
-			if sc.Status.Conditions[i].Type == string(conditions.Provisioned) &&
-				sc.Status.Conditions[i].Status == metav1.ConditionTrue {
-				found = true
-			}
+		expectedCondition := &metav1.Condition{
+			Type:   string(conditions.Provisioned),
+			Status: metav1.ConditionUnknown,
+			Reason: string(conditions.StaleConditions),
 		}
-		Expect(found).To(Equal(true))
+
+		found := conditions.FindStatusCondition(ci.Status.Conditions, expectedCondition.Type)
+		compareToExpectedCondition(found, expectedCondition)
 	})
+
 })

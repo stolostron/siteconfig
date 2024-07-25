@@ -29,11 +29,12 @@ type ConditionReason string
 
 // The following constants define the different reasons that conditions will be set for
 const (
-	Completed  ConditionReason = "Completed"
-	Failed     ConditionReason = "Failed"
-	TimedOut   ConditionReason = "TimedOut"
-	InProgress ConditionReason = "InProgress"
-	Unknown    ConditionReason = "Unknown"
+	Completed       ConditionReason = "Completed"
+	Failed          ConditionReason = "Failed"
+	TimedOut        ConditionReason = "TimedOut"
+	InProgress      ConditionReason = "InProgress"
+	Unknown         ConditionReason = "Unknown"
+	StaleConditions ConditionReason = "StaleConditions"
 )
 
 // SetStatusCondition is a convenience wrapper for meta.SetStatusCondition that takes in the types defined here and
@@ -84,12 +85,23 @@ func PatchStatus(ctx context.Context, c client.Client, siteConfig *v1alpha1.Clus
 	return nil
 }
 
+// FindConditionType finds the conditionType in ClusterDeployment conditions.
 func FindConditionType(
 	conditions []hivev1.ClusterDeploymentCondition,
 	condType hivev1.ClusterDeploymentConditionType,
 ) *hivev1.ClusterDeploymentCondition {
 	for i := range conditions {
 		if conditions[i].Type == condType {
+			return &conditions[i]
+		}
+	}
+	return nil
+}
+
+// FindStatusCondition finds the conditionType in status conditions.
+func FindStatusCondition(conditions []metav1.Condition, conditionType string) *metav1.Condition {
+	for i := range conditions {
+		if conditions[i].Type == conditionType {
 			return &conditions[i]
 		}
 	}
