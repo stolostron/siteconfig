@@ -64,32 +64,6 @@ func requeueWithError(err error) (ctrl.Result, error) {
 	return ctrl.Result{}, err
 }
 
-//nolint:unused
-func requeueImmediately() ctrl.Result {
-	// Allow a brief pause in case there's a delay with a DB Update
-	return ctrl.Result{Requeue: true}
-}
-
-//nolint:unused
-func requeueWithShortInterval() ctrl.Result {
-	return requeueWithCustomInterval(30 * time.Second)
-}
-
-//nolint:unused
-func requeueWithMediumInterval() ctrl.Result {
-	return requeueWithCustomInterval(1 * time.Minute)
-}
-
-//nolint:unused
-func requeueWithLongInterval() ctrl.Result {
-	return requeueWithCustomInterval(5 * time.Minute)
-}
-
-//nolint:unused
-func requeueWithCustomInterval(interval time.Duration) ctrl.Result {
-	return ctrl.Result{RequeueAfter: interval}
-}
-
 //+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances/finalizers,verbs=update
@@ -162,7 +136,10 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return doNotRequeue(), nil
 }
 
-func (r *ClusterInstanceReconciler) finalizeClusterInstance(ctx context.Context, clusterInstance *v1alpha1.ClusterInstance) error {
+func (r *ClusterInstanceReconciler) finalizeClusterInstance(
+	ctx context.Context,
+	clusterInstance *v1alpha1.ClusterInstance,
+) error {
 
 	// Group the manifests by the sync-wave
 	// This is so that the manifests can be deleted in descending order of sync-wave
@@ -200,7 +177,10 @@ func (r *ClusterInstanceReconciler) finalizeClusterInstance(ctx context.Context,
 	return nil
 }
 
-func (r *ClusterInstanceReconciler) handleFinalizer(ctx context.Context, clusterInstance *v1alpha1.ClusterInstance) (ctrl.Result, bool, error) {
+func (r *ClusterInstanceReconciler) handleFinalizer(
+	ctx context.Context,
+	clusterInstance *v1alpha1.ClusterInstance,
+) (ctrl.Result, bool, error) {
 	// Check if the ClusterInstance is marked to be deleted, which is
 	// indicated by the deletion timestamp being set.
 	if clusterInstance.DeletionTimestamp.IsZero() {
@@ -230,7 +210,10 @@ func (r *ClusterInstanceReconciler) handleFinalizer(ctx context.Context, cluster
 	return ctrl.Result{}, false, nil
 }
 
-func (r *ClusterInstanceReconciler) handleValidate(ctx context.Context, clusterInstance *v1alpha1.ClusterInstance) error {
+func (r *ClusterInstanceReconciler) handleValidate(
+	ctx context.Context,
+	clusterInstance *v1alpha1.ClusterInstance,
+) error {
 
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
 
@@ -253,11 +236,14 @@ func (r *ClusterInstanceReconciler) handleValidate(ctx context.Context, clusterI
 	}
 	r.Log.Info("Finished validation", "ClusterInstance", clusterInstance.Name)
 
-	conditions.SetStatusCondition(&clusterInstance.Status.Conditions, conditions.ConditionType(newCond.Type), conditions.ConditionReason(newCond.Reason), newCond.Status, newCond.Message)
+	conditions.SetStatusCondition(&clusterInstance.Status.Conditions, conditions.ConditionType(newCond.Type),
+		conditions.ConditionReason(newCond.Reason), newCond.Status, newCond.Message)
 
 	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			r.Log.Info(fmt.Sprintf("Failed to update ClusterInstance %s status after validating ClusterInstance, err: %s", clusterInstance.Name, updateErr.Error()))
+			r.Log.Info(
+				fmt.Sprintf("Failed to update ClusterInstance %s status after validating ClusterInstance, err: %s",
+					clusterInstance.Name, updateErr.Error()))
 			err = updateErr
 		}
 	}
@@ -265,7 +251,10 @@ func (r *ClusterInstanceReconciler) handleValidate(ctx context.Context, clusterI
 	return err
 }
 
-func (r *ClusterInstanceReconciler) renderManifests(ctx context.Context, clusterInstance *v1alpha1.ClusterInstance) ([]interface{}, error) {
+func (r *ClusterInstanceReconciler) renderManifests(
+	ctx context.Context,
+	clusterInstance *v1alpha1.ClusterInstance,
+) ([]interface{}, error) {
 	r.Log.Info(fmt.Sprintf("Rendering templates for ClusterInstance %s", clusterInstance.Name))
 
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
@@ -287,7 +276,9 @@ func (r *ClusterInstanceReconciler) renderManifests(ctx context.Context, cluster
 
 	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			r.Log.Info(fmt.Sprintf("Failed to update ClusterInstance %s status after rendering templates, err: %s", clusterInstance.Name, updateErr.Error()))
+			r.Log.Info(
+				fmt.Sprintf("Failed to update ClusterInstance %s status after rendering templates, err: %s",
+					clusterInstance.Name, updateErr.Error()))
 			err = updateErr
 		}
 	}
@@ -295,42 +286,65 @@ func (r *ClusterInstanceReconciler) renderManifests(ctx context.Context, cluster
 	return renderedManifests, err
 }
 
+// getSyncWave extracts the syncWave from the given object manifest
+// if the syncWave cannot be parsed, a nil-int pointer is returned with the error
+func getSyncWave(object interface{}) (*int, error) {
+	var (
+		manifest    map[string]interface{}
+		kind        string
+		ok          bool
+		err         error
+		syncWaveStr string
+		syncWave    int
+	)
+
+	if manifest, ok = object.(map[string]interface{}); !ok {
+		return nil, fmt.Errorf("manifest should be of type 'map[string]interface{}'")
+	}
+
+	if kind, ok = manifest["kind"].(string); !ok {
+		return nil, fmt.Errorf("missing field `kind` from rendered manifest")
+	}
+
+	syncWaveStr = ci.DefaultWaveAnnotation
+	if metadata, ok := manifest["metadata"].(map[string]interface{}); ok {
+		if annotations, ok := metadata["annotations"].(map[string]interface{}); ok {
+			if syncWaveStr, ok = annotations[ci.WaveAnnotation].(string); !ok {
+				syncWaveStr = ci.DefaultWaveAnnotation
+			}
+		}
+	}
+
+	if syncWave, err = strconv.Atoi(syncWaveStr); err != nil {
+		return nil, fmt.Errorf("failed to extract annotation %s in resource %s", ci.WaveAnnotation, kind)
+	}
+
+	return &syncWave, nil
+}
+
 // groupAndSortManifests categorizes manifests by the sync-wave and then
 // sorts the groups alphabetically by manifest kind
 func groupAndSortManifests(manifests []interface{}) (map[int][]interface{}, error) {
-	var syncWaveStr string
 	manifestGroups := make(map[int][]interface{}, len(manifests))
 	for _, object := range manifests {
-		manifest, ok := object.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("manifest should be of type 'map[string]interface{}'")
+
+		var (
+			ok          bool
+			err         error
+			syncWavePtr *int
+		)
+
+		if syncWavePtr, err = getSyncWave(object); err != nil || syncWavePtr == nil {
+			return nil, err
 		}
 
-		kind, ok := manifest["kind"].(string)
-		if !ok {
-			return nil, fmt.Errorf("missing field `kind` from rendered manifest")
+		// check if the key exists in the map
+		if _, ok = manifestGroups[*syncWavePtr]; !ok {
+			// if key doesn't exist, initialize the slice
+			manifestGroups[*syncWavePtr] = make([]interface{}, 0)
 		}
-
-		syncWaveStr = ci.DefaultWaveAnnotation
-		if metadata, ok := manifest["metadata"].(map[string]interface{}); ok {
-			if annotations, ok := metadata["annotations"].(map[string]interface{}); ok {
-				if syncWaveStr, ok = annotations[ci.WaveAnnotation].(string); !ok {
-					syncWaveStr = ci.DefaultWaveAnnotation
-				}
-			}
-		}
-
-		if syncWave, err := strconv.Atoi(syncWaveStr); err != nil {
-			return nil, fmt.Errorf("failed to extract annotation %s in resource %s", ci.WaveAnnotation, kind)
-		} else {
-			// check if the key exists in the map
-			if _, ok := manifestGroups[syncWave]; !ok {
-				// if key doesn't exist, initialize the slice
-				manifestGroups[syncWave] = make([]interface{}, 0)
-			}
-			// append the value to the slice associated with the key
-			manifestGroups[syncWave] = append(manifestGroups[syncWave], object)
-		}
+		// append the value to the slice associated with the key
+		manifestGroups[*syncWavePtr] = append(manifestGroups[*syncWavePtr], object)
 	}
 
 	// sort grouped manifests alphabetically (by "kind") to make rendering more deterministic
@@ -347,7 +361,12 @@ func groupAndSortManifests(manifests []interface{}) (map[int][]interface{}, erro
 	return manifestGroups, nil
 }
 
-func createOrPatch(ctx context.Context, c client.Client, obj unstructured.Unstructured, f controllerutil.MutateFn) (controllerutil.OperationResult, error) {
+func createOrPatch(
+	ctx context.Context,
+	c client.Client,
+	obj unstructured.Unstructured,
+	f controllerutil.MutateFn,
+) (controllerutil.OperationResult, error) {
 	existingObj := &unstructured.Unstructured{}
 	existingObj.SetGroupVersionKind(obj.GroupVersionKind())
 	if err := c.Get(ctx, client.ObjectKeyFromObject(&obj), existingObj); err != nil {
@@ -391,72 +410,137 @@ func toUnstructured(obj interface{}) (unstructured.Unstructured, error) {
 	return uObj, nil
 }
 
-func (r *ClusterInstanceReconciler) executeRenderedManifests(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance, manifestGroups map[int][]interface{}, manifestStatus string) (bool, error) {
+// createManifestReference creates a ManifestReference object from a manifest item
+func createManifestReference(manifestItem interface{}, syncWave int) (*v1alpha1.ManifestReference, error) {
+	var (
+		manifest, metadata  map[string]interface{}
+		apiVersion, kind    string
+		name, namespace     string
+		ok, namespaceScoped bool
+	)
+
+	if manifest, ok = manifestItem.(map[string]interface{}); !ok {
+		return nil, fmt.Errorf("failed to interpret manifest type")
+	}
+
+	if metadata, ok = manifest["metadata"].(map[string]interface{}); !ok {
+		return nil, fmt.Errorf("failed to interpret metadata")
+	}
+
+	if name, ok = metadata["name"].(string); !ok {
+		return nil, fmt.Errorf("failed to extract name in metadata %v", metadata)
+	}
+
+	if apiVersion, ok = manifest["apiVersion"].(string); !ok {
+		return nil, fmt.Errorf("failed to extract apiVersion in metadata %v", metadata)
+	}
+
+	if kind, ok = manifest["kind"].(string); !ok {
+		return nil, fmt.Errorf("failed to extract manifest kind in metadata %v", metadata)
+	}
+
+	manifestRef := &v1alpha1.ManifestReference{
+		Name:            name,
+		Kind:            kind,
+		APIGroup:        &apiVersion,
+		SyncWave:        syncWave,
+		LastAppliedTime: metav1.NewTime(time.Now())}
+
+	if namespace, namespaceScoped = metadata["namespace"].(string); namespaceScoped {
+		manifestRef.Namespace = namespace
+	}
+
+	return manifestRef, nil
+}
+
+func (r *ClusterInstanceReconciler) executeRenderedManifests(
+	ctx context.Context,
+	c client.Client,
+	clusterInstance *v1alpha1.ClusterInstance,
+	manifestGroups map[int][]interface{},
+	manifestStatus string) (bool, error) {
 
 	successfulExecution := true
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
+
 	// Get the syncWaves of the map
-	syncWaves := make([]int, 0, len(manifestGroups))
-	for syncWave := range manifestGroups {
-		syncWaves = append(syncWaves, syncWave)
-	}
-	// Sort the syncWaves in ascending order
-	sort.Ints(syncWaves)
+	syncWaves := getSortedSyncWaves(manifestGroups)
 
 	for _, syncWave := range syncWaves {
 		group := manifestGroups[syncWave]
 		for _, item := range group {
-			manifest := item.(map[string]interface{})
-			metadata, _ := manifest["metadata"].(map[string]interface{})
-			name := metadata["name"].(string)
-			apiVersion := manifest["apiVersion"].(string)
-			kind := manifest["kind"].(string)
 
-			manifestRef := &v1alpha1.ManifestReference{Name: name, Kind: kind, APIGroup: &apiVersion, SyncWave: syncWave, LastAppliedTime: metav1.NewTime(time.Now())}
-
-			namespace, namespaceOk := metadata["namespace"].(string)
-			if namespaceOk {
-				manifestRef.Namespace = namespace
+			manifestRef, err := createManifestReference(item, syncWave)
+			if err != nil {
+				return false, err
 			}
 
 			if obj, err := toUnstructured(item); err != nil {
 				successfulExecution = false
-				manifestRef.Status = v1alpha1.ManifestRenderedFailure
-				manifestRef.Message = err.Error()
+				setManifestFailure(manifestRef, err)
 			} else {
-				setOwnerRef := func() error {
-					if namespaceOk && namespace == clusterInstance.Namespace {
-						return ctrl.SetControllerReference(clusterInstance, &obj, r.Scheme)
-					}
-					return nil
-				}
-
-				if result, err := createOrPatch(ctx, c, obj, setOwnerRef); err != nil {
+				if result, err := createOrPatch(
+					ctx, c, obj,
+					setOwnerRefFunc(manifestRef.Namespace, clusterInstance, &obj, r.Scheme)); err != nil {
 					successfulExecution = false
-					manifestRef.Status = v1alpha1.ManifestRenderedFailure
-					manifestRef.Message = err.Error()
+					setManifestFailure(manifestRef, err)
 				} else if result != controllerutil.OperationResultNone {
-					manifestRef.Status = manifestStatus
-					manifestRef.Message = ""
+					setManifestSuccess(manifestRef, manifestStatus)
 				}
 			}
 
-			if found := findManifestRendered(manifestRef, clusterInstance.Status.ManifestsRendered); found != nil {
-				if found.Status != manifestRef.Status || found.Message != manifestRef.Message {
-					found.LastAppliedTime = manifestRef.LastAppliedTime
-					found.Status = manifestRef.Status
-					found.Message = manifestRef.Message
-				}
-			} else {
-				clusterInstance.Status.ManifestsRendered = append(clusterInstance.Status.ManifestsRendered, *manifestRef)
-			}
+			updateClusterInstanceStatus(clusterInstance, manifestRef)
 		}
 	}
 
 	return successfulExecution, conditions.PatchStatus(ctx, r.Client, clusterInstance, patch)
 }
 
-func findManifestRendered(manifest *v1alpha1.ManifestReference, manifestList []v1alpha1.ManifestReference) *v1alpha1.ManifestReference {
+func getSortedSyncWaves(manifestGroups map[int][]interface{}) []int {
+	syncWaves := make([]int, 0, len(manifestGroups))
+	for syncWave := range manifestGroups {
+		syncWaves = append(syncWaves, syncWave)
+	}
+	sort.Ints(syncWaves)
+	return syncWaves
+}
+
+func setOwnerRefFunc(manifestNamespace string, clusterInstance *v1alpha1.ClusterInstance,
+	obj metav1.Object, scheme *runtime.Scheme) controllerutil.MutateFn {
+	return func() error {
+		if manifestNamespace == clusterInstance.Namespace {
+			return ctrl.SetControllerReference(clusterInstance, obj, scheme)
+		}
+		return nil
+	}
+}
+
+func setManifestFailure(manifestRef *v1alpha1.ManifestReference, err error) {
+	manifestRef.Status = v1alpha1.ManifestRenderedFailure
+	manifestRef.Message = err.Error()
+}
+
+func setManifestSuccess(manifestRef *v1alpha1.ManifestReference, manifestStatus string) {
+	manifestRef.Status = manifestStatus
+	manifestRef.Message = ""
+}
+
+func updateClusterInstanceStatus(clusterInstance *v1alpha1.ClusterInstance, manifestRef *v1alpha1.ManifestReference) {
+	if found := findManifestRendered(manifestRef, clusterInstance.Status.ManifestsRendered); found != nil {
+		if found.Status != manifestRef.Status || found.Message != manifestRef.Message {
+			found.LastAppliedTime = manifestRef.LastAppliedTime
+			found.Status = manifestRef.Status
+			found.Message = manifestRef.Message
+		}
+	} else {
+		clusterInstance.Status.ManifestsRendered = append(clusterInstance.Status.ManifestsRendered, *manifestRef)
+	}
+}
+
+func findManifestRendered(
+	manifest *v1alpha1.ManifestReference,
+	manifestList []v1alpha1.ManifestReference,
+) *v1alpha1.ManifestReference {
 	for index, m := range manifestList {
 		if *manifest.APIGroup == *m.APIGroup && manifest.Kind == m.Kind && manifest.Name == m.Name {
 			return &manifestList[index]
@@ -465,36 +549,19 @@ func findManifestRendered(manifest *v1alpha1.ManifestReference, manifestList []v
 	return nil
 }
 
-func (r *ClusterInstanceReconciler) handleRenderTemplates(ctx context.Context, clusterInstance *v1alpha1.ClusterInstance) (rendered bool, err error) {
-	rendered = false
+func (r *ClusterInstanceReconciler) validateRenderedManifests(
+	ctx context.Context,
+	clusterInstance *v1alpha1.ClusterInstance,
+	manifestGroups map[int][]interface{}) (rendered bool, err error) {
 
-	var (
-		unsortedManifests []interface{}
-		manifestGroups    map[int][]interface{}
-	)
-
-	// Render templates manifests
-	r.Log.Info(fmt.Sprintf("Rendering templates for ClusterInstance %s", clusterInstance.Name))
-	unsortedManifests, err = r.renderManifests(ctx, clusterInstance)
-	if err != nil {
-		r.Log.Info(fmt.Sprintf("encountered error while rendering templates for ClusterInstance %s, err: %v", clusterInstance.Name, err))
-		return
-	}
-
-	// Organize rendered manifests by sync-wave and sort groups by manifest type
-	manifestGroups, err = groupAndSortManifests(unsortedManifests)
-	if err != nil {
-		r.Log.Info(fmt.Sprintf("encountered error while rendering templates for ClusterInstance %s, err: %v", clusterInstance.Name, err))
-		return
-	}
-
-	// Validate rendered manifests using kubernetes dry-run
 	r.Log.Info(fmt.Sprintf("Validating rendered manifests for ClusterInstance %s", clusterInstance.Name))
 	dryRunClient := client.NewDryRunClient(r.Client)
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
-	rendered, err = r.executeRenderedManifests(ctx, dryRunClient, clusterInstance, manifestGroups, v1alpha1.ManifestRenderedValidated)
+	rendered, err = r.executeRenderedManifests(ctx, dryRunClient, clusterInstance, manifestGroups,
+		v1alpha1.ManifestRenderedValidated)
 	if err != nil || !rendered {
-		msg := fmt.Sprintf("failed to validate rendered manifests for ClusterInstance %s using dry-run validation", clusterInstance.Name)
+		msg := fmt.Sprintf("failed to validate rendered manifests for ClusterInstance %s using dry-run validation",
+			clusterInstance.Name)
 		if err != nil {
 			msg = fmt.Sprintf(", err: %v", err)
 		}
@@ -515,19 +582,30 @@ func (r *ClusterInstanceReconciler) handleRenderTemplates(ctx context.Context, c
 
 	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			r.Log.Info(fmt.Sprintf("failed to update ClusterInstance %s status post validation of rendered templates, err: %s", clusterInstance.Name, updateErr.Error()))
+			r.Log.Info(
+				fmt.Sprintf("failed to update ClusterInstance %s status post validation of rendered templates, err: %s",
+					clusterInstance.Name, updateErr.Error()))
 			err = updateErr
 		}
 	}
-	if !rendered || err != nil {
-		return
-	}
 
-	// Apply the rendered manifests
+	return rendered, err
+}
+
+func (r *ClusterInstanceReconciler) applyRenderedManifests(
+	ctx context.Context,
+	clusterInstance *v1alpha1.ClusterInstance,
+	manifestGroups map[int][]interface{}) (rendered bool, err error) {
+
 	r.Log.Info(fmt.Sprintf("Applying rendered manifests for ClusterInstance %s", clusterInstance.Name))
-	patch = client.MergeFrom(clusterInstance.DeepCopy())
-	rendered, err = r.executeRenderedManifests(ctx, r.Client, clusterInstance, manifestGroups, v1alpha1.ManifestRenderedSuccess)
-	if err != nil || !rendered {
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
+	if rendered, err = r.executeRenderedManifests(
+		ctx,
+		r.Client,
+		clusterInstance,
+		manifestGroups,
+		v1alpha1.ManifestRenderedSuccess,
+	); err != nil || !rendered {
 		msg := fmt.Sprintf("failed to apply rendered manifests for ClusterInstance %s", clusterInstance.Name)
 		if err != nil {
 			msg = fmt.Sprintf(", err: %v", err)
@@ -549,14 +627,62 @@ func (r *ClusterInstanceReconciler) handleRenderTemplates(ctx context.Context, c
 
 	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			r.Log.Info(fmt.Sprintf("Failed to update ClusterInstance %s status post creation of rendered templates, err: %s", clusterInstance.Name, updateErr.Error()))
+			r.Log.Info(
+				fmt.Sprintf("Failed to update ClusterInstance %s status post creation of rendered templates, err: %s",
+					clusterInstance.Name, updateErr.Error()))
 			err = updateErr
 		}
 	}
 	return
 }
 
-func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(ctx context.Context, clusterInstance *v1alpha1.ClusterInstance) error {
+func (r *ClusterInstanceReconciler) handleRenderTemplates(
+	ctx context.Context,
+	clusterInstance *v1alpha1.ClusterInstance,
+) (rendered bool, err error) {
+
+	rendered = false
+
+	var (
+		unsortedManifests []interface{}
+		manifestGroups    map[int][]interface{}
+	)
+
+	// Render templates manifests
+	r.Log.Info(fmt.Sprintf("Rendering templates for ClusterInstance %s", clusterInstance.Name))
+	unsortedManifests, err = r.renderManifests(ctx, clusterInstance)
+	if err != nil {
+		r.Log.Info(
+			fmt.Sprintf("encountered error while rendering templates for ClusterInstance %s, err: %v",
+				clusterInstance.Name, err))
+		return
+	}
+
+	// Organize rendered manifests by sync-wave and sort groups by manifest type
+	manifestGroups, err = groupAndSortManifests(unsortedManifests)
+	if err != nil {
+		r.Log.Info(
+			fmt.Sprintf("encountered error while rendering templates for ClusterInstance %s, err: %v",
+				clusterInstance.Name, err))
+		return
+	}
+
+	// Validate rendered manifests using kubernetes dry-run
+	if rendered, err = r.validateRenderedManifests(ctx, clusterInstance, manifestGroups); !rendered || err != nil {
+		return
+	}
+
+	// Apply the rendered manifests
+	rendered, err = r.applyRenderedManifests(ctx, clusterInstance, manifestGroups)
+
+	return
+}
+
+func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(
+	ctx context.Context,
+	clusterInstance *v1alpha1.ClusterInstance,
+) error {
+
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
 
 	suppressFn := func(suppressedManifests []string) {

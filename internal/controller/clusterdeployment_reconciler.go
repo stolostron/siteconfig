@@ -76,7 +76,7 @@ func (r *ClusterDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		clusterInstance.Status.ClusterDeploymentRef = &corev1.LocalObjectReference{Name: clusterDeployment.Name}
 	}
 
-	updateSCProvisionedStatus(clusterDeployment, clusterInstance)
+	updateCIProvisionedStatus(clusterDeployment, clusterInstance)
 	updateSCDeploymentConditions(clusterDeployment, clusterInstance)
 	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		return requeueWithError(updateErr)
@@ -94,15 +94,17 @@ func clusterInstallConditionTypes() []hivev1.ClusterDeploymentConditionType {
 	}
 }
 
-func updateSCProvisionedStatus(cd *hivev1.ClusterDeployment, sc *v1alpha1.ClusterInstance) {
-	// Check if cluster has finished installing, if it has -> update ClusterInstance.Status.Conditions(Provisioned -> Completed)
+func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, sc *v1alpha1.ClusterInstance) {
+	// Check if cluster has finished installing:
+	// - if it has then update ClusterInstance.Status.Conditions.Provisioned -> Completed
 	if cd.Spec.Installed {
 		conditions.SetStatusCondition(&sc.Status.Conditions,
 			conditions.Provisioned,
 			conditions.Completed,
 			metav1.ConditionTrue,
 			"Provision completed")
-	} else if installStopped := conditions.FindConditionType(cd.Status.Conditions, hivev1.ClusterInstallStoppedClusterDeploymentCondition); installStopped != nil {
+	} else if installStopped := conditions.FindConditionType(cd.Status.Conditions,
+		hivev1.ClusterInstallStoppedClusterDeploymentCondition); installStopped != nil {
 		// Check if ClusterInstance.Status Provisioned -> InProgress condition
 		if found := meta.FindStatusCondition(sc.Status.Conditions, string(conditions.Provisioned)); found == nil {
 			if !cd.Spec.Installed && installStopped.Status == corev1.ConditionStatus(metav1.ConditionFalse) {
@@ -162,7 +164,10 @@ func isOwnedByClusterInstance(ownerRefs []metav1.OwnerReference) bool {
 	return clusterInstanceOwner(ownerRefs) != ""
 }
 
-func (r *ClusterDeploymentReconciler) getClusterInstance(ctx context.Context, cd *hivev1.ClusterDeployment) (*v1alpha1.ClusterInstance, error) {
+func (r *ClusterDeploymentReconciler) getClusterInstance(
+	ctx context.Context,
+	cd *hivev1.ClusterDeployment,
+) (*v1alpha1.ClusterInstance, error) {
 	clusterInstanceRef := clusterInstanceOwner(cd.GetOwnerReferences())
 	if clusterInstanceRef == "" {
 		r.Log.Info("ClusterInstance owner-reference not found for ClusterDeployment", "name", cd.Name)
@@ -170,7 +175,8 @@ func (r *ClusterDeploymentReconciler) getClusterInstance(ctx context.Context, cd
 	}
 
 	clusterInstance := &v1alpha1.ClusterInstance{}
-	if err := r.Get(ctx, types.NamespacedName{Name: clusterInstanceRef, Namespace: cd.Namespace}, clusterInstance); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: clusterInstanceRef, Namespace: cd.Namespace},
+		clusterInstance); err != nil {
 		if errors.IsNotFound(err) {
 			r.Log.Info("ClusterInstance not found", "name", clusterInstanceRef)
 			return nil, nil
@@ -181,9 +187,13 @@ func (r *ClusterDeploymentReconciler) getClusterInstance(ctx context.Context, cd
 	return clusterInstance, nil
 }
 
-func (r *ClusterDeploymentReconciler) mapClusterInstanceToCD(ctx context.Context, obj client.Object) []reconcile.Request {
+func (r *ClusterDeploymentReconciler) mapClusterInstanceToCD(
+	ctx context.Context,
+	obj client.Object,
+) []reconcile.Request {
 	clusterInstance := &v1alpha1.ClusterInstance{}
-	if err := r.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, clusterInstance); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()},
+		clusterInstance); err != nil {
 		return []reconcile.Request{}
 	}
 
@@ -216,6 +226,7 @@ func (r *ClusterDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					return isOwnedByClusterInstance(e.ObjectNew.GetOwnerReferences())
 				},
 			})).
-		WatchesRawSource(source.Kind(mgr.GetCache(), &v1alpha1.ClusterInstance{}), handler.EnqueueRequestsFromMapFunc(r.mapClusterInstanceToCD)).
+		WatchesRawSource(source.Kind(mgr.GetCache(), &v1alpha1.ClusterInstance{}),
+			handler.EnqueueRequestsFromMapFunc(r.mapClusterInstanceToCD)).
 		Complete(r)
 }

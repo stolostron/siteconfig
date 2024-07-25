@@ -43,14 +43,16 @@ import (
 
 var _ = Describe("Reconcile", func() {
 	var (
-		c                 client.Client
-		r                 *ClusterInstanceReconciler
-		ctx               = context.Background()
-		clusterName       = "test-cluster"
-		clusterNamespace  = "test-namespace"
-		clusterInstance   *v1alpha1.ClusterInstance
-		pullSecret        *corev1.Secret
-		testPullSecretVal = `{"auths":{"cloud.openshift.com":{"auth":"dXNlcjpwYXNzd29yZAo=","email":"r@r.com"}}}`
+		c          client.Client
+		r          *ClusterInstanceReconciler
+		ctx        = context.Background()
+		testParams = &ci.TestParams{
+			ClusterName:      "test-cluster",
+			ClusterNamespace: "test-namespace",
+			PullSecret:       "pull-secret",
+		}
+
+		clusterInstance *v1alpha1.ClusterInstance
 	)
 
 	BeforeEach(func() {
@@ -67,24 +69,17 @@ var _ = Describe("Reconcile", func() {
 			TmplEngine: tmplEngine,
 		}
 
-		pullSecret = &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pull-secret",
-				Namespace: clusterName,
-			},
-			Data: map[string][]byte{corev1.DockerConfigJsonKey: []byte(testPullSecretVal)},
-		}
-		Expect(c.Create(ctx, pullSecret)).To(Succeed())
+		Expect(c.Create(ctx, testParams.GeneratePullSecret())).To(Succeed())
 
 		clusterInstance = &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:       clusterName,
-				Namespace:  clusterNamespace,
+				Name:       testParams.ClusterName,
+				Namespace:  testParams.ClusterNamespace,
 				Finalizers: []string{clusterInstanceFinalizer},
 			},
 			Spec: v1alpha1.ClusterInstanceSpec{
-				ClusterName:            clusterName,
-				PullSecretRef:          corev1.LocalObjectReference{Name: pullSecret.Name},
+				ClusterName:            testParams.ClusterName,
+				PullSecretRef:          corev1.LocalObjectReference{Name: testParams.PullSecret},
 				ClusterImageSetNameRef: "testimage:foobar",
 				SSHPublicKey:           "test-ssh",
 				BaseDomain:             "abcd",
@@ -92,7 +87,7 @@ var _ = Describe("Reconcile", func() {
 				TemplateRefs: []v1alpha1.TemplateRef{
 					{Name: "test-cluster-template", Namespace: "default"}},
 				Nodes: []v1alpha1.NodeSpec{{
-					BmcAddress:         "1:2:3:4",
+					BmcAddress:         "192.0.2.1",
 					BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: "bmc"},
 					TemplateRefs: []v1alpha1.TemplateRef{
 						{Name: "test-node-template", Namespace: "default"}}}}},
@@ -103,8 +98,8 @@ var _ = Describe("Reconcile", func() {
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		key := types.NamespacedName{
-			Namespace: clusterName,
-			Name:      clusterNamespace,
+			Namespace: testParams.ClusterName,
+			Name:      testParams.ClusterNamespace,
 		}
 		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 		Expect(err).NotTo(HaveOccurred())
@@ -113,8 +108,8 @@ var _ = Describe("Reconcile", func() {
 
 	It("doesn't error for a missing ClusterInstance", func() {
 		key := types.NamespacedName{
-			Namespace: clusterName,
-			Name:      clusterNamespace,
+			Namespace: testParams.ClusterName,
+			Name:      testParams.ClusterNamespace,
 		}
 		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 		Expect(err).NotTo(HaveOccurred())
@@ -370,20 +365,20 @@ var _ = Describe("handleFinalizer", func() {
 
 var _ = Describe("handleValidate", func() {
 	var (
-		c                                            client.Client
-		r                                            *ClusterInstanceReconciler
-		ctx                                          = context.Background()
-		bmcCredentialsName                           = "bmh-secret"
-		bmc, pullSecret                              *corev1.Secret
-		clusterName                                  = "test-cluster"
-		clusterNamespace                             = "test-cluster"
-		clusterImageSetName                          = "testimage:foobar"
-		clusterImageSet                              *hivev1.ClusterImageSet
-		clusterTemplateRef                           = "cluster-template-ref"
-		clusterTemplate, nodeTemplate, extraManifest *corev1.ConfigMap
-		extraManifestName                            = "extra-manifest"
-		nodeTemplateRef                              = "node-template-ref"
-		clusterInstance                              *v1alpha1.ClusterInstance
+		c          client.Client
+		r          *ClusterInstanceReconciler
+		ctx        = context.Background()
+		testParams = &ci.TestParams{
+			BmcCredentialsName:  "bmh-secret",
+			ClusterName:         "test-cluster",
+			ClusterNamespace:    "test-cluster",
+			ClusterImageSetName: "testimage:foobar",
+			ExtraManifestName:   "extra-manifest",
+			ClusterTemplateRef:  "cluster-template-ref",
+			NodeTemplateRef:     "node-template-ref",
+			PullSecret:          "pull-secret",
+		}
+		clusterInstance *v1alpha1.ClusterInstance
 	)
 
 	BeforeEach(func() {
@@ -400,15 +395,12 @@ var _ = Describe("handleValidate", func() {
 			TmplEngine: tmplEngine,
 		}
 
-		bmc = ci.GetMockBmcSecret(bmcCredentialsName, clusterNamespace)
-		clusterImageSet = ci.GetMockClusterImageSet(clusterImageSetName)
-		pullSecret = ci.GetMockPullSecret("pull-secret", clusterNamespace)
-		clusterTemplate = ci.GetMockClusterTemplate(clusterTemplateRef, clusterNamespace)
-		nodeTemplate = ci.GetMockNodeTemplate(nodeTemplateRef, clusterNamespace)
-		extraManifest = ci.GetMockExtraManifest(extraManifestName, clusterNamespace)
+		ci.SetupTestResources(ctx, c, testParams)
+		clusterInstance = testParams.GenerateSNOClusterInstance()
+	})
 
-		ci.SetupTestPrereqs(ctx, c, bmc, pullSecret, clusterImageSet, clusterTemplate, nodeTemplate, extraManifest)
-		clusterInstance = ci.GetMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
+	AfterEach(func() {
+		ci.TeardownTestResources(ctx, c, testParams)
 	})
 
 	It("successfully sets the ClusterInstanceValidated condition to true for a valid ClusterInstance", func() {
@@ -418,8 +410,8 @@ var _ = Describe("handleValidate", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		key := types.NamespacedName{
-			Name:      clusterName,
-			Namespace: clusterNamespace,
+			Name:      testParams.ClusterName,
+			Namespace: testParams.ClusterNamespace,
 		}
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		matched := false
@@ -439,8 +431,8 @@ var _ = Describe("handleValidate", func() {
 		Expect(err).To(HaveOccurred())
 
 		key := types.NamespacedName{
-			Name:      clusterName,
-			Namespace: clusterNamespace,
+			Name:      testParams.ClusterName,
+			Namespace: testParams.ClusterNamespace,
 		}
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		matched := false
@@ -467,8 +459,8 @@ var _ = Describe("handleValidate", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		key := types.NamespacedName{
-			Name:      clusterName,
-			Namespace: clusterNamespace,
+			Name:      testParams.ClusterName,
+			Namespace: testParams.ClusterNamespace,
 		}
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		matched := false
@@ -495,8 +487,8 @@ var _ = Describe("handleValidate", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		key := types.NamespacedName{
-			Name:      clusterName,
-			Namespace: clusterNamespace,
+			Name:      testParams.ClusterName,
+			Namespace: testParams.ClusterNamespace,
 		}
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		matched := false
@@ -512,26 +504,23 @@ var _ = Describe("handleValidate", func() {
 
 var _ = Describe("handleRenderTemplates", func() {
 	var (
-		c               client.Client
-		r               *ClusterInstanceReconciler
-		ctx             = context.Background()
+		c          client.Client
+		r          *ClusterInstanceReconciler
+		ctx        = context.Background()
+		testParams = &ci.TestParams{
+			BmcCredentialsName:  "bmh-secret",
+			ClusterName:         "test-cluster",
+			ClusterNamespace:    "test-cluster",
+			ClusterImageSetName: "testimage:foobar",
+			ExtraManifestName:   "extra-manifest",
+			ClusterTemplateRef:  "cluster-template-ref",
+			NodeTemplateRef:     "node-template-ref",
+			PullSecret:          "pull-secret",
+		}
 		clusterInstance *v1alpha1.ClusterInstance
 	)
 
 	BeforeEach(func() {
-
-		var (
-			bmcCredentialsName                           = "bmh-secret"
-			bmc, pullSecret                              *corev1.Secret
-			clusterName                                  = "test-cluster"
-			clusterNamespace                             = "test-cluster"
-			clusterImageSetName                          = "testimage:foobar"
-			clusterTemplateRef                           = "cluster-template-ref"
-			clusterTemplate, nodeTemplate, extraManifest *corev1.ConfigMap
-			extraManifestName                            = "extra-manifest"
-			nodeTemplateRef                              = "node-template-ref"
-		)
-
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
@@ -545,15 +534,12 @@ var _ = Describe("handleRenderTemplates", func() {
 			TmplEngine: tmplEngine,
 		}
 
-		bmc = ci.GetMockBmcSecret(bmcCredentialsName, clusterNamespace)
-		clusterImageSet := ci.GetMockClusterImageSet(clusterImageSetName)
-		pullSecret = ci.GetMockPullSecret("pull-secret", clusterNamespace)
-		clusterTemplate = ci.GetMockClusterTemplate(clusterTemplateRef, clusterNamespace)
-		nodeTemplate = ci.GetMockNodeTemplate(nodeTemplateRef, clusterNamespace)
-		extraManifest = ci.GetMockExtraManifest(extraManifestName, clusterNamespace)
+		ci.SetupTestResources(ctx, c, testParams)
+		clusterInstance = testParams.GenerateSNOClusterInstance()
+	})
 
-		ci.SetupTestPrereqs(ctx, c, bmc, pullSecret, clusterImageSet, clusterTemplate, nodeTemplate, extraManifest)
-		clusterInstance = ci.GetMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret.Name, bmcCredentialsName, clusterImageSetName, extraManifestName, clusterTemplateRef, nodeTemplateRef)
+	AfterEach(func() {
+		ci.TeardownTestResources(ctx, c, testParams)
 	})
 
 	It("fails to render templates and updates the status correctly", func() {
@@ -743,7 +729,7 @@ var _ = Describe("updateSuppressedManifestsStatus", func() {
 				Nodes: []v1alpha1.NodeSpec{
 					{
 						Role:       "master",
-						BmcAddress: "1:2:3:4",
+						BmcAddress: "192.0.2.1",
 					},
 				}},
 		}

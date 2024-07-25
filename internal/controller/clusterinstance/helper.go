@@ -37,7 +37,8 @@ type SpecialVars struct {
 	ControlPlaneAgents, WorkerAgents int
 }
 
-// ClusterData is a special object that provides an interface to the ClusterInstance spec fields for use in rendering templates
+// ClusterData is a special object that provides an interface to the ClusterInstance spec fields for use in rendering
+// templates
 type ClusterData struct {
 	Spec        v1alpha1.ClusterInstanceSpec
 	SpecialVars SpecialVars
@@ -56,8 +57,8 @@ func getWorkloadPinningInstallConfigOverrides(clusterInstance *v1alpha1.ClusterI
 			}
 		}
 
-		// Because the explicit value clusterInstance.Spec.CPUPartitioning == CPUPartitioningAllNodes, we always overwrite
-		// the installConfigOverrides value or add it if not present
+		// Because the explicit value clusterInstance.Spec.CPUPartitioning == CPUPartitioningAllNodes, we always
+		// overwrite the installConfigOverrides value or add it if not present
 		installOverrideValues[cpuPartitioningKey] = v1alpha1.CPUPartitioningAllNodes
 
 		byteData, err := json.Marshal(installOverrideValues)
@@ -70,7 +71,7 @@ func getWorkloadPinningInstallConfigOverrides(clusterInstance *v1alpha1.ClusterI
 	return scInstallConfigOverrides, nil
 }
 
-// getInstallConfigOverrides builds the InstallConfigOverrides and returns it as a json string
+// getInstallConfigOverrides builds the InstallConfigOverrides and returns it as a JSON string
 func getInstallConfigOverrides(clusterInstance *v1alpha1.ClusterInstance) (string, error) {
 
 	// Get workload-pinning install config overrides

@@ -24,12 +24,82 @@ import (
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 
-	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega"
 )
+
+type TestParams struct {
+	ClusterName         string
+	ClusterNamespace    string
+	PullSecret          string
+	BmcCredentialsName  string
+	ClusterImageSetName string
+	ExtraManifestName   string
+	ClusterTemplateRef  string
+	NodeTemplateRef     string
+}
+
+func (tp *TestParams) GeneratePullSecret() *corev1.Secret {
+	return GetMockPullSecret(tp.PullSecret, tp.ClusterNamespace)
+}
+
+func (tp *TestParams) GenerateBMCSecret() *corev1.Secret {
+	return GetMockBmcSecret(tp.BmcCredentialsName, tp.ClusterNamespace)
+}
+
+func (tp *TestParams) GenerateClusterImageSet() *hivev1.ClusterImageSet {
+	return GetMockClusterImageSet(tp.ClusterImageSetName)
+}
+
+func (tp *TestParams) GenerateExtraManifest() *corev1.ConfigMap {
+	return GetMockExtraManifest(tp.ExtraManifestName, tp.ClusterNamespace)
+}
+
+func (tp *TestParams) GenerateClusterTemplate() *corev1.ConfigMap {
+	return GetMockClusterTemplate(tp.ClusterTemplateRef, tp.ClusterNamespace)
+}
+
+func (tp *TestParams) GenerateNodeTemplate() *corev1.ConfigMap {
+	return GetMockNodeTemplate(tp.NodeTemplateRef, tp.ClusterNamespace)
+}
+
+func (tp *TestParams) GenerateSNOClusterInstance() *v1alpha1.ClusterInstance {
+	return GetMockSNOClusterInstance(tp)
+}
+
+func (tp *TestParams) GetResources() map[string]string {
+	resources := map[string]string{}
+
+	if tp.PullSecret != "" {
+		resources[tp.PullSecret] = "Secret"
+	}
+
+	if tp.BmcCredentialsName != "" {
+		resources[tp.BmcCredentialsName] = "Secret"
+	}
+
+	if tp.ClusterImageSetName != "" {
+		resources[tp.ClusterImageSetName] = "ClusterImageSet"
+	}
+
+	if tp.ClusterTemplateRef != "" {
+		resources[tp.ClusterTemplateRef] = "ConfigMap"
+	}
+
+	if tp.NodeTemplateRef != "" {
+		resources[tp.NodeTemplateRef] = "ConfigMap"
+	}
+
+	if tp.ExtraManifestName != "" {
+		resources[tp.ExtraManifestName] = "ConfigMap"
+	}
+
+	return resources
+}
 
 func GetMockBmcSecret(name, namespace string) *corev1.Secret {
 	return &corev1.Secret{
@@ -85,35 +155,37 @@ func GetMockExtraManifest(name, namespace string) *corev1.ConfigMap {
 		Data: map[string]string{"foo": "bar"}}
 }
 
-func GetMockSNOClusterInstance(clusterName, clusterNamespace, pullSecret, bmcCredentialsName, clusterImageSetName, extraManifest, clusterTemplateRef, nodeTemplateRef string) *v1alpha1.ClusterInstance {
-	installConfigOverrides := "{\"networking\":{\"networkType\":\"OVNKubernetes\"},\"cpuPartitioningMode\":\"AllNodes\"}"
-	installerArgs := "[\"--append-karg\", \"nameserver=8.8.8.8\", \"-n\"]"
-	nodeIgnitionConfigOverride := "{\"ignition\": {\"version\": \"3.1.0\"}, \"storage\": {\"files\": [{\"path\": \"/etc/containers/registries.conf\", \"overwrite\": true, \"contents\": {\"source\": \"data:text/plain;base64,aGVsbG8gZnJvbSB6dHAgcG9saWN5IGdlbmVyYXRvcg==\"}}]}}"
+func GetMockSNOClusterInstance(testParams *TestParams) *v1alpha1.ClusterInstance {
+	installConfigOverrides := `{"networking":{"networkType":"OVNKubernetes"}, "cpuPartitioningMode":"AllNodes"}`
+	installerArgs := `["--append-karg", "nameserver=203.0.113.0", "-n"]`
+	nodeIgnitionConfigOverride := `{"ignition": {"version": "3.1.0"}, "storage": {"files": [` +
+		`{"path": "/etc/containers/registries.conf", "overwrite": true, ` +
+		`"contents": {"source": "data:text/plain;base64,foobar=="}}]}}`
 
 	return &v1alpha1.ClusterInstance{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      clusterName,
-			Namespace: clusterNamespace,
+			Name:      testParams.ClusterName,
+			Namespace: testParams.ClusterNamespace,
 		},
 		Spec: v1alpha1.ClusterInstanceSpec{
-			ClusterName:            clusterName,
-			PullSecretRef:          corev1.LocalObjectReference{Name: pullSecret},
-			ClusterImageSetNameRef: clusterImageSetName,
+			ClusterName:            testParams.ClusterName,
+			PullSecretRef:          corev1.LocalObjectReference{Name: testParams.PullSecret},
+			ClusterImageSetNameRef: testParams.ClusterImageSetName,
 			SSHPublicKey:           "test-ssh",
 			BaseDomain:             "abcd",
 			ClusterType:            v1alpha1.ClusterTypeSNO,
-			ExtraManifestsRefs:     []corev1.LocalObjectReference{{Name: extraManifest}},
+			ExtraManifestsRefs:     []corev1.LocalObjectReference{{Name: testParams.ExtraManifestName}},
 			TemplateRefs: []v1alpha1.TemplateRef{
-				{Name: clusterTemplateRef, Namespace: clusterNamespace}},
+				{Name: testParams.ClusterTemplateRef, Namespace: testParams.ClusterNamespace}},
 			InstallConfigOverrides: installConfigOverrides,
 			Nodes: []v1alpha1.NodeSpec{{
 				Role:                   "master",
-				BmcAddress:             "1:2:3:4",
-				BmcCredentialsName:     v1alpha1.BmcCredentialsName{Name: bmcCredentialsName},
+				BmcAddress:             "192.0.2.1",
+				BmcCredentialsName:     v1alpha1.BmcCredentialsName{Name: testParams.BmcCredentialsName},
 				InstallerArgs:          installerArgs,
 				IgnitionConfigOverride: nodeIgnitionConfigOverride,
 				TemplateRefs: []v1alpha1.TemplateRef{
-					{Name: nodeTemplateRef, Namespace: clusterNamespace}}}}},
+					{Name: testParams.NodeTemplateRef, Namespace: testParams.ClusterNamespace}}}}},
 	}
 }
 
@@ -210,41 +282,50 @@ func (nc *NetConfigData) GetInterfaces() []interface{} {
 }
 
 func GetMockNetConfig() *NetConfigData {
+	prefixLengthKey := "prefix-length"
 	netConf := &NetConfigData{}
-
 	netConf.Config = map[string]interface{}{
 		"interfaces": []interface{}{
 			map[string]interface{}{
 				"name": "eno1",
 				"type": "ethernet",
 				"ipv4": map[string]interface{}{"dhcp": false, "enabled": true, "address": []interface{}{
-					map[string]interface{}{"ip": "10.16.231.3", "prefix-length": 24},
-					map[string]interface{}{"ip": "10.16.231.28", "prefix-length": 24},
-					map[string]interface{}{"ip": "10.16.231.31", "prefix-length": 24},
+					map[string]interface{}{"ip": "203.0.113.1", prefixLengthKey: 24},
+					map[string]interface{}{"ip": "203.0.113.2", prefixLengthKey: 24},
+					map[string]interface{}{"ip": "203.0.113.3", prefixLengthKey: 24},
 				}},
 				"ipv6": map[string]interface{}{"dhcp": false, "enabled": true, "address": []interface{}{
-					map[string]interface{}{"ip": "2620:52:0:10e7:e42:a1ff:fe8a:601", "prefix-length": 64},
-					map[string]interface{}{"ip": "2620:52:0:10e7:e42:a1ff:fe8a:602", "prefix-length": 64},
-					map[string]interface{}{"ip": "2620:52:0:10e7:e42:a1ff:fe8a:603", "prefix-length": 64}},
+					map[string]interface{}{"ip": "	2001:0DB8:0:0:0:0:0:1", prefixLengthKey: 32},
+					map[string]interface{}{"ip": "	2001:0DB8:0:0:0:0:0:2", prefixLengthKey: 32},
+					map[string]interface{}{"ip": "	2001:0DB8:0:0:0:0:0:3", prefixLengthKey: 32}},
 				}},
 			map[string]interface{}{
 				"name":  "bond99",
 				"type":  "bond",
 				"state": "up",
 				"ipv6": map[string]interface{}{
-					"enabled":          true,
-					"link-aggregation": map[string]interface{}{"mode": "balance-rr", "options": map[string]interface{}{"miimon": "140"}, "slaves": []interface{}{"eth0", "eth1"}},
-					"address":          []interface{}{map[string]interface{}{"ip": "2620:52:0:1302::100", "prefix-length": 64}}}},
+					"enabled": true,
+					"link-aggregation": map[string]interface{}{
+						"mode":    "balance-rr",
+						"options": map[string]interface{}{"miimon": "140"}, "slaves": []interface{}{"eth0", "eth1"}},
+					"address": []interface{}{map[string]interface{}{
+						"ip":            "2001:0DB8:0:0:0:0:0:4",
+						"prefix-length": 64}}}},
 		},
-		"dns-resolver": map[string]interface{}{"config": map[string]interface{}{"server": []interface{}{"10.19.42.41"}}},
+		"dns-resolver": map[string]interface{}{"config": map[string]interface{}{
+			"server": []interface{}{"203.0.113.4"}}},
 		"routes": map[string]interface{}{
-			"config": []interface{}{map[string]interface{}{"destination": "0.0.0.0/0", "next-hop-address": "10.16.231.254", "next-hop-interface": "eno1", "table-id": 254}},
+			"config": []interface{}{map[string]interface{}{
+				"destination":        "0.0.0.0/0",
+				"next-hop-address":   "203.0.113.255",
+				"next-hop-interface": "eno1",
+				"table-id":           254}},
 		},
 	}
 
 	netConf.Interfaces = []*aiv1beta1.Interface{
-		{Name: "eno1", MacAddress: "02:00:00:80:12:13"},
-		{Name: "bond99", MacAddress: "02:00:00:80:12:14"},
+		{Name: "eno1", MacAddress: "00:00:5E:00:53:00"},
+		{Name: "bond99", MacAddress: "00:00:5E:00:53:01"},
 	}
 
 	return netConf
@@ -264,12 +345,37 @@ spec:
   name: "{{ .SpecialVars.CurrentNode.HostName }}"`, kind)
 }
 
-func SetupTestPrereqs(ctx context.Context, c client.Client, bmc, pullSecret *corev1.Secret,
-	clusterImageSet *hivev1.ClusterImageSet, clusterTemplate, nodeTemplate, extraManifest *corev1.ConfigMap) {
-	Expect(c.Create(ctx, bmc)).To(Succeed())
-	Expect(c.Create(ctx, clusterImageSet)).To(Succeed())
-	Expect(c.Create(ctx, pullSecret)).To(Succeed())
-	Expect(c.Create(ctx, clusterTemplate)).To(Succeed())
-	Expect(c.Create(ctx, nodeTemplate)).To(Succeed())
-	Expect(c.Create(ctx, extraManifest)).To(Succeed())
+func SetupTestResources(ctx context.Context, c client.Client, testParams *TestParams) {
+	gomega.Expect(c.Create(ctx, testParams.GeneratePullSecret())).To(gomega.Succeed())
+	gomega.Expect(c.Create(ctx, testParams.GenerateBMCSecret())).To(gomega.Succeed())
+	gomega.Expect(c.Create(ctx, testParams.GenerateClusterImageSet())).To(gomega.Succeed())
+	gomega.Expect(c.Create(ctx, testParams.GenerateClusterTemplate())).To(gomega.Succeed())
+	gomega.Expect(c.Create(ctx, testParams.GenerateNodeTemplate())).To(gomega.Succeed())
+	gomega.Expect(c.Create(ctx, testParams.GenerateExtraManifest())).To(gomega.Succeed())
+}
+
+func TeardownTestResources(ctx context.Context, c client.Client, testParams *TestParams) {
+
+	for k, v := range testParams.GetResources() {
+		if k != "" {
+			key := types.NamespacedName{
+				Name:      k,
+				Namespace: testParams.ClusterNamespace,
+			}
+
+			var obj client.Object
+			switch v {
+			case "ConfigMap":
+				obj = &corev1.ConfigMap{}
+			case "Secret":
+				obj = &corev1.Secret{}
+			case "ClusterImageSet":
+				obj = &hivev1.ClusterImageSet{}
+			}
+
+			if err := c.Get(ctx, key, obj); err == nil {
+				gomega.Expect(c.Delete(ctx, obj)).To(gomega.Succeed())
+			}
+		}
+	}
 }

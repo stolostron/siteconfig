@@ -36,8 +36,15 @@ const (
 	Unknown    ConditionReason = "Unknown"
 )
 
-// SetStatusCondition is a convenience wrapper for meta.SetStatusCondition that takes in the types defined here and converts them to strings
-func SetStatusCondition(existingConditions *[]metav1.Condition, conditionType ConditionType, conditionReason ConditionReason, conditionStatus metav1.ConditionStatus, message string) {
+// SetStatusCondition is a convenience wrapper for meta.SetStatusCondition that takes in the types defined here and
+// converts them to strings
+func SetStatusCondition(
+	existingConditions *[]metav1.Condition,
+	conditionType ConditionType,
+	conditionReason ConditionReason,
+	conditionStatus metav1.ConditionStatus,
+	message string,
+) {
 	conditions := *existingConditions
 	condition := meta.FindStatusCondition(*existingConditions, string(conditionType))
 	if condition != nil &&
@@ -77,7 +84,10 @@ func PatchStatus(ctx context.Context, c client.Client, siteConfig *v1alpha1.Clus
 	return nil
 }
 
-func FindConditionType(conditions []hivev1.ClusterDeploymentCondition, condType hivev1.ClusterDeploymentConditionType) *hivev1.ClusterDeploymentCondition {
+func FindConditionType(
+	conditions []hivev1.ClusterDeploymentCondition,
+	condType hivev1.ClusterDeploymentConditionType,
+) *hivev1.ClusterDeploymentCondition {
 	for i := range conditions {
 		if conditions[i].Type == condType {
 			return &conditions[i]

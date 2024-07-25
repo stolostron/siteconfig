@@ -45,13 +45,21 @@ func NewTemplateEngine(pLog logr.Logger) *TemplateEngine {
 	return &TemplateEngine{Log: pLog}
 }
 
-func (te *TemplateEngine) ProcessTemplates(ctx context.Context, c client.Client, clusterInstance v1alpha1.ClusterInstance) ([]interface{}, error) {
+func (te *TemplateEngine) ProcessTemplates(
+	ctx context.Context,
+	c client.Client,
+	clusterInstance v1alpha1.ClusterInstance,
+) ([]interface{}, error) {
+
 	te.Log.Info(fmt.Sprintf("Processing cluster-level templates for ClusterInstance %s", clusterInstance.Name))
 
 	// Render cluster-level templates
 	clusterManifests, err := te.renderTemplates(ctx, c, &clusterInstance, nil)
 	if err != nil {
-		te.Log.Info(fmt.Sprintf("encountered error while processing cluster-level templates for ClusterInstance %s, err: %s", clusterInstance.Name, err.Error()))
+		te.Log.Info(
+			fmt.Sprintf(
+				"encountered error while processing cluster-level templates for ClusterInstance %s, err: %s",
+				clusterInstance.Name, err.Error()))
 		return clusterManifests, err
 	}
 	te.Log.Info(fmt.Sprintf("Processed cluster-level templates for ClusterInstance %s", clusterInstance.Name))
@@ -59,15 +67,23 @@ func (te *TemplateEngine) ProcessTemplates(ctx context.Context, c client.Client,
 	// Process node-level templates
 	numNodes := len(clusterInstance.Spec.Nodes)
 	for nodeId, node := range clusterInstance.Spec.Nodes {
-		te.Log.Info(fmt.Sprintf("Processing node-level templates for ClusterInstance %s [node: %d of %d]", clusterInstance.Name, nodeId+1, numNodes))
+		te.Log.Info(
+			fmt.Sprintf(
+				"Processing node-level templates for ClusterInstance %s [node: %d of %d]",
+				clusterInstance.Name, nodeId+1, numNodes))
 
 		// Render node-level templates
 		nodeManifests, err := te.renderTemplates(ctx, c, &clusterInstance, &node)
 		if err != nil {
-			te.Log.Info(fmt.Sprintf("encountered error while processing node-level templates for ClusterInstance %s [%d of %d], err: %s", clusterInstance.Name, nodeId+1, numNodes, err.Error()))
+			te.Log.Info(
+				fmt.Sprintf(
+					"encountered error while processing node-level templates for ClusterInstance %s [%d of %d], err: %s",
+					clusterInstance.Name, nodeId+1, numNodes, err.Error()))
 			return clusterManifests, err
 		}
-		te.Log.Info(fmt.Sprintf("Processed node-level templates for ClusterInstance %s [node: %d of %d]", clusterInstance.Name, nodeId+1, numNodes))
+		te.Log.Info(fmt.Sprintf(
+			"Processed node-level templates for ClusterInstance %s [node: %d of %d]",
+			clusterInstance.Name, nodeId+1, numNodes))
 
 		for _, nodeCR := range nodeManifests {
 			if nodeCR != nil {
@@ -79,22 +95,25 @@ func (te *TemplateEngine) ProcessTemplates(ctx context.Context, c client.Client,
 	return clusterManifests, nil
 }
 
-func (te *TemplateEngine) renderTemplates(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.NodeSpec) ([]interface{}, error) {
+func (te *TemplateEngine) renderTemplates(
+	ctx context.Context,
+	c client.Client,
+	clusterInstance *v1alpha1.ClusterInstance,
+	node *v1alpha1.NodeSpec,
+) ([]interface{}, error) {
+
 	var (
-		manifests           []interface{}
-		templateRefs        []v1alpha1.TemplateRef
-		suppressedManifests []string
+		manifests    []interface{}
+		templateRefs []v1alpha1.TemplateRef
 	)
 
-	// Determine whether templateRefs and suppressedManifests values are cluster-based or node-based
+	// Determine whether templateRefs are cluster-based or node-based
 	if node == nil {
 		// use cluster-level values
 		templateRefs = clusterInstance.Spec.TemplateRefs
-		suppressedManifests = clusterInstance.Spec.SuppressedManifests
 	} else {
 		// use node-level values
 		templateRefs = node.TemplateRefs
-		suppressedManifests = node.SuppressedManifests
 	}
 
 	for tId, templateRef := range templateRefs {
@@ -112,45 +131,85 @@ func (te *TemplateEngine) renderTemplates(ctx context.Context, c client.Client, 
 		// process Template ConfigMap
 		for templateKey, template := range templatesConfigMap.Data {
 
-			clusterData, err := buildClusterData(clusterInstance, node)
+			manifest, err := te.renderManifestFromTemplate(
+				clusterInstance,
+				node,
+				templateRef.Name,
+				templateKey,
+				template)
 			if err != nil {
-				te.Log.Error(err, fmt.Sprintf("renderTemplates: failed to build ClusterInstance data for ClusterInstance %s", clusterInstance.Name))
 				return nil, err
 			}
-
-			manifest, err := te.render(templateKey, template, clusterData)
-			if err != nil {
-				te.Log.Error(err, fmt.Sprintf("renderTemplates: failed to render templateRef %s for ClusterInstance %s", templateRef.Name, clusterInstance.Name))
-				return manifests, err
+			if manifest != nil {
+				manifests = append(manifests, manifest)
 			}
-
-			if manifest == nil {
-				continue
-			}
-
-			kind := manifest["kind"].(string)
-			if suppressManifest(kind, suppressedManifests) {
-				te.Log.Info(fmt.Sprintf("renderTemplates: suppressing manifest %s for ClusterInstance %s", kind, clusterInstance.Name))
-				continue
-			}
-			if node == nil {
-				// Append cluster-level user provided extra annotations if exist
-				if extraManifestAnnotations, ok := clusterInstance.Spec.ExtraAnnotationSearch(kind); ok {
-					manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
-				}
-			} else {
-				// Append node-level user provided extra annotations if exist
-				if extraManifestAnnotations, ok := node.ExtraAnnotationSearch(kind, &clusterInstance.Spec); ok {
-					manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
-				}
-			}
-			manifests = append(manifests, manifest)
 		}
 	}
 	return manifests, nil
 }
 
+func (te *TemplateEngine) renderManifestFromTemplate(
+	clusterInstance *v1alpha1.ClusterInstance,
+	node *v1alpha1.NodeSpec,
+	templateRefName, templateKey, template string,
+) (map[string]interface{}, error) {
+
+	clusterData, err := buildClusterData(clusterInstance, node)
+	if err != nil {
+		te.Log.Error(err,
+			fmt.Sprintf("renderTemplates: failed to build ClusterInstance data for ClusterInstance %s",
+				clusterInstance.Name))
+		return nil, err
+	}
+
+	manifest, err := te.render(templateKey, template, clusterData)
+	if err != nil {
+		te.Log.Error(err,
+			fmt.Sprintf("renderTemplates: failed to render templateRef %s for ClusterInstance %s",
+				templateRefName, clusterInstance.Name))
+		return nil, err
+	}
+
+	if manifest == nil {
+		return nil, nil
+	}
+
+	var (
+		kind string
+		ok   bool
+	)
+	if kind, ok = manifest["kind"].(string); !ok {
+		return nil, fmt.Errorf("missing kind in template %s", templateKey)
+	}
+
+	suppressedManifests := clusterInstance.Spec.SuppressedManifests
+	if node != nil {
+		suppressedManifests = append(suppressedManifests, node.SuppressedManifests...)
+	}
+
+	if suppressManifest(kind, suppressedManifests) {
+		te.Log.Info(fmt.Sprintf("renderTemplates: suppressing manifest %s for ClusterInstance %s",
+			kind, clusterInstance.Name))
+		return nil, nil
+	}
+
+	if node == nil {
+		// Append cluster-level user provided extra annotations if exist
+		if extraManifestAnnotations, ok := clusterInstance.Spec.ExtraAnnotationSearch(kind); ok {
+			manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
+		}
+	} else {
+		// Append node-level user provided extra annotations if exist
+		if extraManifestAnnotations, ok := node.ExtraAnnotationSearch(kind, &clusterInstance.Spec); ok {
+			manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
+		}
+	}
+
+	return manifest, nil
+}
+
 func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterData) (map[string]interface{}, error) {
+
 	renderedTemplate := make(map[string]interface{})
 	fMap := funcMap()
 	t, err := template.New(templateKey).Funcs(fMap).Parse(templateStr)
@@ -173,6 +232,7 @@ func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterD
 			return renderedTemplate, nil
 		}
 	}
+
 	// Output is all whitespace; return nil instead
 	return nil, nil
 }

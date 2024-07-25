@@ -24,7 +24,9 @@ var RetryBackoff30Seconds = wait.Backoff{
 }
 
 func isRetriable(err error) bool {
-	return apierrors.IsInternalError(err) || apierrors.IsServiceUnavailable(err) || net.IsConnectionRefused(err)
+	return apierrors.IsInternalError(err) ||
+		apierrors.IsServiceUnavailable(err) ||
+		net.IsConnectionRefused(err)
 }
 
 func RetryOnRetriable(backoff wait.Backoff, fn func() error) error {
@@ -32,7 +34,10 @@ func RetryOnRetriable(backoff wait.Backoff, fn func() error) error {
 }
 
 func isConflictOrRetriable(err error) bool {
-	return apierrors.IsConflict(err) || apierrors.IsInternalError(err) || apierrors.IsServiceUnavailable(err) || net.IsConnectionRefused(err)
+	return apierrors.IsConflict(err) ||
+		apierrors.IsInternalError(err) ||
+		apierrors.IsServiceUnavailable(err) ||
+		net.IsConnectionRefused(err)
 }
 
 func RetryOnConflictOrRetriable(backoff wait.Backoff, fn func() error) error {
