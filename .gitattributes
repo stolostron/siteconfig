@@ -1,0 +1,5 @@
+vendor/** linguist-generated=true
+bundle/** linguist-generated=true
+internal/generated/** linguist-generated=true
+PROJECT linguist-generated=true
+
