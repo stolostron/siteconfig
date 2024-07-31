@@ -393,8 +393,8 @@ type ClusterInstanceStatus struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:path=clusterinstances,scope=Namespaced
-//+kubebuilder:printcolumn:name="State",type="string",JSONPath=".status.conditions[-1:].reason"
-//+kubebuilder:printcolumn:name="Details",type="string",JSONPath=".status.conditions[-1:].message"
+//+kubebuilder:printcolumn:name="ProvisionStatus",type="string",JSONPath=".status.conditions[?(@.type=='Provisioned')].reason"
+//+kubebuilder:printcolumn:name="ProvisionDetails",type="string",JSONPath=".status.conditions[?(@.type=='Provisioned')].message"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // ClusterInstance is the Schema for the clusterinstances API

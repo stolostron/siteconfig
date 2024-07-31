@@ -76,8 +76,21 @@ func (r *ClusterDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		clusterInstance.Status.ClusterDeploymentRef = &corev1.LocalObjectReference{Name: clusterDeployment.Name}
 	}
 
-	updateCIProvisionedStatus(clusterDeployment, clusterInstance)
-	updateSCDeploymentConditions(clusterDeployment, clusterInstance)
+	// Initialize ClusterInstance Provisioned status if not found
+	if provisionedStatus := meta.FindStatusCondition(
+		clusterInstance.Status.Conditions,
+		string(conditions.Provisioned),
+	); provisionedStatus == nil {
+		r.Log.Info("Initializing Provisioned condition", "ClusterInstance", clusterInstance.Name)
+		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
+			conditions.Provisioned,
+			conditions.Unknown,
+			metav1.ConditionUnknown,
+			"Waiting for provisioning to start")
+	}
+
+	updateCIProvisionedStatus(clusterDeployment, clusterInstance, r.Log)
+	updateCIDeploymentConditions(clusterDeployment, clusterInstance)
 	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		return requeueWithError(updateErr)
 	}
@@ -94,31 +107,66 @@ func clusterInstallConditionTypes() []hivev1.ClusterDeploymentConditionType {
 	}
 }
 
-func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, sc *v1alpha1.ClusterInstance) {
-	// Check if cluster has finished installing:
-	// - if it has then update ClusterInstance.Status.Conditions.Provisioned -> Completed
+func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.ClusterInstance, log logr.Logger) {
+
+	installStopped := conditions.FindConditionType(cd.Status.Conditions,
+		hivev1.ClusterInstallStoppedClusterDeploymentCondition)
+
+	installCompleted := conditions.FindConditionType(cd.Status.Conditions,
+		hivev1.ClusterInstallCompletedClusterDeploymentCondition)
+
+	installFailed := conditions.FindConditionType(cd.Status.Conditions,
+		hivev1.ClusterInstallFailedClusterDeploymentCondition)
+
+	if installStopped == nil || installCompleted == nil || installFailed == nil {
+		log.Info("Failed to extract condition(s)", "name", cd.Name)
+		return
+	}
+
+	// Check whether cluster has finished provisioning
 	if cd.Spec.Installed {
-		conditions.SetStatusCondition(&sc.Status.Conditions,
-			conditions.Provisioned,
-			conditions.Completed,
-			metav1.ConditionTrue,
-			"Provision completed")
-	} else if installStopped := conditions.FindConditionType(cd.Status.Conditions,
-		hivev1.ClusterInstallStoppedClusterDeploymentCondition); installStopped != nil {
-		// Check if ClusterInstance.Status Provisioned -> InProgress condition
-		if found := meta.FindStatusCondition(sc.Status.Conditions, string(conditions.Provisioned)); found == nil {
-			if !cd.Spec.Installed && installStopped.Status == corev1.ConditionStatus(metav1.ConditionFalse) {
-				conditions.SetStatusCondition(&sc.Status.Conditions,
-					conditions.Provisioned,
-					conditions.InProgress,
-					metav1.ConditionTrue,
-					"Provisioning cluster")
-			}
+		// Check for successful provisioning
+		if installStopped.Status == corev1.ConditionTrue && installCompleted.Status == corev1.ConditionTrue {
+			conditions.SetStatusCondition(&ci.Status.Conditions,
+				conditions.Provisioned,
+				conditions.Completed,
+				metav1.ConditionTrue,
+				"Provisioning completed")
+			return
 		}
+		// Check for stale deployment conditions:
+		//  - either Stopped OR Completed deployment conditions are reflecting a `ConditionFalse` status
+		if installStopped.Status == corev1.ConditionFalse || installCompleted.Status == corev1.ConditionFalse {
+			conditions.SetStatusCondition(&ci.Status.Conditions,
+				conditions.Provisioned,
+				conditions.StaleConditions,
+				metav1.ConditionUnknown,
+				"ClusterDeployment Spec.Installed=true, but Status.Conditions are not updated")
+			return
+		}
+	}
+
+	// Check whether cluster has failed provisioning
+	if installStopped.Status == corev1.ConditionTrue && installFailed.Status == corev1.ConditionTrue {
+		conditions.SetStatusCondition(&ci.Status.Conditions,
+			conditions.Provisioned,
+			conditions.Failed,
+			metav1.ConditionFalse,
+			"Provisioning failed")
+		return
+	}
+
+	// Check whether provisioning is in-progress
+	if installStopped.Status == corev1.ConditionFalse {
+		conditions.SetStatusCondition(&ci.Status.Conditions,
+			conditions.Provisioned,
+			conditions.InProgress,
+			metav1.ConditionFalse,
+			"Provisioning cluster")
 	}
 }
 
-func updateSCDeploymentConditions(cd *hivev1.ClusterDeployment, sc *v1alpha1.ClusterInstance) {
+func updateCIDeploymentConditions(cd *hivev1.ClusterDeployment, ci *v1alpha1.ClusterInstance) {
 	// Compare ClusterInstance.Status.installConditions to clusterDeployment.Conditions
 	for _, cond := range clusterInstallConditionTypes() {
 		installCond := conditions.FindConditionType(cd.Status.Conditions, cond)
@@ -134,19 +182,19 @@ func updateSCDeploymentConditions(cd *hivev1.ClusterDeployment, sc *v1alpha1.Clu
 		now := metav1.NewTime(time.Now())
 
 		// Search ClusterInstance status DeploymentConditions for the installCond
-		scCond := conditions.FindConditionType(sc.Status.DeploymentConditions, installCond.Type)
-		if scCond == nil {
+		ciCond := conditions.FindConditionType(ci.Status.DeploymentConditions, installCond.Type)
+		if ciCond == nil {
 			installCond.LastTransitionTime = now
 			installCond.LastProbeTime = now
-			sc.Status.DeploymentConditions = append(sc.Status.DeploymentConditions, *installCond)
+			ci.Status.DeploymentConditions = append(ci.Status.DeploymentConditions, *installCond)
 		} else {
-			scCond.Status = installCond.Status
-			scCond.Reason = installCond.Reason
-			scCond.Message = installCond.Message
-			scCond.LastProbeTime = now
+			ciCond.Status = installCond.Status
+			ciCond.Reason = installCond.Reason
+			ciCond.Message = installCond.Message
+			ciCond.LastProbeTime = now
 
-			if scCond.Status != installCond.Status {
-				scCond.LastTransitionTime = now
+			if ciCond.Status != installCond.Status {
+				ciCond.LastTransitionTime = now
 			}
 		}
 	}
