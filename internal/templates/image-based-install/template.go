@@ -29,7 +29,7 @@ spec:
     name: "{{ .Spec.ClusterImageSetNameRef }}"
   hostname: "{{ .SpecialVars.CurrentNode.HostName }}"
   sshKey: "{{ .Spec.SSHPublicKey }}"
-{{ if .Spec.CaBundleRef.Name }}
+{{ if .Spec.CaBundleRef }}
   caBundleRef:
 {{ .Spec.CaBundleRef | toYaml | indent 4 }}
 {{ end }}
@@ -84,7 +84,7 @@ metadata:
   namespace: "{{ .Spec.ClusterName }}"
 data:
   network-config: |
-{{ .SpecialVars.CurrentNode.NodeNetwork.Config | toYaml | indent 4}}
+{{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig | toYaml | indent 4}}
 `
 
 const KlusterletAddonConfig = `apiVersion: agent.open-cluster-management.io/v1
