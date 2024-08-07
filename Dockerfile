@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM registry.access.redhat.com/ubi9/go-toolset:1.21 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:1.21.11-7 AS builder
 
 # Bring in the go dependencies before anything else so we can take
 # advantage of caching these layers in future builds.
