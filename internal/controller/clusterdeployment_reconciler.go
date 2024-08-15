@@ -91,7 +91,7 @@ func (r *ClusterDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	updateCIProvisionedStatus(clusterDeployment, clusterInstance, r.Log)
 	updateCIDeploymentConditions(clusterDeployment, clusterInstance)
-	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
+	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		return requeueWithError(updateErr)
 	}
 
@@ -109,13 +109,13 @@ func clusterInstallConditionTypes() []hivev1.ClusterDeploymentConditionType {
 
 func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.ClusterInstance, log logr.Logger) {
 
-	installStopped := conditions.FindConditionType(cd.Status.Conditions,
+	installStopped := conditions.FindCDConditionType(cd.Status.Conditions,
 		hivev1.ClusterInstallStoppedClusterDeploymentCondition)
 
-	installCompleted := conditions.FindConditionType(cd.Status.Conditions,
+	installCompleted := conditions.FindCDConditionType(cd.Status.Conditions,
 		hivev1.ClusterInstallCompletedClusterDeploymentCondition)
 
-	installFailed := conditions.FindConditionType(cd.Status.Conditions,
+	installFailed := conditions.FindCDConditionType(cd.Status.Conditions,
 		hivev1.ClusterInstallFailedClusterDeploymentCondition)
 
 	if installStopped == nil || installCompleted == nil || installFailed == nil {
@@ -169,7 +169,7 @@ func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.Cluste
 func updateCIDeploymentConditions(cd *hivev1.ClusterDeployment, ci *v1alpha1.ClusterInstance) {
 	// Compare ClusterInstance.Status.installConditions to clusterDeployment.Conditions
 	for _, cond := range clusterInstallConditionTypes() {
-		installCond := conditions.FindConditionType(cd.Status.Conditions, cond)
+		installCond := conditions.FindCDConditionType(cd.Status.Conditions, cond)
 		if installCond == nil {
 			// not found, initialize with Unknown fields
 			installCond = &hivev1.ClusterDeploymentCondition{
@@ -182,7 +182,7 @@ func updateCIDeploymentConditions(cd *hivev1.ClusterDeployment, ci *v1alpha1.Clu
 		now := metav1.NewTime(time.Now())
 
 		// Search ClusterInstance status DeploymentConditions for the installCond
-		ciCond := conditions.FindConditionType(ci.Status.DeploymentConditions, installCond.Type)
+		ciCond := conditions.FindCDConditionType(ci.Status.DeploymentConditions, installCond.Type)
 		if ciCond == nil {
 			installCond.LastTransitionTime = now
 			installCond.LastProbeTime = now

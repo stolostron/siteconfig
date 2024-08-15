@@ -198,7 +198,7 @@ var _ = Describe("Reconcile", func() {
 		Expect(len(ci.Status.DeploymentConditions)).To(Equal(len(expectedConditions)))
 
 		for _, cond := range expectedConditions {
-			found := conditions.FindConditionType(ci.Status.DeploymentConditions, cond.Type)
+			found := conditions.FindCDConditionType(ci.Status.DeploymentConditions, cond.Type)
 			Expect(found).ToNot(BeNil(), "Condition %s was not found", cond.Type)
 			Expect(found.Status).To(Equal(cond.Status))
 		}
@@ -230,7 +230,7 @@ var _ = Describe("Reconcile", func() {
 			conditions.InProgress,
 			metav1.ConditionTrue,
 			"Provisioning cluster")
-		err := conditions.UpdateStatus(ctx, c, clusterInstance)
+		err := conditions.UpdateCIStatus(ctx, c, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		ci := &v1alpha1.ClusterInstance{}
@@ -304,7 +304,7 @@ var _ = Describe("Reconcile", func() {
 			Expect(c.Get(ctx, key, ci)).To(Succeed())
 
 			for _, cond := range deploymentCondition {
-				found := conditions.FindConditionType(ci.Status.DeploymentConditions, cond.Type)
+				found := conditions.FindCDConditionType(ci.Status.DeploymentConditions, cond.Type)
 				Expect(found).ToNot(BeNil(), "Condition %s was not found", cond.Type)
 				Expect(found.Status).To(Equal(cond.Status))
 				Expect(found.Message).To(Equal(cond.Message))
