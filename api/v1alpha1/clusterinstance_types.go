@@ -370,7 +370,6 @@ type ManifestReference struct {
 
 // ClusterInstanceStatus defines the observed state of ClusterInstance
 type ClusterInstanceStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// List of conditions pertaining to actions performed on the ClusterInstance resource.
@@ -388,6 +387,9 @@ type ClusterInstanceStatus struct {
 	// List of manifests that have been rendered along with their status.
 	// +optional
 	ManifestsRendered []ManifestReference `json:"manifestsRendered,omitempty"`
+
+	// Track the observed generation to avoid unnecessary reconciles
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 //+kubebuilder:object:root=true

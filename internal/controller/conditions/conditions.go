@@ -65,7 +65,7 @@ func SetStatusCondition(
 	)
 }
 
-func UpdateStatus(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance) error {
+func UpdateCIStatus(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance) error {
 	if err := retry.RetryOnConflictOrRetriable(retry.RetryBackoff30Seconds, func() error {
 		return c.Status().Update(ctx, clusterInstance) //nolint:wrapcheck
 	}); err != nil {
@@ -75,9 +75,14 @@ func UpdateStatus(ctx context.Context, c client.Client, clusterInstance *v1alpha
 	return nil
 }
 
-func PatchStatus(ctx context.Context, c client.Client, siteConfig *v1alpha1.ClusterInstance, patch client.Patch) error {
+func PatchCIStatus(
+	ctx context.Context,
+	c client.Client,
+	clusterInstance *v1alpha1.ClusterInstance,
+	patch client.Patch,
+) error {
 	if err := retry.RetryOnConflictOrRetriable(retry.RetryBackoff30Seconds, func() error {
-		return c.Status().Patch(ctx, siteConfig, patch) //nolint:wrapcheck
+		return c.Status().Patch(ctx, clusterInstance, patch) //nolint:wrapcheck
 	}); err != nil {
 		return fmt.Errorf("failed to update ClusterInstance status: %w", err)
 	}
@@ -85,8 +90,8 @@ func PatchStatus(ctx context.Context, c client.Client, siteConfig *v1alpha1.Clus
 	return nil
 }
 
-// FindConditionType finds the conditionType in ClusterDeployment conditions.
-func FindConditionType(
+// FindCDConditionType finds the conditionType in ClusterDeployment conditions.
+func FindCDConditionType(
 	conditions []hivev1.ClusterDeploymentCondition,
 	condType hivev1.ClusterDeploymentConditionType,
 ) *hivev1.ClusterDeploymentCondition {

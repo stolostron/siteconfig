@@ -48,7 +48,7 @@ var _ = Describe("Reconcile", func() {
 		ctx        = context.Background()
 		testParams = &ci.TestParams{
 			ClusterName:      "test-cluster",
-			ClusterNamespace: "test-namespace",
+			ClusterNamespace: "test-cluster",
 			PullSecret:       "pull-secret",
 		}
 
@@ -112,6 +112,48 @@ var _ = Describe("Reconcile", func() {
 			Name:      testParams.ClusterNamespace,
 		}
 		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(Equal(ctrl.Result{}))
+	})
+
+	It("continues to validate the ClusterInstance when the ObjectMeta.Generation and ObservedGeneration are different", func() {
+		generation := int64(2)
+		clusterInstance.ObjectMeta.Generation = generation
+		clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
+			ObservedGeneration: generation - 1,
+		}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		key := types.NamespacedName{
+			Namespace: testParams.ClusterName,
+			Name:      testParams.ClusterNamespace,
+		}
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+
+		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+		// Expect errors to occur in the ClusterInstance validations stage
+		Expect(err).To(HaveOccurred())
+		Expect(res).To(Equal(ctrl.Result{}))
+	})
+
+	It("pre-empts the reconcile-loop when the ObjectMeta.Generation and ObservedGeneration are the same", func() {
+		generation := int64(2)
+		clusterInstance.ObjectMeta.Generation = generation
+		clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
+			ObservedGeneration: generation,
+		}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		key := types.NamespacedName{
+			Namespace: testParams.ClusterName,
+			Name:      testParams.ClusterNamespace,
+		}
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+
+		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+		// Although the ClusterInstance CR should fail validation, the expected behaviour of this test is that the
+		// reconcile should stop early since we have intentionally set the ObservedGeneration to be the same as
+		// ObjectMeta.Generation
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(Equal(ctrl.Result{}))
 	})

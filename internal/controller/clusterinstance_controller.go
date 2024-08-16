@@ -88,7 +88,7 @@ func requeueWithError(err error) (ctrl.Result, error) {
 // move the current state of the cluster closer to the desired state.
 func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	defer func() {
-		r.Log.Info("Finish reconciling ClusterInstance", "name", req.NamespacedName)
+		r.Log.Info("Finished reconciling ClusterInstance", "name", req.NamespacedName)
 	}()
 
 	r.Log.Info("Start reconciling ClusterInstance", "name", req.NamespacedName)
@@ -100,7 +100,7 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			r.Log.Info("ClusterInstance not found", "name", req.NamespacedName)
 			return doNotRequeue(), nil
 		}
-		r.Log.Error(err, "Failed to get ClusterInstance")
+		r.Log.Error(err, "Failed to get ClusterInstance", "name", req.NamespacedName)
 		// This is likely a case where the API is down, so requeue and try again shortly
 		return requeueWithError(err)
 	}
@@ -112,6 +112,13 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			r.Log.Error(err, "Encountered error while handling finalizer", "ClusterInstance", req.NamespacedName)
 		}
 		return res, err
+	}
+
+	// Pre-empt the reconcile-loop when the ObservedGeneration is the same as the ObjectMeta.Generation
+	if clusterInstance.Status.ObservedGeneration == clusterInstance.ObjectMeta.Generation {
+		r.Log.Info("ObservedGeneration and ObjectMeta.Generation are the same, pre-empting reconcile",
+			"ClusterInstance", req.NamespacedName)
+		return doNotRequeue(), nil
 	}
 
 	// Validate ClusterInstance
@@ -131,6 +138,16 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Update manifests' status that have been flagged for suppression
 	if err := r.updateSuppressedManifestsStatus(ctx, clusterInstance); err != nil {
 		return requeueWithError(err)
+	}
+
+	// Only update the ObservedGeneration when all the above processes have been successfully executed
+	if clusterInstance.Status.ObservedGeneration != clusterInstance.ObjectMeta.Generation {
+		r.Log.Info(
+			fmt.Sprintf("Updating ObservedGeneration to %d", clusterInstance.ObjectMeta.Generation),
+			"ClusterInstance", req.NamespacedName)
+		patch := client.MergeFrom(clusterInstance.DeepCopy())
+		clusterInstance.Status.ObservedGeneration = clusterInstance.ObjectMeta.Generation
+		return ctrl.Result{}, conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
 	}
 
 	return doNotRequeue(), nil
@@ -239,7 +256,7 @@ func (r *ClusterInstanceReconciler) handleValidate(
 	conditions.SetStatusCondition(&clusterInstance.Status.Conditions, conditions.ConditionType(newCond.Type),
 		conditions.ConditionReason(newCond.Reason), newCond.Status, newCond.Message)
 
-	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
+	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
 			r.Log.Info(
 				fmt.Sprintf("Failed to update ClusterInstance %s status after validating ClusterInstance, err: %s",
@@ -274,7 +291,7 @@ func (r *ClusterInstanceReconciler) renderManifests(
 			"Rendered templates successfully")
 	}
 
-	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
+	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
 			r.Log.Info(
 				fmt.Sprintf("Failed to update ClusterInstance %s status after rendering templates, err: %s",
@@ -493,7 +510,7 @@ func (r *ClusterInstanceReconciler) executeRenderedManifests(
 		}
 	}
 
-	return successfulExecution, conditions.PatchStatus(ctx, r.Client, clusterInstance, patch)
+	return successfulExecution, conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
 }
 
 func getSortedSyncWaves(manifestGroups map[int][]interface{}) []int {
@@ -580,7 +597,7 @@ func (r *ClusterInstanceReconciler) validateRenderedManifests(
 			"Rendered templates validation succeeded")
 	}
 
-	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
+	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
 			r.Log.Info(
 				fmt.Sprintf("failed to update ClusterInstance %s status post validation of rendered templates, err: %s",
@@ -625,7 +642,7 @@ func (r *ClusterInstanceReconciler) applyRenderedManifests(
 			"Applied site config manifests")
 	}
 
-	if updateErr := conditions.PatchStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
+	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
 			r.Log.Info(
 				fmt.Sprintf("Failed to update ClusterInstance %s status post creation of rendered templates, err: %s",
@@ -704,7 +721,7 @@ func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(
 		suppressFn(node.SuppressedManifests)
 	}
 
-	return conditions.PatchStatus(ctx, r.Client, clusterInstance, patch)
+	return conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
 }
 
 // SetupWithManager sets up the controller with the Manager.
