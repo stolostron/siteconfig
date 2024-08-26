@@ -33,8 +33,6 @@ spec:
   caBundleRef:
 {{ .Spec.CaBundleRef | toYaml | indent 4 }}
 {{ end }}
-  networkConfigRef:
-    name: "{{ .SpecialVars.CurrentNode.HostName }}"
 {{ if gt (len .Spec.ExtraManifestsRefs) 0 }}
   extraManifestsRef:
 {{ .Spec.ExtraManifestsRefs | toYaml | indent 4 }}
@@ -75,17 +73,17 @@ spec:
   pullSecretRef:
     name: "{{ .Spec.PullSecretRef.Name }}"`
 
-const NetworkConfigMap = `apiVersion: v1
-kind: ConfigMap
+const NetworkSecret = `apiVersion: v1
+kind: Secret
 metadata:
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
   namespace: "{{ .Spec.ClusterName }}"
+type: Opaque
 data:
-  network-config: |
-{{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig | toYaml | indent 4}}
-`
+  nmstate: |
+{{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig | toYaml | b64enc | indent 4}}`
 
 const KlusterletAddonConfig = `apiVersion: agent.open-cluster-management.io/v1
 kind: KlusterletAddonConfig
@@ -157,7 +155,8 @@ spec:
 {{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:
 {{ .SpecialVars.CurrentNode.RootDeviceHints | toYaml | indent 4 }}
-{{ end }}`
+{{ end }}
+  preprovisioningNetworkDataName: {{ .SpecialVars.CurrentNode.HostName }}`
 
 func GetClusterTemplates() map[string]string {
 	data := make(map[string]string)
@@ -171,6 +170,6 @@ func GetNodeTemplates() map[string]string {
 	data := make(map[string]string)
 	data["ImageClusterInstall"] = ImageClusterInstall
 	data["BareMetalHost"] = BareMetalHost
-	data["NetworkConfigMap"] = NetworkConfigMap
+	data["NetworkSecret"] = NetworkSecret
 	return data
 }
