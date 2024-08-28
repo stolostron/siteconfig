@@ -35,6 +35,7 @@ import (
 const (
 	WaveAnnotation        = v1alpha1.Group + "/sync-wave"
 	DefaultWaveAnnotation = "0"
+	OwnedByLabel          = v1alpha1.Group + "/owned-by"
 )
 
 type TemplateEngine struct {
@@ -192,6 +193,11 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 			kind, clusterInstance.Name))
 		return nil, nil
 	}
+
+	// Add owned-by label
+	manifest = appendManifestLabels(map[string]string{
+		OwnedByLabel: fmt.Sprintf("%s_%s", clusterInstance.Namespace, clusterInstance.Name),
+	}, manifest)
 
 	if node == nil {
 		// Append cluster-level user provided extra annotations if exist

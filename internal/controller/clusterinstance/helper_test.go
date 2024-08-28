@@ -313,7 +313,105 @@ func Test_suppressManifest(t *testing.T) {
 	}
 }
 
-func Test_appendManifestAnnotations(t *testing.T) {
+func TestAppendToManifestMetadata(t *testing.T) {
+	type args struct {
+		appendData map[string]string
+		field      string
+		manifest   map[string]interface{}
+	}
+	tests := []struct {
+		name string
+		args args
+		want map[string]interface{}
+	}{
+		{
+			name: "add new metadata field",
+			args: args{
+				appendData: map[string]string{
+					"foo": "bar",
+				},
+				field: "newField",
+				manifest: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"newField": map[string]interface{}{
+							"test": "ok",
+						},
+					},
+				},
+			},
+			want: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"newField": map[string]interface{}{
+						"test": "ok",
+						"foo":  "bar",
+					},
+				},
+			},
+		},
+
+		{
+			name: "should not modify existing field",
+			args: args{
+				appendData: map[string]string{
+					"test": "foobar",
+				},
+				field: "testField",
+				manifest: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"testField": map[string]interface{}{
+							"test": "ok",
+						},
+					},
+				},
+			},
+			want: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"testField": map[string]interface{}{
+						"test": "ok",
+					},
+				},
+			},
+		},
+
+		{
+			name: "edge-case: create missing metadata map in addition to new field",
+			args: args{
+				appendData: map[string]string{
+					"foo": "bar",
+				},
+				field: "newField",
+				manifest: map[string]interface{}{
+					"spec": map[string]interface{}{
+						"field1": map[string]interface{}{
+							"subField1": "ok",
+						},
+					},
+				},
+			},
+			want: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"newField": map[string]interface{}{
+						"foo": "bar",
+					},
+				},
+				"spec": map[string]interface{}{
+					"field1": map[string]interface{}{
+						"subField1": "ok",
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := appendToManifestMetadata(tt.args.appendData, tt.args.field, tt.args.manifest); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("appendToManifestMetadata() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAppendManifestAnnotations(t *testing.T) {
 	type args struct {
 		extraAnnotations map[string]string
 		manifest         map[string]interface{}
@@ -378,6 +476,73 @@ func Test_appendManifestAnnotations(t *testing.T) {
 		})
 	}
 }
+
+func TestAppendManifestLabels(t *testing.T) {
+	type args struct {
+		extraLabels map[string]string
+		manifest    map[string]interface{}
+	}
+	tests := []struct {
+		name string
+		args args
+		want map[string]interface{}
+	}{
+		{
+			name: "add new label",
+			args: args{
+				extraLabels: map[string]string{
+					"foo": "bar",
+				},
+				manifest: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"labels": map[string]interface{}{
+							"test": "ok",
+						},
+					},
+				},
+			},
+			want: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"labels": map[string]interface{}{
+						"test": "ok",
+						"foo":  "bar",
+					},
+				},
+			},
+		},
+
+		{
+			name: "should not modify existing label",
+			args: args{
+				extraLabels: map[string]string{
+					"test": "foobar",
+				},
+				manifest: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"labels": map[string]interface{}{
+							"test": "ok",
+						},
+					},
+				},
+			},
+			want: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"labels": map[string]interface{}{
+						"test": "ok",
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := appendManifestLabels(tt.args.extraLabels, tt.args.manifest); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("appendManifestLabels() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func Test_mergeJSONCommonKey(t *testing.T) {
 	type args struct {
 		mergeWith string
