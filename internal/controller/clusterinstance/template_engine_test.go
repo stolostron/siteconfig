@@ -18,6 +18,7 @@ package clusterinstance
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -290,6 +291,11 @@ var _ = Describe("renderTemplates", func() {
 		Expect(got[0]).To(Equal(map[string]interface{}{
 			"apiVersion": "test.io/v1",
 			"kind":       "TestB",
+			"metadata": map[string]interface{}{
+				"labels": map[string]interface{}{
+					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+				},
+			},
 			"spec": map[string]interface{}{
 				"name": "site-sno-du-1",
 			},
@@ -321,6 +327,11 @@ var _ = Describe("renderTemplates", func() {
 		Expect(got[0]).To(Equal(map[string]interface{}{
 			"apiVersion": "test.io/v1",
 			"kind":       "TestD",
+			"metadata": map[string]interface{}{
+				"labels": map[string]interface{}{
+					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+				},
+			},
 			"spec": map[string]interface{}{
 				"name": "node1",
 			},
@@ -358,6 +369,9 @@ var _ = Describe("renderTemplates", func() {
 				"annotations": map[string]interface{}{
 					"extra-annotation-l1": "test",
 					"extra-annotation-l2": "test",
+				},
+				"labels": map[string]interface{}{
+					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
 				},
 			},
 			"spec": map[string]interface{}{
@@ -399,6 +413,9 @@ var _ = Describe("renderTemplates", func() {
 					"extra-node-annotation-l1": "test",
 					"extra-node-annotation-l2": "test",
 				},
+				"labels": map[string]interface{}{
+					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+				},
 			},
 			"spec": map[string]interface{}{
 				"name": "node1",
@@ -438,6 +455,9 @@ var _ = Describe("renderTemplates", func() {
 				"annotations": map[string]interface{}{
 					"extra-node-annotation-l1": "test",
 					"extra-node-annotation-l2": "test",
+				},
+				"labels": map[string]interface{}{
+					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
 				},
 			},
 			"spec": map[string]interface{}{
@@ -592,6 +612,9 @@ var _ = Describe("ProcessTemplates", func() {
 				"annotations": map[string]interface{}{
 					"extra-annotation-l1": "test",
 				},
+				"labels": map[string]interface{}{
+					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+				},
 			},
 			"spec": map[string]interface{}{
 				"name": "site-sno-du-1",
@@ -605,6 +628,9 @@ var _ = Describe("ProcessTemplates", func() {
 			"metadata": map[string]interface{}{
 				"annotations": map[string]interface{}{
 					"extra-node-annotation-l1": "test",
+				},
+				"labels": map[string]interface{}{
+					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
 				},
 			},
 			"spec": map[string]interface{}{
