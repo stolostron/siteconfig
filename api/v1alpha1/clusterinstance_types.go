@@ -91,6 +91,19 @@ type TemplateRef struct {
 	Namespace string `json:"namespace"`
 }
 
+// ResourceRef represents the API version and kind of a Kubernetes resource
+type ResourceRef struct {
+	// APIVersion is the version of the Kubernetes API to use when interacting
+	// with the resource. It includes both the API group and the version, such
+	// as "v1" for core resources or "apps/v1" for deployments.
+	// +required
+	APIVersion string `json:"apiVersion"`
+
+	// Kind is the type of Kubernetes resource being referenced.
+	// +required
+	Kind string `json:"kind"`
+}
+
 // NodeSpec
 type NodeSpec struct {
 	// BmcAddress holds the URL for accessing the controller on the network.
@@ -165,6 +178,11 @@ type NodeSpec struct {
 	// SuppressedManifests is a list of node-level manifest names to be excluded from the template rendering process
 	// +optional
 	SuppressedManifests []string `json:"suppressedManifests,omitempty"`
+
+	// PruneManifests represents a list of Kubernetes resource references that indicates which "node-level" manifests
+	// should be pruned (removed).
+	// +optional
+	PruneManifests []ResourceRef `json:"pruneManifests,omitempty"`
 
 	// IronicInspect is used to specify if automatic introspection carried out during registration of BMH is enabled or
 	// disabled
@@ -293,6 +311,11 @@ type ClusterInstanceSpec struct {
 	// SuppressedManifests is a list of manifest names to be excluded from the template rendering process
 	// +optional
 	SuppressedManifests []string `json:"suppressedManifests,omitempty"`
+
+	// PruneManifests represents a list of Kubernetes resource references that indicates which manifests should be
+	// pruned (removed).
+	// +optional
+	PruneManifests []ResourceRef `json:"pruneManifests,omitempty"`
 
 	// CPUPartitioning determines if a cluster should be setup for CPU workload partitioning at install time.
 	// When this field is set the cluster will be flagged for CPU Partitioning allowing users to segregate workloads to
