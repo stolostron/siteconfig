@@ -204,10 +204,20 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 		if extraManifestAnnotations, ok := clusterInstance.Spec.ExtraAnnotationSearch(kind); ok {
 			manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
 		}
+
+		// Append cluster-level user provided extra labels if exist
+		if extraManifestLabels, ok := clusterInstance.Spec.ExtraLabelSearch(kind); ok {
+			manifest = appendManifestLabels(extraManifestLabels, manifest)
+		}
 	} else {
 		// Append node-level user provided extra annotations if exist
 		if extraManifestAnnotations, ok := node.ExtraAnnotationSearch(kind, &clusterInstance.Spec); ok {
 			manifest = appendManifestAnnotations(extraManifestAnnotations, manifest)
+		}
+
+		// Append node-level user provided extra labels if exist
+		if extraManifestLabels, ok := node.ExtraLabelSearch(kind, &clusterInstance.Spec); ok {
+			manifest = appendManifestLabels(extraManifestLabels, manifest)
 		}
 	}
 

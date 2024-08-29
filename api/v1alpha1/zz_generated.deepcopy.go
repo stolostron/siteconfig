@@ -155,6 +155,24 @@ func (in *ClusterInstanceSpec) DeepCopyInto(out *ClusterInstanceSpec) {
 			(*out)[key] = outVal
 		}
 	}
+	if in.ExtraLabels != nil {
+		in, out := &in.ExtraLabels, &out.ExtraLabels
+		*out = make(map[string]map[string]string, len(*in))
+		for key, val := range *in {
+			var outVal map[string]string
+			if val == nil {
+				(*out)[key] = nil
+			} else {
+				inVal := (*in)[key]
+				in, out := &inVal, &outVal
+				*out = make(map[string]string, len(*in))
+				for key, val := range *in {
+					(*out)[key] = val
+				}
+			}
+			(*out)[key] = outVal
+		}
+	}
 	if in.ClusterLabels != nil {
 		in, out := &in.ClusterLabels, &out.ClusterLabels
 		*out = make(map[string]string, len(*in))
@@ -351,6 +369,24 @@ func (in *NodeSpec) DeepCopyInto(out *NodeSpec) {
 	}
 	if in.ExtraAnnotations != nil {
 		in, out := &in.ExtraAnnotations, &out.ExtraAnnotations
+		*out = make(map[string]map[string]string, len(*in))
+		for key, val := range *in {
+			var outVal map[string]string
+			if val == nil {
+				(*out)[key] = nil
+			} else {
+				inVal := (*in)[key]
+				in, out := &inVal, &outVal
+				*out = make(map[string]string, len(*in))
+				for key, val := range *in {
+					(*out)[key] = val
+				}
+			}
+			(*out)[key] = outVal
+		}
+	}
+	if in.ExtraLabels != nil {
+		in, out := &in.ExtraLabels, &out.ExtraLabels
 		*out = make(map[string]map[string]string, len(*in))
 		for key, val := range *in {
 			var outVal map[string]string

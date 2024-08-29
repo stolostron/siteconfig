@@ -338,7 +338,7 @@ var _ = Describe("renderTemplates", func() {
 		}))
 	})
 
-	It("renders a cluster-level template with extra annotations", func() {
+	It("renders a cluster-level template with extra annotations and labels", func() {
 
 		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "cluster-level", Namespace: "test"},
@@ -358,6 +358,12 @@ var _ = Describe("renderTemplates", func() {
 				"extra-annotation-l2": "test",
 			},
 		}
+		TestClusterInstance.Spec.ExtraLabels = map[string]map[string]string{
+			"Cluster": {
+				"extra-labels-l1": "test",
+				"extra-labels-l2": "test",
+			},
+		}
 		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).ToNot(HaveOccurred())
 
@@ -371,7 +377,9 @@ var _ = Describe("renderTemplates", func() {
 					"extra-annotation-l2": "test",
 				},
 				"labels": map[string]interface{}{
-					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					OwnedByLabel:      fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					"extra-labels-l1": "test",
+					"extra-labels-l2": "test",
 				},
 			},
 			"spec": map[string]interface{}{
@@ -380,7 +388,7 @@ var _ = Describe("renderTemplates", func() {
 		}))
 	})
 
-	It("renders a node-level template with extra annotations defined at cluster-level", func() {
+	It("renders a node-level template with extra annotations and labels defined at cluster-level", func() {
 		node := &TestClusterInstance.Spec.Nodes[0]
 		node.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "node-level", Namespace: "test"},
@@ -401,6 +409,12 @@ var _ = Describe("renderTemplates", func() {
 				"extra-node-annotation-l2": "test",
 			},
 		}
+		TestClusterInstance.Spec.ExtraLabels = map[string]map[string]string{
+			"Node": {
+				"extra-labels-l1": "test",
+				"extra-labels-l2": "test",
+			},
+		}
 		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
@@ -414,7 +428,9 @@ var _ = Describe("renderTemplates", func() {
 					"extra-node-annotation-l2": "test",
 				},
 				"labels": map[string]interface{}{
-					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					OwnedByLabel:      fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					"extra-labels-l1": "test",
+					"extra-labels-l2": "test",
 				},
 			},
 			"spec": map[string]interface{}{
@@ -423,7 +439,7 @@ var _ = Describe("renderTemplates", func() {
 		}))
 	})
 
-	It("renders a node-level template with extra annotations defined at node-level", func() {
+	It("renders a node-level template with extra annotations and labels defined at node-level", func() {
 		node := &TestClusterInstance.Spec.Nodes[0]
 		node.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "node-level", Namespace: "test"},
@@ -444,6 +460,12 @@ var _ = Describe("renderTemplates", func() {
 				"extra-node-annotation-l2": "test",
 			},
 		}
+		node.ExtraLabels = map[string]map[string]string{
+			"Node": {
+				"extra-node-labels-l1": "test",
+				"extra-node-labels-l2": "test",
+			},
+		}
 		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
@@ -457,7 +479,9 @@ var _ = Describe("renderTemplates", func() {
 					"extra-node-annotation-l2": "test",
 				},
 				"labels": map[string]interface{}{
-					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					OwnedByLabel:           fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					"extra-node-labels-l1": "test",
+					"extra-node-labels-l2": "test",
 				},
 			},
 			"spec": map[string]interface{}{
@@ -598,13 +622,25 @@ var _ = Describe("ProcessTemplates", func() {
 			},
 		}
 
+		// Define extra labels for both cluster and node levels
+		TestClusterInstance.Spec.ExtraLabels = map[string]map[string]string{
+			"TestA": {
+				"extra-label-l1": "test",
+			},
+		}
+		node.ExtraLabels = map[string]map[string]string{
+			"TestD": {
+				"extra-node-label-l1": "test",
+			},
+		}
+
 		got, err := tmplEngine.ProcessTemplates(ctx, c, TestClusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify manifest suppression
 		Expect(len(got)).To(Equal(2))
 
-		// Verify rendering and extra annotations are successfully executed for cluster-level templates
+		// Verify rendering and extra annotations & labels are successfully executed for cluster-level templates
 		Expect(got[0]).To(Equal(map[string]interface{}{
 			"apiVersion": "test.io/v1",
 			"kind":       "TestA",
@@ -613,7 +649,8 @@ var _ = Describe("ProcessTemplates", func() {
 					"extra-annotation-l1": "test",
 				},
 				"labels": map[string]interface{}{
-					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					OwnedByLabel:     fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					"extra-label-l1": "test",
 				},
 			},
 			"spec": map[string]interface{}{
@@ -621,7 +658,7 @@ var _ = Describe("ProcessTemplates", func() {
 			},
 		}))
 
-		// Verify rendering and extra annotations are successfully executed for node-level templates
+		// Verify rendering and extra annotations & labels are successfully executed for node-level templates
 		Expect(got[1]).To(Equal(map[string]interface{}{
 			"apiVersion": "test.io/v1",
 			"kind":       "TestD",
@@ -630,7 +667,8 @@ var _ = Describe("ProcessTemplates", func() {
 					"extra-node-annotation-l1": "test",
 				},
 				"labels": map[string]interface{}{
-					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					OwnedByLabel:          fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					"extra-node-label-l1": "test",
 				},
 			},
 			"spec": map[string]interface{}{
