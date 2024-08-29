@@ -175,6 +175,10 @@ type NodeSpec struct {
 	// +optional
 	ExtraAnnotations map[string]map[string]string `json:"extraAnnotations,omitempty"`
 
+	// Additional node-level labels to be applied to the rendered templates
+	// +optional
+	ExtraLabels map[string]map[string]string `json:"extraLabels,omitempty"`
+
 	// SuppressedManifests is a list of node-level manifest names to be excluded from the template rendering process
 	// +optional
 	SuppressedManifests []string `json:"suppressedManifests,omitempty"`
@@ -282,6 +286,10 @@ type ClusterInstanceSpec struct {
 	// Additional cluster-wide annotations to be applied to the rendered templates
 	// +optional
 	ExtraAnnotations map[string]map[string]string `json:"extraAnnotations,omitempty"`
+
+	// Additional cluster-wide labels to be applied to the rendered templates
+	// +optional
+	ExtraLabels map[string]map[string]string `json:"extraLabels,omitempty"`
 
 	// ClusterLabels is used to assign labels to the cluster to assist with policy binding.
 	// +optional
