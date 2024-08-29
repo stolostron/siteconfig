@@ -29,6 +29,8 @@ import (
 
 const (
 	cpuPartitioningKey = "cpuPartitioningMode"
+	AnnotationsKey     = "annotations"
+	LabelsKey          = "labels"
 )
 
 type SpecialVars struct {
@@ -223,27 +225,39 @@ func mergeJSONCommonKey(mergeWith, mergeTo, key string) (string, error) {
 	return string(mergedJSON), nil
 }
 
-func appendManifestAnnotations(extraAnnotations map[string]string, manifest map[string]interface{}) map[string]interface{} {
-	if manifest["metadata"] == nil && len(extraAnnotations) > 0 {
+func appendToManifestMetadata(
+	appendData map[string]string,
+	field string,
+	manifest map[string]interface{},
+) map[string]interface{} {
+	if manifest["metadata"] == nil && len(appendData) > 0 {
 		manifest["metadata"] = make(map[string]interface{})
 	}
 	metadata, _ := manifest["metadata"].(map[string]interface{})
 
-	if metadata["annotations"] == nil && len(extraAnnotations) > 0 {
-		metadata["annotations"] = make(map[string]interface{})
+	if metadata[field] == nil && len(appendData) > 0 {
+		metadata[field] = make(map[string]interface{})
 	}
-	annotations, _ := metadata["annotations"].(map[string]interface{})
+	data, _ := metadata[field].(map[string]interface{})
 
-	for key, value := range extraAnnotations {
-		if _, found := annotations[key]; !found {
-			// It's a new annotation, adding
-			if annotations == nil {
-				annotations = make(map[string]interface{})
+	for key, value := range appendData {
+		if _, found := data[key]; !found {
+			// It's a new data-item, adding
+			if data == nil {
+				data = make(map[string]interface{})
 			}
-			annotations[key] = value
+			data[key] = value
 		}
 	}
 	return manifest
+}
+
+func appendManifestAnnotations(extraAnnotations map[string]string, manifest map[string]interface{}) map[string]interface{} {
+	return appendToManifestMetadata(extraAnnotations, AnnotationsKey, manifest)
+}
+
+func appendManifestLabels(extraLabels map[string]string, manifest map[string]interface{}) map[string]interface{} {
+	return appendToManifestMetadata(extraLabels, LabelsKey, manifest)
 }
 
 // toYaml marshals a given field to Yaml
