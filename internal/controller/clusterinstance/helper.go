@@ -24,6 +24,7 @@ import (
 
 	sprig "github.com/go-task/slim-sprig"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/types"
 	k8syaml "sigs.k8s.io/yaml"
 )
 
@@ -275,4 +276,20 @@ func funcMap() template.FuncMap {
 	f := sprig.TxtFuncMap()
 	f["toYaml"] = toYaml
 	return f
+}
+
+// GenerateOwnedByLabelValue is a utility function that generates the ownedBy label value
+// using the ClusterInstance namespace and name
+func GenerateOwnedByLabelValue(namespace, name string) string {
+	return fmt.Sprintf("%s_%s", namespace, name)
+}
+
+// GetNamespacedNameFromOwnedByLabel extracts the namespace and name from the ownedBy label value
+func GetNamespacedNameFromOwnedByLabel(ownedByLabel string) (types.NamespacedName, error) {
+	res := strings.Split(ownedByLabel, "_")
+	if len(res) != 2 {
+		return types.NamespacedName{}, fmt.Errorf("expecting single underscore delimiter in %s label value", ownedByLabel)
+	}
+
+	return types.NamespacedName{Namespace: res[0], Name: res[1]}, nil
 }

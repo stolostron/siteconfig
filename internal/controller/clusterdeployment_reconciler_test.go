@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -115,12 +116,8 @@ var _ = Describe("Reconcile", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clusterName,
 				Namespace: clusterNamespace,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: "foobar.group.io",
-						Kind:       "foobar",
-						Name:       clusterName,
-					},
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, "not-the-owner"),
 				},
 			},
 			Status: hivev1.ClusterDeploymentStatus{
@@ -154,12 +151,8 @@ var _ = Describe("Reconcile", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clusterName,
 				Namespace: clusterNamespace,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: ClusterInstanceApiVersion,
-						Kind:       v1alpha1.ClusterInstanceKind,
-						Name:       clusterName,
-					},
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
 				},
 			},
 		}
@@ -213,12 +206,8 @@ var _ = Describe("Reconcile", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clusterName,
 				Namespace: clusterNamespace,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: ClusterInstanceApiVersion,
-						Kind:       v1alpha1.ClusterInstanceKind,
-						Name:       clusterName,
-					},
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
 				},
 			},
 		}
@@ -323,12 +312,8 @@ var _ = Describe("Reconcile", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clusterName,
 				Namespace: clusterNamespace,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: ClusterInstanceApiVersion,
-						Kind:       v1alpha1.ClusterInstanceKind,
-						Name:       clusterName,
-					},
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
 				},
 			},
 			Spec: hivev1.ClusterDeploymentSpec{
@@ -393,12 +378,8 @@ var _ = Describe("Reconcile", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clusterName,
 				Namespace: clusterNamespace,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: ClusterInstanceApiVersion,
-						Kind:       v1alpha1.ClusterInstanceKind,
-						Name:       clusterName,
-					},
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
 				},
 			},
 			Spec: hivev1.ClusterDeploymentSpec{
@@ -464,12 +445,8 @@ var _ = Describe("Reconcile", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clusterName,
 				Namespace: clusterNamespace,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: ClusterInstanceApiVersion,
-						Kind:       v1alpha1.ClusterInstanceKind,
-						Name:       clusterName,
-					},
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
 				},
 			},
 			Spec: hivev1.ClusterDeploymentSpec{

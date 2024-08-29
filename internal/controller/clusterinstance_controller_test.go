@@ -221,9 +221,11 @@ var _ = Describe("handleFinalizer", func() {
 		Expect(err).ToNot(HaveOccurred())
 	})
 
-	It("deletes all rendered manifests", func() {
+	It("deletes all rendered manifests owned-by ClusterInstance", func() {
 
 		manifestName := "test"
+		manifest2Name := "test2"
+		v1ApiGroup := "v1"
 		bmhApilGroup := "metal3.io/v1alpha1"
 		cdApiGroup := "hive.openshift.io/v1"
 		mcApiGroup := "cluster.open-cluster-management.io/v1"
@@ -259,6 +261,22 @@ var _ = Describe("handleFinalizer", func() {
 						SyncWave: 3,
 						Status:   v1alpha1.ManifestRenderedSuccess,
 					},
+					{
+						APIGroup:  &v1ApiGroup,
+						Kind:      "ConfigMap",
+						Name:      manifest2Name,
+						Namespace: clusterNamespace,
+						SyncWave:  4,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+					},
+					{
+						APIGroup:  &v1ApiGroup,
+						Kind:      "ConfigMap",
+						Name:      manifestName,
+						Namespace: clusterNamespace,
+						SyncWave:  4,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+					},
 				},
 			},
 		}
@@ -269,6 +287,9 @@ var _ = Describe("handleFinalizer", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      manifestName,
 				Namespace: clusterNamespace,
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+				},
 			},
 		}
 		Expect(c.Create(ctx, cd)).To(Succeed())
@@ -277,6 +298,9 @@ var _ = Describe("handleFinalizer", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      manifestName,
 				Namespace: clusterNamespace,
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+				},
 			},
 		}
 		Expect(c.Create(ctx, bmh)).To(Succeed())
@@ -284,21 +308,52 @@ var _ = Describe("handleFinalizer", func() {
 		mc := &clusterv1.ManagedCluster{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: manifestName,
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+				},
 			},
 		}
 		Expect(c.Create(ctx, mc)).To(Succeed())
+
+		// This resource should not be deleted because the owned-by label is not set
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      manifest2Name,
+				Namespace: clusterNamespace,
+			},
+		}
+		Expect(c.Create(ctx, cm)).To(Succeed())
+
+		// This resource should not be deleted because the ClusterInstance is not the owner
+		cm = &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      manifestName,
+				Namespace: clusterNamespace,
+				Labels: map[string]string{
+					ci.OwnedByLabel: "not-the-owner",
+				},
+			},
+		}
+		Expect(c.Create(ctx, cm)).To(Succeed())
 
 		// Get the created manfiests to confirm they exist before calling finalizer
 		key := types.NamespacedName{
 			Name:      manifestName,
 			Namespace: clusterNamespace,
 		}
+		key2 := types.NamespacedName{
+			Name:      manifest2Name,
+			Namespace: clusterNamespace,
+		}
 		keyMc := types.NamespacedName{
 			Name: manifestName,
 		}
+
 		Expect(c.Get(ctx, key, cd)).To(Succeed())
 		Expect(c.Get(ctx, key, bmh)).To(Succeed())
 		Expect(c.Get(ctx, keyMc, mc)).To(Succeed())
+		Expect(c.Get(ctx, key2, cm)).To(Succeed())
+		Expect(c.Get(ctx, key, cm)).To(Succeed())
 
 		// Set the deletionTimestamp to force deletion of siteconfig manifests
 		deletionTimeStamp := metav1.Now()
@@ -313,6 +368,8 @@ var _ = Describe("handleFinalizer", func() {
 		Expect(c.Get(ctx, key, cd)).ToNot(Succeed())
 		Expect(c.Get(ctx, key, bmh)).ToNot(Succeed())
 		Expect(c.Get(ctx, keyMc, mc)).ToNot(Succeed())
+		Expect(c.Get(ctx, key2, cm)).To(Succeed())
+		Expect(c.Get(ctx, key, cm)).To(Succeed())
 	})
 
 	It("does not fail to handle the finalizer when attempting to delete a missing manifest", func() {
@@ -363,6 +420,9 @@ var _ = Describe("handleFinalizer", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      manifestName,
 				Namespace: clusterNamespace,
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+				},
 			},
 		}
 		Expect(c.Create(ctx, cd)).To(Succeed())
@@ -370,6 +430,9 @@ var _ = Describe("handleFinalizer", func() {
 		mc := &clusterv1.ManagedCluster{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: manifestName,
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+				},
 			},
 		}
 		Expect(c.Create(ctx, mc)).To(Succeed())

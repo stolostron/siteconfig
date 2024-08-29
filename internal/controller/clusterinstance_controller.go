@@ -182,10 +182,35 @@ func (r *ClusterInstanceReconciler) finalizeClusterInstance(
 			obj.SetNamespace(manifest.Namespace)
 			obj.SetAPIVersion(*manifest.APIGroup)
 			obj.SetKind(manifest.Kind)
+
+			resourceId := fmt.Sprintf("%s:%s", manifest.Kind, manifest.Name)
+			if manifest.Namespace != "" {
+				resourceId = fmt.Sprintf("%s:%s/%s", manifest.Kind, manifest.Namespace, manifest.Name)
+			}
+
+			// Check that the manifest is logically owned-by the ClusterInstance
+			if err := r.Client.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+				if errors.IsNotFound(err) {
+					r.Log.Info(fmt.Sprintf("Resource %s not found! Skipping it from finalization", resourceId))
+					continue
+				}
+				r.Log.Info(fmt.Sprintf("Unable to retrieve resource %s for finalization", resourceId))
+				return err
+			}
+			labels := obj.GetLabels()
+			ownedBy, ok := labels[ci.OwnedByLabel]
+			if !ok || ownedBy != ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name) {
+				r.Log.Info(
+					fmt.Sprintf("Skipping finalization of resource %s not owned-by ClusterInstance %s/%s",
+						resourceId, clusterInstance.Namespace, clusterInstance.Name))
+				continue
+			}
+
+			// Delete resource
 			if err := r.Client.Delete(ctx, obj); err == nil {
-				r.Log.Info("Successfully deleted resource", manifest.Kind, manifest.Name)
+				r.Log.Info(fmt.Sprintf("Successfully deleted resource %s", resourceId))
 			} else if !errors.IsNotFound(err) {
-				r.Log.Info("Failed to delete resource", manifest.Kind, manifest.Name)
+				r.Log.Info(fmt.Sprintf("Failed to delete resource %s", resourceId))
 				return err
 			}
 		}
@@ -496,9 +521,7 @@ func (r *ClusterInstanceReconciler) executeRenderedManifests(
 				successfulExecution = false
 				setManifestFailure(manifestRef, err)
 			} else {
-				if result, err := createOrPatch(
-					ctx, c, obj,
-					setOwnerRefFunc(manifestRef.Namespace, clusterInstance, &obj, r.Scheme)); err != nil {
+				if result, err := createOrPatch(ctx, c, obj, nil); err != nil {
 					successfulExecution = false
 					setManifestFailure(manifestRef, err)
 				} else if result != controllerutil.OperationResultNone {
@@ -520,16 +543,6 @@ func getSortedSyncWaves(manifestGroups map[int][]interface{}) []int {
 	}
 	sort.Ints(syncWaves)
 	return syncWaves
-}
-
-func setOwnerRefFunc(manifestNamespace string, clusterInstance *v1alpha1.ClusterInstance,
-	obj metav1.Object, scheme *runtime.Scheme) controllerutil.MutateFn {
-	return func() error {
-		if manifestNamespace == clusterInstance.Namespace {
-			return ctrl.SetControllerReference(clusterInstance, obj, scheme)
-		}
-		return nil
-	}
 }
 
 func setManifestFailure(manifestRef *v1alpha1.ManifestReference, err error) {
