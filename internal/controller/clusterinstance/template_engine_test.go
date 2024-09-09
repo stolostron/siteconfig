@@ -58,7 +58,7 @@ func TestTemplateEngine_render(t *testing.T) {
 			ClusterNetwork:         []v1alpha1.ClusterNetworkEntry{{CIDR: "203.0.113.0/24", HostPrefix: 23}},
 			ServiceNetwork:         []v1alpha1.ServiceNetworkEntry{{CIDR: "203.0.113.0/24"}},
 			NetworkType:            "OVNKubernetes",
-			ClusterLabels:          map[string]string{"group-du-sno": "test", "common": "true", "sites": "site-sno-du-1"},
+			ExtraLabels:            map[string]map[string]string{"ManagedCluster": {"group-du-sno": "test", "common": "true", "sites": "site-sno-du-1"}},
 			InstallConfigOverrides: "{\"capabilities\":{\"baselineCapabilitySet\": \"None\", \"additionalEnabledCapabilities\": [ \"marketplace\", \"NodeTuning\" ] }}",
 			IgnitionConfigOverride: "igen",
 			DiskEncryption: &v1alpha1.DiskEncryption{

@@ -79,12 +79,6 @@ spec:
                 description: ClusterImageSetNameRef is the name of the ClusterImageSet
                   resource indicating which OpenShift version to deploy.
                 type: string
-              clusterLabels:
-                additionalProperties:
-                  type: string
-                description: ClusterLabels is used to assign labels to the cluster
-                  to assist with policy binding.
-                type: object
               clusterName:
                 description: ClusterName is the name of the cluster.
                 type: string

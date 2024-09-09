@@ -160,8 +160,6 @@ const ManagedCluster = `apiVersion: cluster.open-cluster-management.io/v1
 kind: ManagedCluster
 metadata:
   name: "{{ .Spec.ClusterName }}"
-  labels:
-{{ .Spec.ClusterLabels | toYaml | indent 4 }}
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "2"
 spec:
