@@ -19,24 +19,37 @@ package clusterinstance
 import (
 	"context"
 	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/go-logr/logr"
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	aiv1beta1 "github.com/openshift/assisted-service/api/v1beta1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 )
 
-func TestTemplateEngine_render(t *testing.T) {
+func isEqualRenderedObject(got, expected []RenderedObject) bool {
+	sort.Slice(got, func(x, y int) bool {
+		return got[x].GetKind() < got[y].GetKind()
+	})
+
+	sort.Slice(expected, func(x, y int) bool {
+		return expected[x].GetKind() < expected[y].GetKind()
+	})
+
+	return reflect.DeepEqual(got, expected)
+}
+
+func TestTemplateEngineRender(t *testing.T) {
 
 	NetConfig := GetMockNetConfig()
 	TestClusterInstance := &v1alpha1.ClusterInstance{
@@ -275,8 +288,8 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA_Foobar": GetMockBasicClusterTemplate("TestA"),
-				"TestB":        GetMockBasicClusterTemplate("TestB"),
+				"TestA": GetMockBasicClusterTemplate("TestA"),
+				"TestB": GetMockBasicClusterTemplate("TestB"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
@@ -286,19 +299,45 @@ var _ = Describe("renderTemplates", func() {
 		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).ToNot(HaveOccurred())
 
-		Expect(len(got)).To(Equal(1))
-		Expect(got[0]).To(Equal(map[string]interface{}{
-			"apiVersion": "test.io/v1",
-			"kind":       "TestB",
-			"metadata": map[string]interface{}{
-				"labels": map[string]interface{}{
-					OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
-				},
+		Expect(len(got)).To(Equal(2))
+
+		expected := []RenderedObject{
+			{
+				action: actionSuppress,
+				object: unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "test.io/v1",
+					"kind":       "TestA",
+					"metadata": map[string]interface{}{
+						"name":      TestClusterInstance.Name,
+						"namespace": TestClusterInstance.Namespace,
+						// should not contain labels
+					},
+					"spec": map[string]interface{}{
+						"name": "site-sno-du-1",
+					},
+				}},
 			},
-			"spec": map[string]interface{}{
-				"name": "site-sno-du-1",
+			{
+				action: actionRender,
+				object: unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "test.io/v1",
+					"kind":       "TestB",
+					"metadata": map[string]interface{}{
+						"name":      TestClusterInstance.Name,
+						"namespace": TestClusterInstance.Namespace,
+						"labels": map[string]interface{}{
+							OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
+								TestClusterInstance.Name),
+						},
+					},
+					"spec": map[string]interface{}{
+						"name": "site-sno-du-1",
+					},
+				}},
 			},
-		}))
+		}
+
+		Expect(isEqualRenderedObject(got, expected)).To(BeTrue())
 	})
 
 	It("suppresses rendering manifests at node-level", func() {
@@ -322,19 +361,42 @@ var _ = Describe("renderTemplates", func() {
 		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
-		Expect(len(got)).To(Equal(1))
-		Expect(got[0]).To(Equal(map[string]interface{}{
-			"apiVersion": "test.io/v1",
-			"kind":       "TestD",
-			"metadata": map[string]interface{}{
-				"labels": map[string]interface{}{
-					OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
+		expected := []RenderedObject{
+			{
+				action: actionSuppress,
+				object: unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "test.io/v1",
+					"kind":       "TestC",
+					"metadata": map[string]interface{}{
+						"name":      TestClusterInstance.Spec.Nodes[0].HostName,
+						"namespace": TestClusterInstance.Namespace,
+					},
+					"spec": map[string]interface{}{
+						"name": "node1",
+					},
 				},
+				}},
+			{
+				action: actionRender,
+				object: unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "test.io/v1",
+					"kind":       "TestD",
+					"metadata": map[string]interface{}{
+						"name":      TestClusterInstance.Spec.Nodes[0].HostName,
+						"namespace": TestClusterInstance.Namespace,
+						"labels": map[string]interface{}{
+							OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
+								TestClusterInstance.Name),
+						},
+					},
+					"spec": map[string]interface{}{
+						"name": "node1",
+					},
+				}},
 			},
-			"spec": map[string]interface{}{
-				"name": "node1",
-			},
-		}))
+		}
+
+		Expect(isEqualRenderedObject(got, expected)).To(BeTrue())
 	})
 
 	It("renders a cluster-level template with extra annotations and labels", func() {
@@ -366,25 +428,33 @@ var _ = Describe("renderTemplates", func() {
 		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
 		Expect(err).ToNot(HaveOccurred())
 
-		Expect(len(got)).To(Equal(1))
-		Expect(got[0]).To(Equal(map[string]interface{}{
-			"apiVersion": "test.io/v1",
-			"kind":       "Cluster",
-			"metadata": map[string]interface{}{
-				"annotations": map[string]interface{}{
-					"extra-annotation-l1": "test",
-					"extra-annotation-l2": "test",
-				},
-				"labels": map[string]interface{}{
-					OwnedByLabel:      GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
-					"extra-labels-l1": "test",
-					"extra-labels-l2": "test",
-				},
+		expected := []RenderedObject{
+			{
+				action: actionRender,
+				object: unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "test.io/v1",
+					"kind":       "Cluster",
+					"metadata": map[string]interface{}{
+						"name":      TestClusterInstance.Spec.ClusterName,
+						"namespace": TestClusterInstance.Namespace,
+						"annotations": map[string]interface{}{
+							"extra-annotation-l1": "test",
+							"extra-annotation-l2": "test",
+						},
+						"labels": map[string]interface{}{
+							OwnedByLabel:      GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
+							"extra-labels-l1": "test",
+							"extra-labels-l2": "test",
+						},
+					},
+					"spec": map[string]interface{}{
+						"name": "site-sno-du-1",
+					},
+				}},
 			},
-			"spec": map[string]interface{}{
-				"name": "site-sno-du-1",
-			},
-		}))
+		}
+
+		Expect(isEqualRenderedObject(got, expected)).To(BeTrue())
 	})
 
 	It("renders a node-level template with extra annotations and labels defined at cluster-level", func() {
@@ -417,25 +487,34 @@ var _ = Describe("renderTemplates", func() {
 		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
-		Expect(len(got)).To(Equal(1))
-		Expect(got[0]).To(Equal(map[string]interface{}{
-			"apiVersion": "test.io/v1",
-			"kind":       "Node",
-			"metadata": map[string]interface{}{
-				"annotations": map[string]interface{}{
-					"extra-node-annotation-l1": "test",
-					"extra-node-annotation-l2": "test",
-				},
-				"labels": map[string]interface{}{
-					OwnedByLabel:      GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
-					"extra-labels-l1": "test",
-					"extra-labels-l2": "test",
-				},
+		expected := []RenderedObject{
+			{
+				action: actionRender,
+				object: unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "test.io/v1",
+					"kind":       "Node",
+					"metadata": map[string]interface{}{
+						"name":      TestClusterInstance.Spec.Nodes[0].HostName,
+						"namespace": TestClusterInstance.Namespace,
+						"annotations": map[string]interface{}{
+							"extra-node-annotation-l1": "test",
+							"extra-node-annotation-l2": "test",
+						},
+						"labels": map[string]interface{}{
+							OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
+								TestClusterInstance.Name),
+							"extra-labels-l1": "test",
+							"extra-labels-l2": "test",
+						},
+					},
+					"spec": map[string]interface{}{
+						"name": TestClusterInstance.Spec.Nodes[0].HostName,
+					},
+				}},
 			},
-			"spec": map[string]interface{}{
-				"name": "node1",
-			},
-		}))
+		}
+
+		Expect(isEqualRenderedObject(got, expected)).To(BeTrue())
 	})
 
 	It("renders a node-level template with extra annotations and labels defined at node-level", func() {
@@ -468,25 +547,34 @@ var _ = Describe("renderTemplates", func() {
 		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
-		Expect(len(got)).To(Equal(1))
-		Expect(got[0]).To(Equal(map[string]interface{}{
-			"apiVersion": "test.io/v1",
-			"kind":       "Node",
-			"metadata": map[string]interface{}{
-				"annotations": map[string]interface{}{
-					"extra-node-annotation-l1": "test",
-					"extra-node-annotation-l2": "test",
-				},
-				"labels": map[string]interface{}{
-					OwnedByLabel:           GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
-					"extra-node-labels-l1": "test",
-					"extra-node-labels-l2": "test",
-				},
+		expected := []RenderedObject{
+			{
+				action: actionRender,
+				object: unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "test.io/v1",
+					"kind":       "Node",
+					"metadata": map[string]interface{}{
+						"name":      TestClusterInstance.Spec.Nodes[0].HostName,
+						"namespace": TestClusterInstance.Namespace,
+						"annotations": map[string]interface{}{
+							"extra-node-annotation-l1": "test",
+							"extra-node-annotation-l2": "test",
+						},
+						"labels": map[string]interface{}{
+							OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
+								TestClusterInstance.Name),
+							"extra-node-labels-l1": "test",
+							"extra-node-labels-l2": "test",
+						},
+					},
+					"spec": map[string]interface{}{
+						"name": TestClusterInstance.Spec.Nodes[0].HostName,
+					},
+				}},
 			},
-			"spec": map[string]interface{}{
-				"name": "node1",
-			},
-		}))
+		}
+
+		Expect(isEqualRenderedObject(got, expected)).To(BeTrue())
 	})
 
 })
@@ -637,42 +725,85 @@ var _ = Describe("ProcessTemplates", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify manifest suppression
-		Expect(len(got)).To(Equal(2))
-
-		// Verify rendering and extra annotations & labels are successfully executed for cluster-level templates
-		Expect(got[0]).To(Equal(map[string]interface{}{
-			"apiVersion": "test.io/v1",
-			"kind":       "TestA",
-			"metadata": map[string]interface{}{
-				"annotations": map[string]interface{}{
-					"extra-annotation-l1": "test",
-				},
-				"labels": map[string]interface{}{
-					OwnedByLabel:     GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
-					"extra-label-l1": "test",
-				},
+		expectedSlice := []RenderedObject{
+			{
+				// Verify rendering and extra annotations & labels are successfully executed for cluster-level templates
+				action: actionRender,
+				object: unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "test.io/v1",
+					"kind":       "TestA",
+					"metadata": map[string]interface{}{
+						"name":      TestClusterInstance.Spec.ClusterName,
+						"namespace": TestClusterInstance.Namespace,
+						"annotations": map[string]interface{}{
+							"extra-annotation-l1": "test",
+						},
+						"labels": map[string]interface{}{
+							OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
+								TestClusterInstance.Name),
+							"extra-label-l1": "test",
+						},
+					},
+					"spec": map[string]interface{}{
+						"name": TestClusterInstance.Spec.ClusterName,
+					},
+				}},
 			},
-			"spec": map[string]interface{}{
-				"name": "site-sno-du-1",
+			{
+				action: actionSuppress,
+				object: unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "test.io/v1",
+					"kind":       "TestB",
+					"metadata": map[string]interface{}{
+						"name":      TestClusterInstance.Spec.ClusterName,
+						"namespace": TestClusterInstance.Namespace,
+					},
+					"spec": map[string]interface{}{
+						"name": TestClusterInstance.Spec.ClusterName,
+					},
+				}},
 			},
-		}))
-
-		// Verify rendering and extra annotations & labels are successfully executed for node-level templates
-		Expect(got[1]).To(Equal(map[string]interface{}{
-			"apiVersion": "test.io/v1",
-			"kind":       "TestD",
-			"metadata": map[string]interface{}{
-				"annotations": map[string]interface{}{
-					"extra-node-annotation-l1": "test",
-				},
-				"labels": map[string]interface{}{
-					OwnedByLabel:          GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
-					"extra-node-label-l1": "test",
-				},
+			{
+				action: actionSuppress,
+				object: unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "test.io/v1",
+					"kind":       "TestC",
+					"metadata": map[string]interface{}{
+						"name":      TestClusterInstance.Spec.Nodes[0].HostName,
+						"namespace": TestClusterInstance.Namespace,
+					},
+					"spec": map[string]interface{}{
+						"name": TestClusterInstance.Spec.Nodes[0].HostName,
+					},
+				}},
 			},
-			"spec": map[string]interface{}{
-				"name": "node1",
+			{
+				// Verify rendering and extra annotations & labels are successfully executed for node-level templates
+				action: actionRender,
+				object: unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "test.io/v1",
+					"kind":       "TestD",
+					"metadata": map[string]interface{}{
+						"name":      TestClusterInstance.Spec.Nodes[0].HostName,
+						"namespace": TestClusterInstance.Namespace,
+						"annotations": map[string]interface{}{
+							"extra-node-annotation-l1": "test",
+						},
+						"labels": map[string]interface{}{
+							OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
+								TestClusterInstance.Name),
+							"extra-node-label-l1": "test",
+						},
+					},
+					"spec": map[string]interface{}{
+						"name": TestClusterInstance.Spec.Nodes[0].HostName,
+					},
+				}},
 			},
-		}))
+		}
+		expected := RenderedObjectCollection{}
+		err = expected.AddObjects(expectedSlice)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(reflect.DeepEqual(got, expected)).To(BeTrue())
 	})
 })

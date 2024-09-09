@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
@@ -31,6 +30,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -41,15 +41,52 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
+const (
+	TestClusterInstanceName      = "test-cluster"
+	TestClusterInstanceNamespace = TestClusterInstanceName
+	TestNode1Hostname            = "test-node-1"
+	TestNode2Hostname            = "test-node-2"
+	TestPullSecret               = "pull-secret"
+	TestBMHSecret                = "bmh-secret"
+	TestConfigMap1               = TestClusterInstanceName
+	TestConfigMap2               = TestClusterInstanceName + "-2"
+	OwnedByOtherCI               = "not-the-owner"
+)
+
+// Define API Version
+const (
+	AgentClusterInstallApiVersion = "extensions.ClusterDeploymentApiVersionbeta1"
+	BareMetalHostApiVersion       = "metal3.io/v1alpha1"
+	ClusterDeploymentApiVersion   = "hive.openshift.io/v1"
+	ManagedClusterApiVersion      = "cluster.open-cluster-management.io/v1"
+	NMStateConfigApiVersion       = "agent-install.openshift.io/v1beta1"
+	V1ApiVersion                  = "v1"
+)
+
+// Define Kind
+const (
+	AgentClusterInstallKind = "AgentClusterInstall"
+	BareMetalHostKind       = "BareMetalHost"
+	ClusterDeploymentKind   = "ClusterDeployment"
+	ConfigMapKind           = "ConfigMap"
+	ManagedClusterKind      = "ManagedCluster"
+	NMStateConfigKind       = "NMStateConfig"
+)
+
+func stringToStringPtr(s string) *string {
+	sPtr := s
+	return &sPtr
+}
+
 var _ = Describe("Reconcile", func() {
 	var (
 		c          client.Client
 		r          *ClusterInstanceReconciler
 		ctx        = context.Background()
 		testParams = &ci.TestParams{
-			ClusterName:      "test-cluster",
-			ClusterNamespace: "test-cluster",
-			PullSecret:       "pull-secret",
+			ClusterName:      TestClusterInstanceName,
+			ClusterNamespace: TestClusterInstanceNamespace,
+			PullSecret:       TestPullSecret,
 		}
 
 		clusterInstance *v1alpha1.ClusterInstance
@@ -164,8 +201,8 @@ var _ = Describe("handleFinalizer", func() {
 		c                client.Client
 		r                *ClusterInstanceReconciler
 		ctx              = context.Background()
-		clusterName      = "test-cluster"
-		clusterNamespace = "test-namespace"
+		clusterName      = TestClusterInstanceName
+		clusterNamespace = TestClusterInstanceNamespace
 	)
 
 	BeforeEach(func() {
@@ -223,12 +260,8 @@ var _ = Describe("handleFinalizer", func() {
 
 	It("deletes all rendered manifests owned-by ClusterInstance", func() {
 
-		manifestName := "test"
-		manifest2Name := "test2"
-		v1ApiGroup := "v1"
-		bmhApilGroup := "metal3.io/v1alpha1"
-		cdApiGroup := "hive.openshift.io/v1"
-		mcApiGroup := "cluster.open-cluster-management.io/v1"
+		manifestName := TestClusterInstanceName
+		manifest2Name := fmt.Sprintf("%s-2", TestClusterInstanceName)
 
 		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
@@ -239,39 +272,39 @@ var _ = Describe("handleFinalizer", func() {
 			Status: v1alpha1.ClusterInstanceStatus{
 				ManifestsRendered: []v1alpha1.ManifestReference{
 					{
-						APIGroup:  &cdApiGroup,
-						Kind:      "ClusterDeployment",
+						APIGroup:  stringToStringPtr(ClusterDeploymentApiVersion),
+						Kind:      ClusterDeploymentKind,
 						Name:      manifestName,
 						Namespace: clusterNamespace,
 						SyncWave:  1,
 						Status:    v1alpha1.ManifestRenderedSuccess,
 					},
 					{
-						APIGroup:  &bmhApilGroup,
-						Kind:      "BareMetalHost",
+						APIGroup:  stringToStringPtr(BareMetalHostApiVersion),
+						Kind:      BareMetalHostKind,
 						Name:      manifestName,
 						Namespace: clusterNamespace,
 						SyncWave:  2,
 						Status:    v1alpha1.ManifestRenderedSuccess,
 					},
 					{
-						APIGroup: &mcApiGroup,
-						Kind:     "ManagedCluster",
+						APIGroup: stringToStringPtr(ManagedClusterApiVersion),
+						Kind:     ManagedClusterKind,
 						Name:     manifestName,
 						SyncWave: 3,
 						Status:   v1alpha1.ManifestRenderedSuccess,
 					},
 					{
-						APIGroup:  &v1ApiGroup,
-						Kind:      "ConfigMap",
+						APIGroup:  stringToStringPtr(V1ApiVersion),
+						Kind:      ConfigMapKind,
 						Name:      manifest2Name,
 						Namespace: clusterNamespace,
 						SyncWave:  4,
 						Status:    v1alpha1.ManifestRenderedSuccess,
 					},
 					{
-						APIGroup:  &v1ApiGroup,
-						Kind:      "ConfigMap",
+						APIGroup:  stringToStringPtr(V1ApiVersion),
+						Kind:      ConfigMapKind,
 						Name:      manifestName,
 						Namespace: clusterNamespace,
 						SyncWave:  4,
@@ -330,7 +363,7 @@ var _ = Describe("handleFinalizer", func() {
 				Name:      manifestName,
 				Namespace: clusterNamespace,
 				Labels: map[string]string{
-					ci.OwnedByLabel: "not-the-owner",
+					ci.OwnedByLabel: OwnedByOtherCI,
 				},
 			},
 		}
@@ -374,38 +407,34 @@ var _ = Describe("handleFinalizer", func() {
 
 	It("does not fail to handle the finalizer when attempting to delete a missing manifest", func() {
 
-		manifestName := "test"
-		bmhApilGroup := "metal3.io/v1alpha1"
-		cdApiGroup := "hive.openshift.io/v1"
-		mcApiGroup := "cluster.open-cluster-management.io/v1"
-
+		manifestName := TestClusterInstanceName
 		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:       clusterName,
-				Namespace:  clusterNamespace,
+				Name:       TestClusterInstanceName,
+				Namespace:  TestClusterInstanceNamespace,
 				Finalizers: []string{clusterInstanceFinalizer},
 			},
 			Status: v1alpha1.ClusterInstanceStatus{
 				ManifestsRendered: []v1alpha1.ManifestReference{
 					{
-						APIGroup:  &cdApiGroup,
-						Kind:      "ClusterDeployment",
+						APIGroup:  stringToStringPtr(ClusterDeploymentApiVersion),
+						Kind:      ClusterDeploymentKind,
 						Name:      manifestName,
-						Namespace: clusterNamespace,
+						Namespace: TestClusterInstanceNamespace,
 						SyncWave:  1,
 						Status:    v1alpha1.ManifestRenderedSuccess,
 					},
 					{
-						APIGroup:  &bmhApilGroup,
-						Kind:      "BareMetalHost",
+						APIGroup:  stringToStringPtr(BareMetalHostApiVersion),
+						Kind:      BareMetalHostKind,
 						Name:      manifestName,
 						Namespace: clusterNamespace,
 						SyncWave:  2,
 						Status:    v1alpha1.ManifestRenderedSuccess,
 					},
 					{
-						APIGroup: &mcApiGroup,
-						Kind:     "ManagedCluster",
+						APIGroup: stringToStringPtr(ManagedClusterApiVersion),
+						Kind:     ManagedClusterKind,
 						Name:     manifestName,
 						SyncWave: 3,
 						Status:   v1alpha1.ManifestRenderedSuccess,
@@ -468,20 +497,332 @@ var _ = Describe("handleFinalizer", func() {
 
 })
 
+var _ = Describe("pruneManifests", func() {
+
+	var (
+		c   client.Client
+		r   *ClusterInstanceReconciler
+		ctx = context.Background()
+
+		// objects to create for pruning test
+		cdManifest, bmh1Manifest, bmh2Manifest, mcManifest, cm1Manifest, cm2Manifest map[string]interface{}
+
+		// RenderedObject
+		cdRenderedObject, bmh1RenderedObject, bmh2RenderedObject, mcRenderedObject, cm1RenderedObject, cm2RenderedObject ci.RenderedObject
+		// list of objects
+		objects []ci.RenderedObject
+
+		// references for retrieving the objects
+		cdKey, bmh1Key, bmh2Key, mcKey, cm1Key, cm2Key types.NamespacedName
+		// list of keys
+		objectKeys []types.NamespacedName
+
+		verifyPruningFn = func(pruneList, doNotPruneList []ci.RenderedObject, pruneKeys, doNotPruneKeys []types.NamespacedName) {
+			Expect(len(pruneList)).To(Equal(len(pruneKeys)))
+			Expect(len(doNotPruneList)).To(Equal(len(doNotPruneKeys)))
+
+			for index, object := range pruneList {
+				obj := object.GetObject()
+				obj2 := &unstructured.Unstructured{}
+				obj2.SetGroupVersionKind(obj.GroupVersionKind())
+				Expect(c.Get(ctx, pruneKeys[index], obj2)).ToNot(Succeed())
+			}
+
+			for index, object := range doNotPruneList {
+				obj := object.GetObject()
+				obj2 := &unstructured.Unstructured{}
+				obj2.SetGroupVersionKind(obj.GroupVersionKind())
+				Expect(c.Get(ctx, doNotPruneKeys[index], obj2)).To(Succeed())
+			}
+		}
+	)
+
+	BeforeEach(func() {
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			Build()
+		testLogger := ctrl.Log.WithName("TemplateEngine")
+		tmplEngine := ci.NewTemplateEngine(testLogger)
+		r = &ClusterInstanceReconciler{
+			Client:     c,
+			Scheme:     scheme.Scheme,
+			Log:        testLogger,
+			TmplEngine: tmplEngine,
+		}
+
+		annotations := map[string]string{
+			ci.WaveAnnotation: "0",
+		}
+		labels := map[string]string{
+			ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(TestClusterInstanceNamespace, TestClusterInstanceName),
+		}
+
+		cdManifest = map[string]interface{}{
+			"apiVersion": ClusterDeploymentApiVersion,
+			"kind":       ClusterDeploymentKind,
+			"metadata": map[string]interface{}{
+				"name":        TestClusterInstanceName,
+				"namespace":   TestClusterInstanceNamespace,
+				"annotations": annotations,
+				"labels":      labels,
+			},
+		}
+
+		bmh1Manifest = map[string]interface{}{
+			"apiVersion": BareMetalHostApiVersion,
+			"kind":       BareMetalHostKind,
+			"metadata": map[string]interface{}{
+				"name":        TestNode1Hostname,
+				"namespace":   TestClusterInstanceNamespace,
+				"annotations": annotations,
+				"labels":      labels,
+			},
+		}
+
+		bmh2Manifest = map[string]interface{}{
+			"apiVersion": BareMetalHostApiVersion,
+			"kind":       BareMetalHostKind,
+			"metadata": map[string]interface{}{
+				"name":        TestNode2Hostname,
+				"namespace":   TestClusterInstanceNamespace,
+				"annotations": annotations,
+				"labels":      labels,
+			},
+		}
+
+		mcManifest = map[string]interface{}{
+			"apiVersion": ManagedClusterApiVersion,
+			"kind":       ManagedClusterKind,
+			"metadata": map[string]interface{}{
+				"name":        TestClusterInstanceName,
+				"annotations": annotations,
+				"labels":      labels,
+			},
+		}
+
+		cm1Manifest = map[string]interface{}{
+			"apiVersion": V1ApiVersion,
+			"kind":       ConfigMapKind,
+			"metadata": map[string]interface{}{
+				"name":        TestConfigMap1,
+				"namespace":   TestClusterInstanceNamespace,
+				"annotations": annotations,
+				"labels":      labels,
+			},
+		}
+
+		cm2Manifest = map[string]interface{}{
+			"apiVersion": V1ApiVersion,
+			"kind":       ConfigMapKind,
+			"metadata": map[string]interface{}{
+				"name":        TestConfigMap2,
+				"namespace":   TestClusterInstanceNamespace,
+				"annotations": annotations,
+				"labels":      labels,
+			},
+		}
+
+		// define keys
+		cdKey = types.NamespacedName{Name: TestClusterInstanceName, Namespace: TestClusterInstanceNamespace}
+		bmh1Key = types.NamespacedName{Name: TestNode1Hostname, Namespace: TestClusterInstanceNamespace}
+		bmh2Key = types.NamespacedName{Name: TestNode2Hostname, Namespace: TestClusterInstanceNamespace}
+		mcKey = types.NamespacedName{Name: TestClusterInstanceName}
+		cm1Key = types.NamespacedName{Name: TestConfigMap1, Namespace: TestClusterInstanceNamespace}
+		cm2Key = types.NamespacedName{Name: TestConfigMap2, Namespace: TestClusterInstanceNamespace}
+
+		// convert objects to RenderedObject
+		Expect(cdRenderedObject.SetObject(cdManifest)).ToNot(HaveOccurred())
+		Expect(bmh1RenderedObject.SetObject(bmh1Manifest)).ToNot(HaveOccurred())
+		Expect(bmh2RenderedObject.SetObject(bmh2Manifest)).ToNot(HaveOccurred())
+		Expect(mcRenderedObject.SetObject(mcManifest)).ToNot(HaveOccurred())
+		Expect(cm1RenderedObject.SetObject(cm1Manifest)).ToNot(HaveOccurred())
+		Expect(cm2RenderedObject.SetObject(cm2Manifest)).ToNot(HaveOccurred())
+
+		objects = []ci.RenderedObject{cdRenderedObject, bmh1RenderedObject, bmh2RenderedObject, mcRenderedObject, cm1RenderedObject, cm2RenderedObject}
+		objectKeys = []types.NamespacedName{cdKey, bmh1Key, bmh2Key, mcKey, cm1Key, cm2Key}
+
+		// Create the manifests and confirm they exist
+		for index, object := range objects {
+			obj := object.GetObject()
+			Expect(c.Create(ctx, &obj)).To(Succeed())
+			obj2 := &unstructured.Unstructured{}
+			obj2.SetGroupVersionKind(obj.GroupVersionKind())
+			Expect(c.Get(ctx, objectKeys[index], obj2)).To(Succeed())
+		}
+	})
+
+	It("prunes manifests defined at the cluster-level", func() {
+
+		pruneList := []ci.RenderedObject{
+			cdRenderedObject, bmh1RenderedObject, bmh2RenderedObject, mcRenderedObject, cm1RenderedObject, cm2RenderedObject,
+		}
+		pruneKeys := []types.NamespacedName{cdKey, bmh1Key, bmh2Key, mcKey, cm1Key, cm2Key}
+
+		doNotPruneList := []ci.RenderedObject{}
+		doNotPruneKeys := []types.NamespacedName{}
+
+		clusterInstance := &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      TestClusterInstanceName,
+				Namespace: TestClusterInstanceNamespace,
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				PruneManifests: []v1alpha1.ResourceRef{
+					{
+						APIVersion: V1ApiVersion,
+						Kind:       ConfigMapKind,
+					},
+					{
+						APIVersion: ClusterDeploymentApiVersion,
+						Kind:       ClusterDeploymentKind,
+					},
+					{
+						APIVersion: ManagedClusterApiVersion,
+						Kind:       ManagedClusterKind,
+					},
+					{
+						APIVersion: BareMetalHostApiVersion,
+						Kind:       BareMetalHostKind,
+					},
+				},
+				Nodes: []v1alpha1.NodeSpec{
+					{
+						HostName: TestNode1Hostname,
+					},
+					{
+						HostName: TestNode2Hostname,
+					},
+				},
+			},
+		}
+		// Create the ClusterInstance CR
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		ok, err := r.pruneManifests(ctx, clusterInstance, pruneList)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(ok).To(BeTrue())
+
+		// Expect the objects previously created to be deleted after pruneManifests is called
+		verifyPruningFn(pruneList, doNotPruneList, pruneKeys, doNotPruneKeys)
+	})
+
+	It("prunes manifests defined at the node-level", func() {
+
+		pruneList := []ci.RenderedObject{bmh1RenderedObject}
+		pruneKeys := []types.NamespacedName{bmh1Key}
+
+		doNotPruneList := []ci.RenderedObject{
+			cdRenderedObject, bmh2RenderedObject, mcRenderedObject, cm1RenderedObject, cm2RenderedObject,
+		}
+		doNotPruneKeys := []types.NamespacedName{cdKey, bmh2Key, mcKey, cm1Key, cm2Key}
+
+		clusterInstance := &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      TestClusterInstanceName,
+				Namespace: TestClusterInstanceNamespace,
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				PruneManifests: []v1alpha1.ResourceRef{},
+				Nodes: []v1alpha1.NodeSpec{
+					{
+						HostName: TestNode1Hostname,
+						PruneManifests: []v1alpha1.ResourceRef{
+							{
+								APIVersion: BareMetalHostApiVersion,
+								Kind:       BareMetalHostKind,
+							},
+						},
+					},
+					{
+						HostName: TestNode2Hostname,
+					},
+				},
+			},
+		}
+		// Create the ClusterInstance CR
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		ok, err := r.pruneManifests(ctx, clusterInstance, pruneList)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(ok).To(BeTrue())
+
+		// Expect the objects previously created to be deleted after pruneManifests is called
+		verifyPruningFn(pruneList, doNotPruneList, pruneKeys, doNotPruneKeys)
+	})
+
+	It("does not prune manifests not-owned by the ClusterInstance", func() {
+
+		pruneList := []ci.RenderedObject{
+			mcRenderedObject, cm1RenderedObject, cm2RenderedObject,
+		}
+
+		doNotPruneList := []ci.RenderedObject{
+			cdRenderedObject, bmh1RenderedObject, bmh2RenderedObject, mcRenderedObject, cm1RenderedObject, cm2RenderedObject,
+		}
+		doNotPruneKeys := []types.NamespacedName{cdKey, bmh1Key, bmh2Key, mcKey, cm1Key, cm2Key}
+
+		clusterInstance := &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "not-the-owner",
+				Namespace: TestClusterInstanceNamespace,
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				PruneManifests: []v1alpha1.ResourceRef{
+					{
+						APIVersion: V1ApiVersion,
+						Kind:       ConfigMapKind,
+					},
+					{
+						APIVersion: ManagedClusterApiVersion,
+						Kind:       ManagedClusterKind,
+					},
+				},
+				Nodes: []v1alpha1.NodeSpec{
+					{
+						HostName: TestNode1Hostname,
+					},
+					{
+						HostName: TestNode2Hostname,
+						PruneManifests: []v1alpha1.ResourceRef{
+							{
+								APIVersion: BareMetalHostApiVersion,
+								Kind:       BareMetalHostKind,
+							},
+						},
+					},
+				},
+			},
+		}
+		// Create the ClusterInstance CR
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		ok, err := r.pruneManifests(ctx, clusterInstance, pruneList)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(ok).To(BeTrue())
+
+		// Expect the objects previously created to be deleted after pruneManifests is called
+		expectedPruneList := []ci.RenderedObject{}
+		expectedPruneKeys := []types.NamespacedName{}
+		verifyPruningFn(expectedPruneList, doNotPruneList, expectedPruneKeys, doNotPruneKeys)
+	})
+
+})
+
 var _ = Describe("handleValidate", func() {
 	var (
 		c          client.Client
 		r          *ClusterInstanceReconciler
 		ctx        = context.Background()
 		testParams = &ci.TestParams{
-			BmcCredentialsName:  "bmh-secret",
-			ClusterName:         "test-cluster",
-			ClusterNamespace:    "test-cluster",
+			BmcCredentialsName:  TestBMHSecret,
+			ClusterName:         TestClusterInstanceName,
+			ClusterNamespace:    TestClusterInstanceNamespace,
 			ClusterImageSetName: "testimage:foobar",
 			ExtraManifestName:   "extra-manifest",
 			ClusterTemplateRef:  "cluster-template-ref",
 			NodeTemplateRef:     "node-template-ref",
-			PullSecret:          "pull-secret",
+			PullSecret:          TestPullSecret,
 		}
 		clusterInstance *v1alpha1.ClusterInstance
 	)
@@ -613,14 +954,14 @@ var _ = Describe("handleRenderTemplates", func() {
 		r          *ClusterInstanceReconciler
 		ctx        = context.Background()
 		testParams = &ci.TestParams{
-			BmcCredentialsName:  "bmh-secret",
-			ClusterName:         "test-cluster",
-			ClusterNamespace:    "test-cluster",
+			BmcCredentialsName:  TestBMHSecret,
+			ClusterName:         TestClusterInstanceName,
+			ClusterNamespace:    TestClusterInstanceNamespace,
 			ClusterImageSetName: "testimage:foobar",
 			ExtraManifestName:   "extra-manifest",
 			ClusterTemplateRef:  "cluster-template-ref",
 			NodeTemplateRef:     "node-template-ref",
-			PullSecret:          "pull-secret",
+			PullSecret:          TestPullSecret,
 		}
 		clusterInstance *v1alpha1.ClusterInstance
 	)
@@ -791,283 +1132,374 @@ spec:
 	})
 })
 
-var _ = Describe("updateSuppressedManifestsStatus", func() {
-	var (
-		c               client.Client
-		r               *ClusterInstanceReconciler
-		ctx             = context.Background()
-		clusterInstance *v1alpha1.ClusterInstance
-		Manifests       []v1alpha1.ManifestReference
-		aciApiGroup     = "extensions.hive.openshift.io/v1beta1"
-		cdApiGroup      = "hive.openshift.io/v1"
-		bmhApilGroup    = "metal3.io/v1alpha1"
-		nmscApiGroup    = "agent-install.openshift.io/v1beta1"
-	)
+type suppressManifestTestArgs struct {
+	ClusterLevelSuppressedManifests []string
+	NodeLevelSuppressedManifests    [][]string
+	ExpectedManifests               []v1alpha1.ManifestReference
+}
 
-	BeforeEach(func() {
+var _ = DescribeTable("updateSuppressedManifestsStatus",
+	func(
+		ciSpec v1alpha1.ClusterInstanceSpec,
+		args suppressManifestTestArgs,
+	) {
 
-		var (
-			clusterName      = "test-cluster"
-			clusterNamespace = "test-cluster"
-		)
+		ctx := context.Background()
 
-		c = fakeclient.NewClientBuilder().
+		c := fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 		testLogger := ctrl.Log.WithName("TemplateEngine")
 		tmplEngine := ci.NewTemplateEngine(testLogger)
-		r = &ClusterInstanceReconciler{
+		r := &ClusterInstanceReconciler{
 			Client:     c,
 			Scheme:     scheme.Scheme,
 			Log:        testLogger,
 			TmplEngine: tmplEngine,
 		}
 
-		clusterInstance = &v1alpha1.ClusterInstance{
+		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      clusterName,
-				Namespace: clusterNamespace,
+				Name:      TestClusterInstanceName,
+				Namespace: TestClusterInstanceNamespace,
 			},
 			Spec: v1alpha1.ClusterInstanceSpec{
-				ClusterName: clusterName,
+				ClusterName:         TestClusterInstanceName,
+				SuppressedManifests: args.ClusterLevelSuppressedManifests,
 				Nodes: []v1alpha1.NodeSpec{
 					{
-						Role:       "master",
-						BmcAddress: "192.0.2.1",
+						HostName:            TestNode1Hostname,
+						Role:                "master",
+						BmcAddress:          "192.0.2.1",
+						SuppressedManifests: make([]string, 0),
+					},
+					{
+						HostName:            TestNode2Hostname,
+						Role:                "master",
+						BmcAddress:          "192.0.2.2",
+						SuppressedManifests: make([]string, 0),
 					},
 				}},
+			Status: v1alpha1.ClusterInstanceStatus{
+				ManifestsRendered: []v1alpha1.ManifestReference{
+					{
+						APIGroup:  stringToStringPtr(ClusterDeploymentApiVersion),
+						Kind:      ClusterDeploymentKind,
+						Name:      TestClusterInstanceName,
+						Namespace: TestClusterInstanceNamespace,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+						SyncWave:  0,
+					},
+					{
+						APIGroup:  stringToStringPtr(AgentClusterInstallApiVersion),
+						Kind:      AgentClusterInstallKind,
+						Name:      TestClusterInstanceName,
+						Namespace: TestClusterInstanceNamespace,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+						SyncWave:  0,
+					},
+					{
+						APIGroup:  stringToStringPtr(BareMetalHostApiVersion),
+						Kind:      BareMetalHostKind,
+						Name:      TestNode1Hostname,
+						Namespace: TestClusterInstanceNamespace,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+						SyncWave:  0,
+					},
+					{
+						APIGroup:  stringToStringPtr(BareMetalHostApiVersion),
+						Kind:      BareMetalHostKind,
+						Name:      TestNode2Hostname,
+						Namespace: TestClusterInstanceNamespace,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+						SyncWave:  0,
+					},
+					{
+						APIGroup:  stringToStringPtr(NMStateConfigApiVersion),
+						Kind:      NMStateConfigKind,
+						Name:      TestNode1Hostname,
+						Namespace: TestClusterInstanceNamespace,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+						SyncWave:  0,
+					},
+					{
+						APIGroup:  stringToStringPtr(NMStateConfigApiVersion),
+						Kind:      NMStateConfigKind,
+						Name:      TestNode2Hostname,
+						Namespace: TestClusterInstanceNamespace,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+						SyncWave:  0,
+					},
+				},
+			},
 		}
 
-		Manifests = []v1alpha1.ManifestReference{
-			{
-				APIGroup: &cdApiGroup,
-				Kind:     "ClusterDeployment",
-				Name:     "test-cd",
-				Status:   v1alpha1.ManifestRenderedSuccess,
-			},
-			{
-				APIGroup: &aciApiGroup,
-				Kind:     "AgentClusterInstall",
-				Name:     "test-aci",
-				Status:   v1alpha1.ManifestRenderedSuccess,
-			},
-			{
-				APIGroup: &bmhApilGroup,
-				Kind:     "BareMetalHost",
-				Name:     "test-bmh",
-				Status:   v1alpha1.ManifestRenderedSuccess,
-			},
-			{
-				APIGroup: &nmscApiGroup,
-				Kind:     "NMStateConfig",
-				Name:     "test-aci",
-				Status:   v1alpha1.ManifestRenderedSuccess,
-			},
+		// Define node-level suppressed manifests
+		Expect(len(args.NodeLevelSuppressedManifests) <= 2).To(BeTrue())
+		for k, v := range args.NodeLevelSuppressedManifests {
+			clusterInstance.Spec.Nodes[k].SuppressedManifests = append(
+				clusterInstance.Spec.Nodes[k].SuppressedManifests, v...)
 		}
-	})
 
-	It("does not suppress manifests if nothing is specified", func() {
-
-		clusterInstance.Spec.SuppressedManifests = []string{}
-		clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
-			ManifestsRendered: Manifests,
-		}
+		// Create the ClusterInstance CR
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.updateSuppressedManifestsStatus(ctx, clusterInstance)
-		Expect(err).ToNot(HaveOccurred())
+		suppressList := make([]ci.RenderedObject, 0)
+		for _, manifestRef := range clusterInstance.Status.ManifestsRendered {
 
-		// Verify status.ManifestRendered is unchanged
-		sc := &v1alpha1.ClusterInstance{}
-		key := types.NamespacedName{
-			Name:      clusterInstance.Name,
-			Namespace: clusterInstance.Namespace,
+			shouldSuppress := false
+			// check cluster-level suppressed manifests args
+			for _, m := range args.ClusterLevelSuppressedManifests {
+				if manifestRef.Kind == m {
+					shouldSuppress = true
+				}
+			}
+
+			// check node-level suppressed manifests args
+			for k, nodeManifests := range args.NodeLevelSuppressedManifests {
+				nodeName := clusterInstance.Spec.Nodes[k].HostName
+				for _, m := range nodeManifests {
+					if manifestRef.Kind == m && manifestRef.Name == nodeName {
+						shouldSuppress = true
+					}
+				}
+			}
+
+			if !shouldSuppress {
+				continue
+			}
+
+			object := ci.RenderedObject{}
+			err := object.SetObject(map[string]interface{}{
+				"apiVersion": *manifestRef.APIGroup,
+				"kind":       manifestRef.Kind,
+				"metadata": map[string]interface{}{
+					"name":      manifestRef.Name,
+					"namespace": manifestRef.Namespace,
+					"annotations": map[string]string{
+						ci.WaveAnnotation: fmt.Sprintf("%d", manifestRef.SyncWave),
+					},
+					"labels": map[string]string{
+						ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace,
+							clusterInstance.Name),
+					},
+				},
+			})
+			Expect(err).ToNot(HaveOccurred())
+			suppressList = append(suppressList, object)
 		}
-		Expect(c.Get(ctx, key, sc)).To(Succeed())
-		for _, expManifest := range Manifests {
-			manifest := findManifestRendered(&expManifest, sc.Status.ManifestsRendered)
-			Expect(manifest).ToNot(Equal(nil))
-			Expect(manifest.Status).To(Equal(expManifest.Status))
-		}
-	})
 
-	It("correctly suppresses cluster-level manifests when specified", func() {
-
-		clusterInstance.Spec.SuppressedManifests = []string{"ClusterDeployment"}
-		clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
-			ManifestsRendered: Manifests,
-		}
-		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
-
-		err := r.updateSuppressedManifestsStatus(ctx, clusterInstance)
-		Expect(err).ToNot(HaveOccurred())
-
-		// Verify handling of suppression
-		expectedManifests := []v1alpha1.ManifestReference{
-			{
-				APIGroup: &cdApiGroup,
-				Kind:     "ClusterDeployment",
-				Name:     "test-cd",
-				Status:   v1alpha1.ManifestSuppressed,
-			},
-			{
-				APIGroup: &aciApiGroup,
-				Kind:     "AgentClusterInstall",
-				Name:     "test-aci",
-				Status:   v1alpha1.ManifestRenderedSuccess,
-			},
-			{
-				APIGroup: &bmhApilGroup,
-				Kind:     "BareMetalHost",
-				Name:     "test-bmh",
-				Status:   v1alpha1.ManifestRenderedSuccess,
-			},
-			{
-				APIGroup: &nmscApiGroup,
-				Kind:     "NMStateConfig",
-				Name:     "test-aci",
-				Status:   v1alpha1.ManifestRenderedSuccess,
-			},
-		}
-		sc := &v1alpha1.ClusterInstance{}
-		key := types.NamespacedName{
-			Name:      clusterInstance.Name,
-			Namespace: clusterInstance.Namespace,
-		}
-		Expect(c.Get(ctx, key, sc)).To(Succeed())
-		for _, expManifest := range expectedManifests {
-			manifest := findManifestRendered(&expManifest, sc.Status.ManifestsRendered)
-			Expect(manifest).ToNot(Equal(nil))
-			Expect(manifest.Status).To(Equal(expManifest.Status))
-		}
-	})
-
-	It("correctly suppresses cluster and node level manifests when specified", func() {
-
-		clusterInstance.Spec.SuppressedManifests = []string{"ClusterDeployment"}
-		clusterInstance.Spec.Nodes[0].SuppressedManifests = []string{"BareMetalHost"}
-
-		clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
-			ManifestsRendered: Manifests,
-		}
-		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
-
-		err := r.updateSuppressedManifestsStatus(ctx, clusterInstance)
+		err := r.updateSuppressedManifestsStatus(ctx, clusterInstance, suppressList)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify handling of suppression
-		expectedManifests := []v1alpha1.ManifestReference{
-			{
-				APIGroup: &cdApiGroup,
-				Kind:     "ClusterDeployment",
-				Name:     "test-cd",
-				Status:   v1alpha1.ManifestSuppressed,
-			},
-			{
-				APIGroup: &aciApiGroup,
-				Kind:     "AgentClusterInstall",
-				Name:     "test-aci",
-				Status:   v1alpha1.ManifestRenderedSuccess,
-			},
-			{
-				APIGroup: &bmhApilGroup,
-				Kind:     "BareMetalHost",
-				Name:     "test-bmh",
-				Status:   v1alpha1.ManifestSuppressed,
-			},
-			{
-				APIGroup: &nmscApiGroup,
-				Kind:     "NMStateConfig",
-				Name:     "test-aci",
-				Status:   v1alpha1.ManifestRenderedSuccess,
-			},
-		}
-		sc := &v1alpha1.ClusterInstance{}
 		key := types.NamespacedName{
 			Name:      clusterInstance.Name,
 			Namespace: clusterInstance.Namespace,
 		}
-		Expect(c.Get(ctx, key, sc)).To(Succeed())
-		for _, expManifest := range expectedManifests {
-			manifest := findManifestRendered(&expManifest, sc.Status.ManifestsRendered)
-			Expect(manifest).ToNot(Equal(nil))
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+		for _, expManifest := range args.ExpectedManifests {
+			manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
+			Expect(manifest).ToNot(BeNil())
 			Expect(manifest.Status).To(Equal(expManifest.Status))
 		}
-	})
-
-})
-
-var _ = DescribeTable("groupAndSortManifests",
-	func(manifests []interface{}, expected map[int][]interface{}, wantError bool) {
-		got, err1 := groupAndSortManifests(manifests)
-		if wantError {
-			Expect(err1).To(HaveOccurred())
-		}
-		Expect(reflect.DeepEqual(got, expected)).To(BeTrue())
 	},
 
-	Entry("missing field 'kind'", []interface{}{
-		map[string]interface{}{"apiVersion": "animal", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-		map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-	}, nil, true),
+	Entry("does not suppress manifests if nothing is specified",
+		v1alpha1.ClusterInstanceSpec{},
+		suppressManifestTestArgs{
+			ClusterLevelSuppressedManifests: []string{},
+			NodeLevelSuppressedManifests:    [][]string{{}, {}},
+			ExpectedManifests: []v1alpha1.ManifestReference{
+				{
+					APIGroup:  stringToStringPtr(ClusterDeploymentApiVersion),
+					Kind:      ClusterDeploymentKind,
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+					Status:    v1alpha1.ManifestRenderedSuccess,
+					SyncWave:  0,
+				},
+				{
+					APIGroup:  stringToStringPtr(AgentClusterInstallApiVersion),
+					Kind:      AgentClusterInstallKind,
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+					Status:    v1alpha1.ManifestRenderedSuccess,
+					SyncWave:  0,
+				},
+				{
+					APIGroup:  stringToStringPtr(BareMetalHostApiVersion),
+					Kind:      BareMetalHostKind,
+					Name:      TestNode1Hostname,
+					Namespace: TestClusterInstanceNamespace,
+					Status:    v1alpha1.ManifestRenderedSuccess,
+					SyncWave:  0,
+				},
+				{
+					APIGroup:  stringToStringPtr(BareMetalHostApiVersion),
+					Kind:      BareMetalHostKind,
+					Name:      TestNode2Hostname,
+					Namespace: TestClusterInstanceNamespace,
+					Status:    v1alpha1.ManifestRenderedSuccess,
+					SyncWave:  0,
+				},
+				{
+					APIGroup:  stringToStringPtr(NMStateConfigApiVersion),
+					Kind:      NMStateConfigKind,
+					Name:      TestNode1Hostname,
+					Namespace: TestClusterInstanceNamespace,
+					Status:    v1alpha1.ManifestRenderedSuccess,
+					SyncWave:  0,
+				},
+				{
+					APIGroup:  stringToStringPtr(NMStateConfigApiVersion),
+					Kind:      NMStateConfigKind,
+					Name:      TestNode2Hostname,
+					Namespace: TestClusterInstanceNamespace,
+					Status:    v1alpha1.ManifestRenderedSuccess,
+					SyncWave:  0,
+				},
+			},
+		}),
 
-	Entry("all wave annotations supplied", []interface{}{
-		map[string]interface{}{"apiVersion": "car", "kind": "mercedez", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "dog", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-		map[string]interface{}{"apiVersion": "car", "kind": "mazda", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
-		map[string]interface{}{"apiVersion": "fruit", "kind": "banana", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
-		map[string]interface{}{"apiVersion": "fruit", "kind": "apple", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "cat", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-		map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-	}, map[int][]interface{}{
-		0: {
-			map[string]interface{}{"apiVersion": "fruit", "kind": "apple", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
-			map[string]interface{}{"apiVersion": "fruit", "kind": "banana", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
-			map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
-		},
+	Entry("correctly suppresses cluster-level manifests when specified",
+		v1alpha1.ClusterInstanceSpec{},
+		suppressManifestTestArgs{
+			ClusterLevelSuppressedManifests: []string{ClusterDeploymentKind},
+			NodeLevelSuppressedManifests:    [][]string{{}, {}},
+			ExpectedManifests: []v1alpha1.ManifestReference{
+				{
+					APIGroup: stringToStringPtr(ClusterDeploymentApiVersion),
+					Kind:     ClusterDeploymentKind,
+					Name:     TestClusterInstanceName,
+					Status:   v1alpha1.ManifestSuppressed,
+				},
+				{
+					APIGroup: stringToStringPtr(AgentClusterInstallApiVersion),
+					Kind:     AgentClusterInstallKind,
+					Name:     TestClusterInstanceName,
+					Status:   v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup: stringToStringPtr(BareMetalHostApiVersion),
+					Kind:     BareMetalHostKind,
+					Name:     TestNode1Hostname,
+					Status:   v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup: stringToStringPtr(BareMetalHostApiVersion),
+					Kind:     BareMetalHostKind,
+					Name:     TestNode2Hostname,
+					Status:   v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup: stringToStringPtr(NMStateConfigApiVersion),
+					Kind:     NMStateConfigKind,
+					Name:     TestNode1Hostname,
+					Status:   v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup: stringToStringPtr(NMStateConfigApiVersion),
+					Kind:     NMStateConfigKind,
+					Name:     TestNode2Hostname,
+					Status:   v1alpha1.ManifestRenderedSuccess,
+				},
+			},
+		}),
 
-		1: {
-			map[string]interface{}{"apiVersion": "animal", "kind": "cat", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-			map[string]interface{}{"apiVersion": "animal", "kind": "dog", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-			map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-		},
+	Entry("correctly suppresses cluster and node level manifests when specified",
+		v1alpha1.ClusterInstanceSpec{},
+		suppressManifestTestArgs{
+			ClusterLevelSuppressedManifests: []string{ClusterDeploymentKind},
+			NodeLevelSuppressedManifests: [][]string{
+				{NMStateConfigKind}, // suppress NMStateConfig for node[0]
+				{BareMetalHostKind}, // suppress BareMetalHost for node[1]
+			},
+			ExpectedManifests: []v1alpha1.ManifestReference{
+				{
+					APIGroup: stringToStringPtr(ClusterDeploymentApiVersion),
+					Kind:     ClusterDeploymentKind,
+					Name:     TestClusterInstanceName,
+					Status:   v1alpha1.ManifestSuppressed,
+				},
+				{
+					APIGroup: stringToStringPtr(AgentClusterInstallApiVersion),
+					Kind:     AgentClusterInstallKind,
+					Name:     TestClusterInstanceName,
+					Status:   v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup: stringToStringPtr(BareMetalHostApiVersion),
+					Kind:     BareMetalHostKind,
+					Name:     TestNode1Hostname,
+					Status:   v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup: stringToStringPtr(BareMetalHostApiVersion),
+					Kind:     BareMetalHostKind,
+					Name:     TestNode2Hostname,
+					Status:   v1alpha1.ManifestSuppressed,
+				},
+				{
+					APIGroup: stringToStringPtr(NMStateConfigApiVersion),
+					Kind:     NMStateConfigKind,
+					Name:     TestNode1Hostname,
+					Status:   v1alpha1.ManifestSuppressed,
+				},
+				{
+					APIGroup: stringToStringPtr(NMStateConfigApiVersion),
+					Kind:     NMStateConfigKind,
+					Name:     TestNode2Hostname,
+					Status:   v1alpha1.ManifestRenderedSuccess,
+				},
+			},
+		}),
 
-		2: {
-			map[string]interface{}{"apiVersion": "car", "kind": "mazda", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
-			map[string]interface{}{"apiVersion": "car", "kind": "mercedez", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
-		},
-	}, false),
-
-	Entry("test that default wave annotation is applied if not defined", []interface{}{
-		map[string]interface{}{"apiVersion": "fruit", "kind": "banana"},
-		map[string]interface{}{"apiVersion": "fruit", "kind": "apple"},
-		map[string]interface{}{"apiVersion": "car", "kind": "mercedez", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "dog", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-		map[string]interface{}{"apiVersion": "car", "kind": "mazda", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "cat", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-		map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-		map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
-	}, map[int][]interface{}{
-		0: {
-			map[string]interface{}{"apiVersion": "fruit", "kind": "apple"},
-			map[string]interface{}{"apiVersion": "fruit", "kind": "banana"},
-			map[string]interface{}{"apiVersion": "fruit", "kind": "grape", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "0"}}},
-		},
-
-		1: {
-			map[string]interface{}{"apiVersion": "animal", "kind": "cat", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-			map[string]interface{}{"apiVersion": "animal", "kind": "dog", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-			map[string]interface{}{"apiVersion": "animal", "kind": "elephant", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "1"}}},
-		},
-
-		2: {
-			map[string]interface{}{"apiVersion": "car", "kind": "mazda", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
-			map[string]interface{}{"apiVersion": "car", "kind": "mercedez", "metadata": map[string]interface{}{"annotations": map[string]interface{}{ci.WaveAnnotation: "2"}}},
-		},
-	}, false),
+	Entry("correctly suppresses node level manifests specified globally in ClusterInstance.Spec.SuppressedManifests",
+		v1alpha1.ClusterInstanceSpec{},
+		suppressManifestTestArgs{
+			ClusterLevelSuppressedManifests: []string{BareMetalHostKind},
+			NodeLevelSuppressedManifests:    [][]string{{""}, {""}},
+			ExpectedManifests: []v1alpha1.ManifestReference{
+				{
+					APIGroup: stringToStringPtr(ClusterDeploymentApiVersion),
+					Kind:     ClusterDeploymentKind,
+					Name:     TestClusterInstanceName,
+					Status:   v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup: stringToStringPtr(AgentClusterInstallApiVersion),
+					Kind:     AgentClusterInstallKind,
+					Name:     TestClusterInstanceName,
+					Status:   v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup: stringToStringPtr(BareMetalHostApiVersion),
+					Kind:     BareMetalHostKind,
+					Name:     TestNode1Hostname,
+					Status:   v1alpha1.ManifestSuppressed,
+				},
+				{
+					APIGroup: stringToStringPtr(BareMetalHostApiVersion),
+					Kind:     BareMetalHostKind,
+					Name:     TestNode2Hostname,
+					Status:   v1alpha1.ManifestSuppressed,
+				},
+				{
+					APIGroup: stringToStringPtr(NMStateConfigApiVersion),
+					Kind:     NMStateConfigKind,
+					Name:     TestNode1Hostname,
+					Status:   v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup: stringToStringPtr(NMStateConfigApiVersion),
+					Kind:     NMStateConfigKind,
+					Name:     TestNode2Hostname,
+					Status:   v1alpha1.ManifestRenderedSuccess,
+				},
+			},
+		}),
 )
 
 var _ = Describe("executeRenderedManifests", func() {
@@ -1076,26 +1508,19 @@ var _ = Describe("executeRenderedManifests", func() {
 		r                *ClusterInstanceReconciler
 		ctx              = context.Background()
 		clusterInstance  *v1alpha1.ClusterInstance
-		clusterName      = "test-cluster"
-		clusterNamespace = "test-cluster"
+		clusterName      = TestClusterInstanceName
+		clusterNamespace = TestClusterInstanceNamespace
 		key              = types.NamespacedName{
 			Name:      clusterName,
 			Namespace: clusterNamespace,
 		}
-		apiGroup    = "hive.openshift.io/v1"
+		apiGroup    = "ClusterDeploymentApiVersion"
 		expManifest = v1alpha1.ManifestReference{
 			APIGroup: &apiGroup,
-			Kind:     "ClusterDeployment",
+			Kind:     ClusterDeploymentKind,
 			Name:     clusterName,
 		}
-		manifestGroup = map[int][]interface{}{
-			0: {
-				map[string]interface{}{
-					"apiVersion": *expManifest.APIGroup,
-					"kind":       expManifest.Kind,
-					"metadata":   map[string]interface{}{"name": clusterName, "namespace": clusterNamespace}},
-			},
-		}
+		objects []ci.RenderedObject
 	)
 
 	BeforeEach(func() {
@@ -1122,6 +1547,22 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		manifests := []map[string]interface{}{
+			map[string]interface{}{
+				"apiVersion": *expManifest.APIGroup,
+				"kind":       expManifest.Kind,
+				"metadata":   map[string]interface{}{"name": clusterName, "namespace": clusterNamespace},
+			},
+		}
+
+		objects = make([]ci.RenderedObject, 0)
+		for _, manifest := range manifests {
+			object := ci.RenderedObject{}
+			err := object.SetObject(manifest)
+			Expect(err).ToNot(HaveOccurred())
+			objects = append(objects, object)
+		}
 	})
 
 	It("succeeds in creating a manifest", func() {
@@ -1138,7 +1579,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}).Build()
 
-		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, manifestGroup, expManifest.Status)
+		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, objects, expManifest.Status)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeTrue())
 		Expect(called).To(BeTrue())
@@ -1146,7 +1587,7 @@ var _ = Describe("executeRenderedManifests", func() {
 		// Verify ClusterInstance status
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
-		Expect(manifest).ToNot(Equal(nil))
+		Expect(manifest).ToNot(BeNil())
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 	})
 
@@ -1165,7 +1606,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}).Build()
 
-		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, manifestGroup, v1alpha1.ManifestRenderedSuccess)
+		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, objects, v1alpha1.ManifestRenderedSuccess)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeFalse())
 		Expect(called).To(BeTrue())
@@ -1173,7 +1614,7 @@ var _ = Describe("executeRenderedManifests", func() {
 		// Verify ClusterInstance status
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
-		Expect(manifest).ToNot(Equal(nil))
+		Expect(manifest).ToNot(BeNil())
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 		Expect(manifest.Message).To(ContainSubstring(testError))
 
@@ -1193,7 +1634,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}).Build()
 
-		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, manifestGroup, expManifest.Status)
+		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, objects, expManifest.Status)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeTrue())
 		Expect(called).To(BeTrue())
@@ -1201,7 +1642,7 @@ var _ = Describe("executeRenderedManifests", func() {
 		// Verify ClusterInstance status
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
-		Expect(manifest).ToNot(Equal(nil))
+		Expect(manifest).ToNot(BeNil())
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 	})
 
@@ -1220,7 +1661,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}).Build()
 
-		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, manifestGroup, expManifest.Status)
+		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, objects, expManifest.Status)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeFalse())
 		Expect(called).To(BeTrue())
@@ -1228,7 +1669,7 @@ var _ = Describe("executeRenderedManifests", func() {
 		// Verify ClusterInstance status
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
-		Expect(manifest).ToNot(Equal(nil))
+		Expect(manifest).ToNot(BeNil())
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 		Expect(manifest.Message).To(ContainSubstring(testError))
 	})

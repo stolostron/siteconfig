@@ -162,13 +162,27 @@ func buildClusterData(clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.
 	return
 }
 
-// suppressManifest function returns true if the manifest-rendering should be suppressed
-func suppressManifest(kind string, suppressedManifests []string) bool {
-	if kind == "" || len(suppressedManifests) == 0 {
+// pruneManifest function returns true if the manifest should be pruned (i.e. not rendered)
+func pruneManifest(resource v1alpha1.ResourceRef, pruneList []v1alpha1.ResourceRef) bool {
+	if resource.APIVersion == "" || resource.Kind == "" || len(pruneList) == 0 {
 		return false
 	}
 
-	for _, manifest := range suppressedManifests {
+	for _, p := range pruneList {
+		if resource.APIVersion == p.APIVersion && resource.Kind == p.Kind {
+			return true
+		}
+	}
+	return false
+}
+
+// suppressManifest function returns true if the manifest should be suppressed (i.e. not rendered)
+func suppressManifest(kind string, supressManifestsList []string) bool {
+	if kind == "" || len(supressManifestsList) == 0 {
+		return false
+	}
+
+	for _, manifest := range supressManifestsList {
 		if manifest == kind {
 			return true
 		}
@@ -292,4 +306,11 @@ func GetNamespacedNameFromOwnedByLabel(ownedByLabel string) (types.NamespacedNam
 	}
 
 	return types.NamespacedName{Namespace: res[0], Name: res[1]}, nil
+}
+
+func GetResourceId(name, namespace, kind string) string {
+	if namespace != "" {
+		return fmt.Sprintf("%s:%s/%s", kind, namespace, name)
+	}
+	return fmt.Sprintf("%s:%s", kind, name)
 }

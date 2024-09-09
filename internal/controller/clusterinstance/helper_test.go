@@ -257,10 +257,10 @@ func Test_buildClusterData(t *testing.T) {
 
 }
 
-func Test_suppressManifest(t *testing.T) {
+func TestPruneManifest(t *testing.T) {
 	type args struct {
-		kind                string
-		suppressedManifests []string
+		resource  v1alpha1.ResourceRef
+		pruneList []v1alpha1.ResourceRef
 	}
 	tests := []struct {
 		name string
@@ -268,37 +268,49 @@ func Test_suppressManifest(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "manifest found in suppressedManfiests",
+			name: "manifest found in pruneList",
 			args: args{
-				kind:                "BareMetalHost",
-				suppressedManifests: []string{"foobar-1", "BareMetalHost", "foobar-2"},
+				resource: v1alpha1.ResourceRef{APIVersion: "metal3.io/v1alpha1", Kind: "BareMetalHost"},
+				pruneList: []v1alpha1.ResourceRef{
+					{APIVersion: "metal3.io/v1alpha1", Kind: "foobar-1"},
+					{APIVersion: "metal3.io/v1alpha1", Kind: "BareMetalHost"},
+					{APIVersion: "metal3.io/v1alpha1", Kind: "foobar-2"},
+				},
 			},
 			want: true,
 		},
 
 		{
-			name: "manifest does not exist in suppressedManfiests",
+			name: "manifest does not exist in pruneList",
 			args: args{
-				kind:                "BareMetalHost",
-				suppressedManifests: []string{"foobar-1", "foobar-2", "foobar-3"},
+				resource: v1alpha1.ResourceRef{APIVersion: "metal3.io/v1alpha1", Kind: "BareMetalHost"},
+				pruneList: []v1alpha1.ResourceRef{
+					{APIVersion: "metal3.io/v1alpha1", Kind: "foobar-1"},
+					{APIVersion: "metal3.io/v1alpha1", Kind: "foobar-2"},
+					{APIVersion: "metal3.io/v1alpha1", Kind: "foobar-3"},
+				},
 			},
 			want: false,
 		},
 
 		{
-			name: "no manifest specified",
+			name: "missing apiVersion",
 			args: args{
-				kind:                "",
-				suppressedManifests: []string{"foobar-1", "foobar-2", "foobar-3"},
+				resource: v1alpha1.ResourceRef{Kind: "BareMetalHost"},
+				pruneList: []v1alpha1.ResourceRef{
+					{APIVersion: "metal3.io/v1alpha1", Kind: "foobar-1"},
+					{APIVersion: "metal3.io/v1alpha1", Kind: "BareMetalHost"},
+					{APIVersion: "metal3.io/v1alpha1", Kind: "foobar-2"},
+				},
 			},
 			want: false,
 		},
 
 		{
-			name: "suppressedManifests list is empty",
+			name: "pruneList is empty",
 			args: args{
-				kind:                "foobar-1",
-				suppressedManifests: []string{},
+				resource:  v1alpha1.ResourceRef{APIVersion: "metal3.io/v1alpha1", Kind: "BareMetalHost"},
+				pruneList: []v1alpha1.ResourceRef{},
 			},
 			want: false,
 		},
@@ -306,7 +318,63 @@ func Test_suppressManifest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := suppressManifest(tt.args.kind, tt.args.suppressedManifests); got != tt.want {
+			if got := pruneManifest(tt.args.resource, tt.args.pruneList); got != tt.want {
+				t.Errorf("pruneManifest() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSuppressManifest(t *testing.T) {
+	type args struct {
+		kind                  string
+		suppressManifestsList []string
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "manifest found in suppressManifestsList",
+			args: args{
+				kind:                  "BareMetalHost",
+				suppressManifestsList: []string{"foobar-1", "BareMetalHost", "foobar-2"},
+			},
+			want: true,
+		},
+
+		{
+			name: "manifest does not exist in suppressManifestsList",
+			args: args{
+				kind:                  "BareMetalHost",
+				suppressManifestsList: []string{"foobar-1", "foobar-2", "foobar-3"},
+			},
+			want: false,
+		},
+
+		{
+			name: "no manifest specified",
+			args: args{
+				kind:                  "",
+				suppressManifestsList: []string{"foobar-1", "foobar-2", "foobar-3"},
+			},
+			want: false,
+		},
+
+		{
+			name: "suppressManifestsList is empty",
+			args: args{
+				kind:                  "foobar-1",
+				suppressManifestsList: []string{},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := suppressManifest(tt.args.kind, tt.args.suppressManifestsList); got != tt.want {
 				t.Errorf("suppressManifest() = %v, want %v", got, tt.want)
 			}
 		})

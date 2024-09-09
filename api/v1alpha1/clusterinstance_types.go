@@ -354,6 +354,7 @@ const (
 	ManifestRenderedFailure   = "failed"
 	ManifestRenderedValidated = "validated"
 	ManifestSuppressed        = "suppressed"
+	ManifestPruneFailure      = "pruning-attempt-failed"
 )
 
 // ManifestReference contains enough information to let you locate the
