@@ -20,11 +20,6 @@ metadata:
             "caBundleRef": {
               "name": "my-bundle-ref"
             },
-            "clusterLabels": {
-              "common": "true",
-              "group-du-sno": "test",
-              "sites": "site-sno-du-1"
-            },
             "clusterName": "site-sno-du-1",
             "clusterNetwork": [
               {
@@ -41,6 +36,13 @@ metadata:
                 }
               ],
               "type": "nbde"
+            },
+            "extraLabels": {
+              "ManagedCluster": {
+                "common": "true",
+                "group-du-sno": "test",
+                "sites": "site-sno-du-1"
+              }
             },
             "extraManifestsRefs": [
               {
