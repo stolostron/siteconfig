@@ -73,7 +73,8 @@ spec:
   pullSecretRef:
     name: "{{ .Spec.PullSecretRef.Name }}"`
 
-const NetworkSecret = `apiVersion: v1
+const NetworkSecret = `{{ if .SpecialVars.CurrentNode.NodeNetwork }}
+apiVersion: v1
 kind: Secret
 metadata:
   annotations:
@@ -83,7 +84,8 @@ metadata:
 type: Opaque
 data:
   nmstate: |
-{{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig | toYaml | b64enc | indent 4}}`
+{{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig | toYaml | b64enc | indent 4}}
+{{ end }}`
 
 const KlusterletAddonConfig = `apiVersion: agent.open-cluster-management.io/v1
 kind: KlusterletAddonConfig
