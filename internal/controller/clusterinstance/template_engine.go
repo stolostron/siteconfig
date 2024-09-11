@@ -196,7 +196,7 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 
 	// Add owned-by label
 	manifest = appendManifestLabels(map[string]string{
-		OwnedByLabel: fmt.Sprintf("%s_%s", clusterInstance.Namespace, clusterInstance.Name),
+		OwnedByLabel: GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
 	}, manifest)
 
 	if node == nil {

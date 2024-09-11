@@ -18,7 +18,6 @@ package clusterinstance
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"testing"
 
@@ -293,7 +292,7 @@ var _ = Describe("renderTemplates", func() {
 			"kind":       "TestB",
 			"metadata": map[string]interface{}{
 				"labels": map[string]interface{}{
-					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
 				},
 			},
 			"spec": map[string]interface{}{
@@ -329,7 +328,7 @@ var _ = Describe("renderTemplates", func() {
 			"kind":       "TestD",
 			"metadata": map[string]interface{}{
 				"labels": map[string]interface{}{
-					OwnedByLabel: fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
 				},
 			},
 			"spec": map[string]interface{}{
@@ -377,7 +376,7 @@ var _ = Describe("renderTemplates", func() {
 					"extra-annotation-l2": "test",
 				},
 				"labels": map[string]interface{}{
-					OwnedByLabel:      fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					OwnedByLabel:      GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
 					"extra-labels-l1": "test",
 					"extra-labels-l2": "test",
 				},
@@ -428,7 +427,7 @@ var _ = Describe("renderTemplates", func() {
 					"extra-node-annotation-l2": "test",
 				},
 				"labels": map[string]interface{}{
-					OwnedByLabel:      fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					OwnedByLabel:      GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
 					"extra-labels-l1": "test",
 					"extra-labels-l2": "test",
 				},
@@ -479,7 +478,7 @@ var _ = Describe("renderTemplates", func() {
 					"extra-node-annotation-l2": "test",
 				},
 				"labels": map[string]interface{}{
-					OwnedByLabel:           fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					OwnedByLabel:           GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
 					"extra-node-labels-l1": "test",
 					"extra-node-labels-l2": "test",
 				},
@@ -649,7 +648,7 @@ var _ = Describe("ProcessTemplates", func() {
 					"extra-annotation-l1": "test",
 				},
 				"labels": map[string]interface{}{
-					OwnedByLabel:     fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					OwnedByLabel:     GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
 					"extra-label-l1": "test",
 				},
 			},
@@ -667,7 +666,7 @@ var _ = Describe("ProcessTemplates", func() {
 					"extra-node-annotation-l1": "test",
 				},
 				"labels": map[string]interface{}{
-					OwnedByLabel:          fmt.Sprintf("%s_%s", TestClusterInstance.Namespace, TestClusterInstance.Name),
+					OwnedByLabel:          GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
 					"extra-node-label-l1": "test",
 				},
 			},

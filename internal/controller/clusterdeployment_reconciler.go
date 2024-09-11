@@ -18,11 +18,13 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -200,30 +202,35 @@ func updateCIDeploymentConditions(cd *hivev1.ClusterDeployment, ci *v1alpha1.Clu
 	}
 }
 
-func clusterInstanceOwner(ownerRefs []metav1.OwnerReference) string {
-	for _, ownerRef := range ownerRefs {
-		if ownerRef.Kind == v1alpha1.ClusterInstanceKind {
-			return ownerRef.Name
-		}
-	}
-	return ""
+func getClusterInstanceOwner(labels map[string]string) string {
+	return labels[ci.OwnedByLabel]
 }
-func isOwnedByClusterInstance(ownerRefs []metav1.OwnerReference) bool {
-	return clusterInstanceOwner(ownerRefs) != ""
+func isOwnedByClusterInstance(labels map[string]string) bool {
+	return getClusterInstanceOwner(labels) != ""
 }
 
 func (r *ClusterDeploymentReconciler) getClusterInstance(
 	ctx context.Context,
 	cd *hivev1.ClusterDeployment,
 ) (*v1alpha1.ClusterInstance, error) {
-	clusterInstanceRef := clusterInstanceOwner(cd.GetOwnerReferences())
-	if clusterInstanceRef == "" {
-		r.Log.Info("ClusterInstance owner-reference not found for ClusterDeployment", "name", cd.Name)
+	ownedBy := getClusterInstanceOwner(cd.Labels)
+	if ownedBy == "" {
+		r.Log.Info("ClusterInstance owner reference not found for ClusterDeployment", "name", cd.Name)
 		return nil, nil
 	}
 
+	clusterInstanceRef, err := ci.GetNamespacedNameFromOwnedByLabel(ownedBy)
+	if err != nil {
+		return nil, err
+	}
+
+	if clusterInstanceRef.Namespace != cd.Namespace {
+		return nil, fmt.Errorf("ClusterDeployment namespace [%s] does not match ClusterInstance namespace [%s]",
+			cd.Namespace, clusterInstanceRef.Namespace)
+	}
+
 	clusterInstance := &v1alpha1.ClusterInstance{}
-	if err := r.Get(ctx, types.NamespacedName{Name: clusterInstanceRef, Namespace: cd.Namespace},
+	if err := r.Get(ctx, clusterInstanceRef,
 		clusterInstance); err != nil {
 		if errors.IsNotFound(err) {
 			r.Log.Info("ClusterInstance not found", "name", clusterInstanceRef)
@@ -267,11 +274,11 @@ func (r *ClusterDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			builder.WithPredicates(predicate.Funcs{
 				GenericFunc: func(e event.GenericEvent) bool { return false },
 				CreateFunc: func(e event.CreateEvent) bool {
-					return isOwnedByClusterInstance(e.Object.GetOwnerReferences())
+					return isOwnedByClusterInstance(e.Object.GetLabels())
 				},
 				DeleteFunc: func(e event.DeleteEvent) bool { return false },
 				UpdateFunc: func(e event.UpdateEvent) bool {
-					return isOwnedByClusterInstance(e.ObjectNew.GetOwnerReferences())
+					return isOwnedByClusterInstance(e.ObjectNew.GetLabels())
 				},
 			})).
 		WatchesRawSource(source.Kind(mgr.GetCache(), &v1alpha1.ClusterInstance{}),
