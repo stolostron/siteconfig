@@ -141,7 +141,8 @@ spec:
   searchCollector:
     enabled: false`
 
-const NMStateConfig = `apiVersion: agent-install.openshift.io/v1beta1
+const NMStateConfig = `{{ if .SpecialVars.CurrentNode.NodeNetwork }}
+apiVersion: agent-install.openshift.io/v1beta1
 kind: NMStateConfig
 metadata:
   annotations:
@@ -154,7 +155,8 @@ spec:
   config:
 {{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig | toYaml | indent 4}}
   interfaces:
-{{ .SpecialVars.CurrentNode.NodeNetwork.Interfaces | toYaml | indent 4 }}`
+{{ .SpecialVars.CurrentNode.NodeNetwork.Interfaces | toYaml | indent 4 }}
+{{ end }}`
 
 const ManagedCluster = `apiVersion: cluster.open-cluster-management.io/v1
 kind: ManagedCluster
