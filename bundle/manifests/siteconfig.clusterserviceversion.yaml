@@ -380,18 +380,6 @@ spec:
           - get
           - patch
           - update
-        - apiGroups:
-          - authentication.k8s.io
-          resources:
-          - tokenreviews
-          verbs:
-          - create
-        - apiGroups:
-          - authorization.k8s.io
-          resources:
-          - subjectaccessreviews
-          verbs:
-          - create
         serviceAccountName: siteconfig-controller-manager
       deployments:
       - label:
@@ -532,12 +520,17 @@ spec:
   - supported: true
     type: AllNamespaces
   keywords:
-  - a
-  - v
-  - x
+  - SiteConfig
+  - install
+  - edge
   links:
-  - name: Siteconfig
-    url: https://siteconfig.domain
+  - name: SiteConfig Operator
+    url: https://github.com/stolostron/siteconfig
+  maintainers:
+  - email: sakhoury@redhat.com
+    name: Sharat Akhoury
+  - email: ncarboni@redhat.com
+    name: Nick Carboni
   maturity: alpha
   provider:
     name: Red Hat
