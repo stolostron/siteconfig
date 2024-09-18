@@ -303,6 +303,9 @@ spec:
                       description: |-
                         IronicInspect is used to specify if automatic introspection carried out during registration of BMH is enabled or
                         disabled
+                      enum:
+                      - ""
+                      - disabled
                       type: string
                     nodeLabels:
                       additionalProperties:
@@ -469,6 +472,17 @@ spec:
                   - templateRefs
                   type: object
                 type: array
+              platformType:
+                description: PlatformType is the name for the specific platform upon
+                  which to perform the installation.
+                enum:
+                - ""
+                - BareMetal
+                - None
+                - VSphere
+                - Nutanix
+                - External
+                type: string
               proxy:
                 description: Proxy defines the proxy settings used for the install
                   config
