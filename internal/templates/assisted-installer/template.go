@@ -63,6 +63,9 @@ spec:
   proxy:
 {{ .Spec.Proxy | toYaml | indent 4 }}
 {{ end }}
+{{ if .Spec.PlatformType }}
+  platformType: "{{ .Spec.PlatformType }}"
+{{ end }}
   sshPublicKey: "{{ .Spec.SSHPublicKey }}"
 {{ if gt (len .Spec.ExtraManifestsRefs) 0 }}
   manifestsConfigMapRefs:
