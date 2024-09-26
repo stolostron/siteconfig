@@ -334,6 +334,9 @@ func GetMockNetConfig() *NetConfigData {
 func GetMockBasicClusterTemplate(kind string) string {
 	return fmt.Sprintf(`apiVersion: test.io/v1
 kind: %s
+metadata:
+  name: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
 spec:
   name: "{{ .Spec.ClusterName }}"`, kind)
 }
@@ -341,6 +344,9 @@ spec:
 func GetMockBasicNodeTemplate(kind string) string {
 	return fmt.Sprintf(`apiVersion: test.io/v1
 kind: %s
+metadata:
+  name: "{{ .SpecialVars.CurrentNode.HostName }}"
+  namespace: "{{ .Spec.ClusterName }}"
 spec:
   name: "{{ .SpecialVars.CurrentNode.HostName }}"`, kind)
 }

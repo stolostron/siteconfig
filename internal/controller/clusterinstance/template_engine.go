@@ -50,50 +50,54 @@ func (te *TemplateEngine) ProcessTemplates(
 	ctx context.Context,
 	c client.Client,
 	clusterInstance v1alpha1.ClusterInstance,
-) ([]interface{}, error) {
+) (RenderedObjectCollection, error) {
 
-	te.Log.Info(fmt.Sprintf("Processing cluster-level templates for ClusterInstance %s", clusterInstance.Name))
+	var renderedObjects RenderedObjectCollection
+	te.Log.Info(fmt.Sprintf("Started processing cluster-level install templates for ClusterInstance %s", clusterInstance.Name))
 
-	// Render cluster-level templates
-	clusterManifests, err := te.renderTemplates(ctx, c, &clusterInstance, nil)
+	// Render cluster-level install templates
+	clusterObjects, err := te.renderTemplates(ctx, c, &clusterInstance, nil)
 	if err != nil {
 		te.Log.Info(
 			fmt.Sprintf(
-				"encountered error while processing cluster-level templates for ClusterInstance %s, err: %s",
+				"encountered error while processing cluster-level install templates for ClusterInstance %s, err: %s",
 				clusterInstance.Name, err.Error()))
-		return clusterManifests, err
+		return renderedObjects, err
 	}
-	te.Log.Info(fmt.Sprintf("Processed cluster-level templates for ClusterInstance %s", clusterInstance.Name))
 
-	// Process node-level templates
+	if err := renderedObjects.AddObjects(clusterObjects); err != nil {
+		return renderedObjects, err
+	}
+	te.Log.Info(fmt.Sprintf("Finished processing cluster-level install templates for ClusterInstance %s", clusterInstance.Name))
+
+	// Process node-level install templates
 	numNodes := len(clusterInstance.Spec.Nodes)
 	for nodeId, node := range clusterInstance.Spec.Nodes {
 		te.Log.Info(
 			fmt.Sprintf(
-				"Processing node-level templates for ClusterInstance %s [node: %d of %d]",
+				"Started processing node-level install templates for ClusterInstance %s [node: %d of %d]",
 				clusterInstance.Name, nodeId+1, numNodes))
 
 		// Render node-level templates
-		nodeManifests, err := te.renderTemplates(ctx, c, &clusterInstance, &node)
+		nodeObjects, err := te.renderTemplates(ctx, c, &clusterInstance, &node)
 		if err != nil {
 			te.Log.Info(
 				fmt.Sprintf(
-					"encountered error while processing node-level templates for ClusterInstance %s [%d of %d], err: %s",
+					"encountered error while processing node-level install templates for ClusterInstance %s [%d of %d], err: %s",
 					clusterInstance.Name, nodeId+1, numNodes, err.Error()))
-			return clusterManifests, err
+			return renderedObjects, err
 		}
-		te.Log.Info(fmt.Sprintf(
-			"Processed node-level templates for ClusterInstance %s [node: %d of %d]",
-			clusterInstance.Name, nodeId+1, numNodes))
 
-		for _, nodeCR := range nodeManifests {
-			if nodeCR != nil {
-				clusterManifests = append(clusterManifests, nodeCR)
-			}
+		if err := renderedObjects.AddObjects(nodeObjects); err != nil {
+			return renderedObjects, err
 		}
+
+		te.Log.Info(fmt.Sprintf(
+			"Finished processing node-level install templates for ClusterInstance %s [node: %d of %d]",
+			clusterInstance.Name, nodeId+1, numNodes))
 	}
 
-	return clusterManifests, nil
+	return renderedObjects, nil
 }
 
 func (te *TemplateEngine) renderTemplates(
@@ -101,11 +105,11 @@ func (te *TemplateEngine) renderTemplates(
 	c client.Client,
 	clusterInstance *v1alpha1.ClusterInstance,
 	node *v1alpha1.NodeSpec,
-) ([]interface{}, error) {
+) ([]RenderedObject, error) {
 
 	var (
-		manifests    []interface{}
-		templateRefs []v1alpha1.TemplateRef
+		renderedObjects []RenderedObject
+		templateRefs    []v1alpha1.TemplateRef
 	)
 
 	// Determine whether templateRefs are cluster-based or node-based
@@ -126,79 +130,33 @@ func (te *TemplateEngine) renderTemplates(
 			Namespace: templateRef.Namespace,
 		}, templatesConfigMap); err != nil {
 			te.Log.Info(fmt.Sprintf("renderTemplates: failed to get ConfigMap, err: %s", err.Error()))
-			return manifests, err
+			return renderedObjects, err
 		}
 
 		// process Template ConfigMap
 		for templateKey, template := range templatesConfigMap.Data {
 
-			manifest, err := te.renderManifestFromTemplate(
+			object, err := te.renderManifestFromTemplate(
 				clusterInstance,
 				node,
 				templateRef.Name,
 				templateKey,
 				template)
 			if err != nil {
-				return nil, err
+				return renderedObjects, err
 			}
-			if manifest != nil {
-				manifests = append(manifests, manifest)
-			}
+			renderedObjects = append(renderedObjects, object)
 		}
 	}
-	return manifests, nil
+	return renderedObjects, nil
 }
 
-func (te *TemplateEngine) renderManifestFromTemplate(
+func appendAnnotationsAndLabels(
 	clusterInstance *v1alpha1.ClusterInstance,
 	node *v1alpha1.NodeSpec,
-	templateRefName, templateKey, template string,
-) (map[string]interface{}, error) {
-
-	clusterData, err := buildClusterData(clusterInstance, node)
-	if err != nil {
-		te.Log.Error(err,
-			fmt.Sprintf("renderTemplates: failed to build ClusterInstance data for ClusterInstance %s",
-				clusterInstance.Name))
-		return nil, err
-	}
-
-	manifest, err := te.render(templateKey, template, clusterData)
-	if err != nil {
-		te.Log.Error(err,
-			fmt.Sprintf("renderTemplates: failed to render templateRef %s for ClusterInstance %s",
-				templateRefName, clusterInstance.Name))
-		return nil, err
-	}
-
-	if manifest == nil {
-		return nil, nil
-	}
-
-	var (
-		kind string
-		ok   bool
-	)
-	if kind, ok = manifest["kind"].(string); !ok {
-		return nil, fmt.Errorf("missing kind in template %s", templateKey)
-	}
-
-	suppressedManifests := clusterInstance.Spec.SuppressedManifests
-	if node != nil {
-		suppressedManifests = append(suppressedManifests, node.SuppressedManifests...)
-	}
-
-	if suppressManifest(kind, suppressedManifests) {
-		te.Log.Info(fmt.Sprintf("renderTemplates: suppressing manifest %s for ClusterInstance %s",
-			kind, clusterInstance.Name))
-		return nil, nil
-	}
-
-	// Add owned-by label
-	manifest = appendManifestLabels(map[string]string{
-		OwnedByLabel: GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
-	}, manifest)
-
+	manifest map[string]interface{},
+	kind string,
+) map[string]interface{} {
 	if node == nil {
 		// Append cluster-level user provided extra annotations if exist
 		if extraManifestAnnotations, ok := clusterInstance.Spec.ExtraAnnotationSearch(kind); ok {
@@ -220,8 +178,109 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 			manifest = appendManifestLabels(extraManifestLabels, manifest)
 		}
 	}
+	return manifest
+}
 
-	return manifest, nil
+func (te *TemplateEngine) renderManifestFromTemplate(
+	clusterInstance *v1alpha1.ClusterInstance,
+	node *v1alpha1.NodeSpec,
+	templateRefName, templateKey, template string,
+) (RenderedObject, error) {
+
+	var object RenderedObject
+
+	clusterData, err := buildClusterData(clusterInstance, node)
+	if err != nil {
+		te.Log.Error(err,
+			fmt.Sprintf("renderTemplates: failed to build ClusterInstance data for ClusterInstance %s",
+				clusterInstance.Name))
+		return object, err
+	}
+
+	manifest, err := te.render(templateKey, template, clusterData)
+	if err != nil {
+		te.Log.Error(err,
+			fmt.Sprintf("renderTemplates: failed to render templateRef %s for ClusterInstance %s",
+				templateRefName, clusterInstance.Name))
+		return object, err
+	}
+	if manifest == nil {
+		return object, nil
+	}
+
+	if err := object.SetObject(manifest); err != nil {
+		te.Log.Error(err,
+			fmt.Sprintf("renderTemplates: failed to parse rendered template templateRef %s for ClusterInstance %s",
+				templateRefName, clusterInstance.Name))
+		return object, err
+	}
+
+	apiVersion := object.GetAPIVersion()
+	kind := object.GetKind()
+	name := object.GetName()
+	namespace := object.GetNamespace()
+
+	// Default action is to render the manifest
+	object.action = actionRender
+
+	// Determine if manifest should be pruned or suppressed
+	suppressManifestLogMsg := fmt.Sprintf("renderTemplates: suppressed manifest %s for ClusterInstance %s",
+		GetResourceId(name, namespace, kind), clusterInstance.Name)
+	pruneList := clusterInstance.Spec.PruneManifests
+	suppressManifestsList := clusterInstance.Spec.SuppressedManifests
+	if node != nil {
+		pruneList = append(pruneList, node.PruneManifests...)
+		suppressManifestsList = append(suppressManifestsList, node.SuppressedManifests...)
+	}
+	if pruneManifest(v1alpha1.ResourceRef{APIVersion: apiVersion, Kind: kind}, pruneList) {
+		object.action = actionPrune
+		te.Log.Info(suppressManifestLogMsg)
+		return object, nil
+	}
+	if suppressManifest(kind, suppressManifestsList) {
+		object.action = actionSuppress
+		te.Log.Info(suppressManifestLogMsg)
+		return object, nil
+	}
+
+	// Append Annotations and Labels to rendered manifest
+	updatedManifest := appendAnnotationsAndLabels(clusterInstance, node, object.GetObject().Object, kind)
+
+	// Add owned-by label
+	updatedManifest = appendManifestLabels(map[string]string{
+		OwnedByLabel: GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+	}, updatedManifest)
+
+	// Update the rendered object with the labels and annotations applied above
+	if err := object.SetObject(updatedManifest); err != nil {
+		te.Log.Error(err,
+			fmt.Sprintf("renderTemplates: failed to parse rendered template templateRef %s for ClusterInstance %s",
+				templateRefName, clusterInstance.Name))
+		return object, err
+	}
+
+	return object, nil
+}
+
+func validateRenderedTemplate(manifest map[string]interface{}, templateKey string) error {
+	if _, ok := manifest["apiVersion"].(string); !ok {
+		return fmt.Errorf("missing apiVersion in template %s", templateKey)
+	}
+
+	if _, ok := manifest["kind"].(string); !ok {
+		return fmt.Errorf("missing kind in template %s", templateKey)
+	}
+
+	if metadata, ok := manifest["metadata"].(map[string]interface{}); ok {
+		if _, ok := metadata["name"].(string); !ok {
+			return fmt.Errorf("missing metadata.name in template %s", templateKey)
+		}
+	} else {
+		return fmt.Errorf("missing metadata in template %s", templateKey)
+	}
+
+	// all validations passed
+	return nil
 }
 
 func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterData) (map[string]interface{}, error) {
@@ -245,7 +304,7 @@ func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterD
 			if err := yaml.Unmarshal(buffer.Bytes(), &renderedTemplate); err != nil {
 				return renderedTemplate, err
 			}
-			return renderedTemplate, nil
+			return renderedTemplate, validateRenderedTemplate(renderedTemplate, templateKey)
 		}
 	}
 
