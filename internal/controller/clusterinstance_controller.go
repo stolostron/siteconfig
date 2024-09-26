@@ -267,27 +267,27 @@ func (r *ClusterInstanceReconciler) handleValidate(
 
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
 
-	newCond := metav1.Condition{Type: string(conditions.ClusterInstanceValidated)}
+	newCond := metav1.Condition{Type: string(v1alpha1.ClusterInstanceValidated)}
 	r.Log.Info("Starting validation", "ClusterInstance", clusterInstance.Name)
 	err := ci.Validate(ctx, r.Client, clusterInstance)
 	if err != nil {
 		r.Log.Error(err, "ClusterInstance validation failed due to error", "ClusterInstance", clusterInstance.Name)
 
-		newCond.Reason = string(conditions.Failed)
+		newCond.Reason = string(v1alpha1.Failed)
 		newCond.Status = metav1.ConditionFalse
 		newCond.Message = fmt.Sprintf("Validation failed: %s", err.Error())
 
 	} else {
 		r.Log.Info("Validation succeeded", "ClusterInstance", clusterInstance.Name)
 
-		newCond.Reason = string(conditions.Completed)
+		newCond.Reason = string(v1alpha1.Completed)
 		newCond.Status = metav1.ConditionTrue
 		newCond.Message = "Validation succeeded"
 	}
 	r.Log.Info("Finished validation", "ClusterInstance", clusterInstance.Name)
 
-	conditions.SetStatusCondition(&clusterInstance.Status.Conditions, conditions.ConditionType(newCond.Type),
-		conditions.ConditionReason(newCond.Reason), newCond.Status, newCond.Message)
+	conditions.SetStatusCondition(&clusterInstance.Status.Conditions, v1alpha1.ClusterInstanceConditionType(newCond.Type),
+		v1alpha1.ClusterInstanceConditionReason(newCond.Reason), newCond.Status, newCond.Message)
 
 	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
@@ -312,14 +312,14 @@ func (r *ClusterInstanceReconciler) renderManifests(
 	if err != nil {
 		r.Log.Error(err, "Failed to render manifests", "ClusterInstance", clusterInstance.Name)
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			conditions.RenderedTemplates,
-			conditions.Failed,
+			v1alpha1.RenderedTemplates,
+			v1alpha1.Failed,
 			metav1.ConditionFalse,
 			fmt.Sprintf("Failed to render templates, err= %s", err))
 	} else {
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			conditions.RenderedTemplates,
-			conditions.Completed,
+			v1alpha1.RenderedTemplates,
+			v1alpha1.Completed,
 			metav1.ConditionTrue,
 			"Rendered templates successfully")
 	}
@@ -485,14 +485,14 @@ func (r *ClusterInstanceReconciler) validateRenderedManifests(
 		r.Log.Info(msg)
 
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			conditions.RenderedTemplatesValidated,
-			conditions.Failed,
+			v1alpha1.RenderedTemplatesValidated,
+			v1alpha1.Failed,
 			metav1.ConditionFalse,
 			"Rendered manifests failed dry-run validation")
 	} else {
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			conditions.RenderedTemplatesValidated,
-			conditions.Completed,
+			v1alpha1.RenderedTemplatesValidated,
+			v1alpha1.Completed,
 			metav1.ConditionTrue,
 			"Rendered templates validation succeeded")
 	}
@@ -530,14 +530,14 @@ func (r *ClusterInstanceReconciler) applyRenderedManifests(
 		r.Log.Info(msg)
 
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			conditions.RenderedTemplatesApplied,
-			conditions.Failed,
+			v1alpha1.RenderedTemplatesApplied,
+			v1alpha1.Failed,
 			metav1.ConditionFalse,
 			"Failed to apply site config manifests")
 	} else {
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			conditions.RenderedTemplatesApplied,
-			conditions.Completed,
+			v1alpha1.RenderedTemplatesApplied,
+			v1alpha1.Completed,
 			metav1.ConditionTrue,
 			"Applied site config manifests")
 	}
