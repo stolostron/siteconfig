@@ -179,8 +179,9 @@ metadata:
     siteconfig.open-cluster-management.io/sync-wave: "1"
     inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
 {{ if .SpecialVars.CurrentNode.NodeLabels }}
-    bmac.agent-install.openshift.io.node-label:
-{{ .SpecialVars.CurrentNode.NodeLabels | toYaml | indent 6 }}
+{{ range $key, $value := .SpecialVars.CurrentNode.NodeLabels }}
+    bmac.agent-install.openshift.io.node-label.{{ $key }}: {{ $value | quote}}
+{{ end }}
 {{ end }}
     bmac.agent-install.openshift.io/hostname: "{{ .SpecialVars.CurrentNode.HostName }}"
 {{ if .SpecialVars.CurrentNode.InstallerArgs  }}

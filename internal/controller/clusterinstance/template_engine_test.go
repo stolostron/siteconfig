@@ -79,6 +79,11 @@ func TestTemplateEngine_render(t *testing.T) {
 				InstallerArgs:          "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
 				IgnitionConfigOverride: "{\"ignition\": {\"version\": \"3.1.0\"}, \"storage\": {\"files\": [{\"path\": \"/etc/containers/registries.conf\", \"overwrite\": true, \"contents\": {\"source\": \"data:text/plain;base64,foobar==\"}}]}}",
 				TemplateRefs:           []v1alpha1.TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+				NodeLabels: map[string]string{
+					"node-role.kubernetes.io/infra":  "",
+					"node-role.kubernetes.io/master": "",
+					"foo":                            "bar",
+				},
 				NodeNetwork: &aiv1beta1.NMStateConfigSpec{
 					NetConfig:  aiv1beta1.NetConfig{Raw: []byte(NetConfig.RawNetConfig())},
 					Interfaces: NetConfig.Interfaces,
@@ -167,6 +172,44 @@ func TestTemplateEngine_render(t *testing.T) {
 				"spec": map[string]interface{}{
 					"config":     NetConfig.Config,
 					"interfaces": NetConfig.GetInterfaces(),
+				},
+			},
+			wantErr: false,
+		},
+
+		{
+			name: "Test with valid BMH-like template",
+			args: args{
+				templateType: "BareMetalHost",
+				templateStr: `apiVersion: metal3.io/v1alpha1
+kind: BareMetalHost
+metadata:
+  name: "{{ .SpecialVars.CurrentNode.HostName }}"
+  namespace: "{{ .Spec.ClusterName }}"
+  annotations:
+    siteconfig.open-cluster-management.io/sync-wave: "1"
+    inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
+{{ if .SpecialVars.CurrentNode.NodeLabels }}
+{{ range $key, $value := .SpecialVars.CurrentNode.NodeLabels }}
+    bmac.agent-install.openshift.io.node-label.{{ $key }}: {{ $value | quote}}
+{{ end }}
+{{ end }}
+`,
+				data: TestData,
+			},
+			want: map[string]interface{}{
+				"apiVersion": "metal3.io/v1alpha1",
+				"kind":       "BareMetalHost",
+				"metadata": map[string]interface{}{
+					"annotations": map[string]interface{}{
+						"siteconfig.open-cluster-management.io/sync-wave": "1",
+						"inspect.metal3.io": "enabled",
+						"bmac.agent-install.openshift.io.node-label.node-role.kubernetes.io/infra":  "",
+						"bmac.agent-install.openshift.io.node-label.node-role.kubernetes.io/master": "",
+						"bmac.agent-install.openshift.io.node-label.foo":                            "bar",
+					},
+					"name":      "node1",
+					"namespace": "site-sno-du-1",
 				},
 			},
 			wantErr: false,
