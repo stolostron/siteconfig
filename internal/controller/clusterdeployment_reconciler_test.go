@@ -215,8 +215,8 @@ var _ = Describe("Reconcile", func() {
 
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			conditions.Provisioned,
-			conditions.InProgress,
+			v1alpha1.ClusterProvisioned,
+			v1alpha1.InProgress,
 			metav1.ConditionTrue,
 			"Provisioning cluster")
 		err := conditions.UpdateCIStatus(ctx, c, clusterInstance)
@@ -359,9 +359,9 @@ var _ = Describe("Reconcile", func() {
 		Expect(c.Get(ctx, key, ci)).To(Succeed())
 
 		expectedCondition := &metav1.Condition{
-			Type:   string(conditions.Provisioned),
+			Type:   string(v1alpha1.ClusterProvisioned),
 			Status: metav1.ConditionTrue,
-			Reason: string(conditions.Completed),
+			Reason: string(v1alpha1.Completed),
 		}
 
 		found := conditions.FindStatusCondition(ci.Status.Conditions, expectedCondition.Type)
@@ -425,9 +425,9 @@ var _ = Describe("Reconcile", func() {
 		Expect(c.Get(ctx, key, ci)).To(Succeed())
 
 		expectedCondition := &metav1.Condition{
-			Type:   string(conditions.Provisioned),
+			Type:   string(v1alpha1.ClusterProvisioned),
 			Status: metav1.ConditionFalse,
-			Reason: string(conditions.Failed),
+			Reason: string(v1alpha1.Failed),
 		}
 
 		found := conditions.FindStatusCondition(ci.Status.Conditions, expectedCondition.Type)
@@ -499,9 +499,9 @@ var _ = Describe("Reconcile", func() {
 		Expect(c.Get(ctx, key, ci)).To(Succeed())
 
 		expectedCondition := &metav1.Condition{
-			Type:   string(conditions.Provisioned),
+			Type:   string(v1alpha1.ClusterProvisioned),
 			Status: metav1.ConditionUnknown,
-			Reason: string(conditions.StaleConditions),
+			Reason: string(v1alpha1.StaleConditions),
 		}
 
 		found := conditions.FindStatusCondition(ci.Status.Conditions, expectedCondition.Type)

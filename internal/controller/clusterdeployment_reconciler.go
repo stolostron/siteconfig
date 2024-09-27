@@ -81,12 +81,12 @@ func (r *ClusterDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// Initialize ClusterInstance Provisioned status if not found
 	if provisionedStatus := meta.FindStatusCondition(
 		clusterInstance.Status.Conditions,
-		string(conditions.Provisioned),
+		string(v1alpha1.ClusterProvisioned),
 	); provisionedStatus == nil {
 		r.Log.Info("Initializing Provisioned condition", "ClusterInstance", clusterInstance.Name)
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			conditions.Provisioned,
-			conditions.Unknown,
+			v1alpha1.ClusterProvisioned,
+			v1alpha1.Unknown,
 			metav1.ConditionUnknown,
 			"Waiting for provisioning to start")
 	}
@@ -130,8 +130,8 @@ func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.Cluste
 		// Check for successful provisioning
 		if installStopped.Status == corev1.ConditionTrue && installCompleted.Status == corev1.ConditionTrue {
 			conditions.SetStatusCondition(&ci.Status.Conditions,
-				conditions.Provisioned,
-				conditions.Completed,
+				v1alpha1.ClusterProvisioned,
+				v1alpha1.Completed,
 				metav1.ConditionTrue,
 				"Provisioning completed")
 			return
@@ -140,8 +140,8 @@ func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.Cluste
 		//  - either Stopped OR Completed deployment conditions are reflecting a `ConditionFalse` status
 		if installStopped.Status == corev1.ConditionFalse || installCompleted.Status == corev1.ConditionFalse {
 			conditions.SetStatusCondition(&ci.Status.Conditions,
-				conditions.Provisioned,
-				conditions.StaleConditions,
+				v1alpha1.ClusterProvisioned,
+				v1alpha1.StaleConditions,
 				metav1.ConditionUnknown,
 				"ClusterDeployment Spec.Installed=true, but Status.Conditions are not updated")
 			return
@@ -151,8 +151,8 @@ func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.Cluste
 	// Check whether cluster has failed provisioning
 	if installStopped.Status == corev1.ConditionTrue && installFailed.Status == corev1.ConditionTrue {
 		conditions.SetStatusCondition(&ci.Status.Conditions,
-			conditions.Provisioned,
-			conditions.Failed,
+			v1alpha1.ClusterProvisioned,
+			v1alpha1.Failed,
 			metav1.ConditionFalse,
 			"Provisioning failed")
 		return
@@ -161,8 +161,8 @@ func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.Cluste
 	// Check whether provisioning is in-progress
 	if installStopped.Status == corev1.ConditionFalse {
 		conditions.SetStatusCondition(&ci.Status.Conditions,
-			conditions.Provisioned,
-			conditions.InProgress,
+			v1alpha1.ClusterProvisioned,
+			v1alpha1.InProgress,
 			metav1.ConditionFalse,
 			"Provisioning cluster")
 	}

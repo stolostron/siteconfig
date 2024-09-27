@@ -12,37 +12,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// ConditionType is a string representing the condition's type
-type ConditionType string
-
-// The following constants define the different types of conditions that will be set
-const (
-	ClusterInstanceValidated   ConditionType = "ClusterInstanceValidated"
-	RenderedTemplates          ConditionType = "RenderedTemplates"
-	RenderedTemplatesValidated ConditionType = "RenderedTemplatesValidated"
-	RenderedTemplatesApplied   ConditionType = "RenderedTemplatesApplied"
-	Provisioned                ConditionType = "Provisioned"
-)
-
-// ConditionReason is a string representing the condition's reason
-type ConditionReason string
-
-// The following constants define the different reasons that conditions will be set for
-const (
-	Completed       ConditionReason = "Completed"
-	Failed          ConditionReason = "Failed"
-	TimedOut        ConditionReason = "TimedOut"
-	InProgress      ConditionReason = "InProgress"
-	Unknown         ConditionReason = "Unknown"
-	StaleConditions ConditionReason = "StaleConditions"
-)
-
 // SetStatusCondition is a convenience wrapper for meta.SetStatusCondition that takes in the types defined here and
 // converts them to strings
 func SetStatusCondition(
 	existingConditions *[]metav1.Condition,
-	conditionType ConditionType,
-	conditionReason ConditionReason,
+	conditionType v1alpha1.ClusterInstanceConditionType,
+	conditionReason v1alpha1.ClusterInstanceConditionReason,
 	conditionStatus metav1.ConditionStatus,
 	message string,
 ) {

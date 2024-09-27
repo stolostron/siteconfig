@@ -26,7 +26,6 @@ import (
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
-	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -862,7 +861,7 @@ var _ = Describe("handleValidate", func() {
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		matched := false
 		for _, cond := range clusterInstance.Status.Conditions {
-			if cond.Type == string(conditions.ClusterInstanceValidated) && cond.Status == metav1.ConditionTrue {
+			if cond.Type == string(v1alpha1.ClusterInstanceValidated) && cond.Status == metav1.ConditionTrue {
 				matched = true
 			}
 		}
@@ -883,7 +882,7 @@ var _ = Describe("handleValidate", func() {
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		matched := false
 		for _, cond := range clusterInstance.Status.Conditions {
-			if cond.Type == string(conditions.ClusterInstanceValidated) && cond.Status == metav1.ConditionFalse {
+			if cond.Type == string(v1alpha1.ClusterInstanceValidated) && cond.Status == metav1.ConditionFalse {
 				matched = true
 			}
 		}
@@ -893,8 +892,8 @@ var _ = Describe("handleValidate", func() {
 	It("does not require a reconcile when the ClusterInstanceValidated condition remains unchanged", func() {
 		clusterInstance.Status.Conditions = []metav1.Condition{
 			{
-				Type:    string(conditions.ClusterInstanceValidated),
-				Reason:  string(conditions.Completed),
+				Type:    string(v1alpha1.ClusterInstanceValidated),
+				Reason:  string(v1alpha1.Completed),
 				Status:  metav1.ConditionTrue,
 				Message: "Validation succeeded",
 			},
@@ -911,7 +910,7 @@ var _ = Describe("handleValidate", func() {
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		matched := false
 		for _, cond := range clusterInstance.Status.Conditions {
-			if cond.Type == string(conditions.ClusterInstanceValidated) && cond.Status == metav1.ConditionTrue {
+			if cond.Type == string(v1alpha1.ClusterInstanceValidated) && cond.Status == metav1.ConditionTrue {
 				matched = true
 			}
 		}
@@ -921,8 +920,8 @@ var _ = Describe("handleValidate", func() {
 	It("requires a reconcile when the ClusterInstanceValidated condition has changed", func() {
 		clusterInstance.Status.Conditions = []metav1.Condition{
 			{
-				Type:    string(conditions.ClusterInstanceValidated),
-				Reason:  string(conditions.Failed),
+				Type:    string(v1alpha1.ClusterInstanceValidated),
+				Reason:  string(v1alpha1.Failed),
 				Status:  metav1.ConditionFalse,
 				Message: "Validation failed",
 			},
@@ -939,7 +938,7 @@ var _ = Describe("handleValidate", func() {
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		matched := false
 		for _, cond := range clusterInstance.Status.Conditions {
-			if cond.Type == string(conditions.ClusterInstanceValidated) && cond.Status == metav1.ConditionTrue {
+			if cond.Type == string(v1alpha1.ClusterInstanceValidated) && cond.Status == metav1.ConditionTrue {
 				matched = true
 			}
 		}
@@ -1039,11 +1038,11 @@ spec:
 
 		matched := false
 		for _, cond := range clusterInstance.Status.Conditions {
-			if cond.Type == string(conditions.RenderedTemplates) && cond.Status == metav1.ConditionFalse {
+			if cond.Type == string(v1alpha1.RenderedTemplates) && cond.Status == metav1.ConditionFalse {
 				matched = true
 			}
 		}
-		Expect(matched).To(Equal(true), "Condition %s was not found", conditions.RenderedTemplates)
+		Expect(matched).To(Equal(true), "Condition %s was not found", v1alpha1.RenderedTemplates)
 	})
 
 	It("successfully renders templates and updates the status correctly", func() {
@@ -1097,23 +1096,23 @@ spec:
 
 		expectedConditions := []metav1.Condition{
 			{
-				Type:   string(conditions.ClusterInstanceValidated),
-				Reason: string(conditions.Completed),
+				Type:   string(v1alpha1.ClusterInstanceValidated),
+				Reason: string(v1alpha1.Completed),
 				Status: metav1.ConditionTrue,
 			},
 			{
-				Type:   string(conditions.RenderedTemplates),
-				Reason: string(conditions.Completed),
+				Type:   string(v1alpha1.RenderedTemplates),
+				Reason: string(v1alpha1.Completed),
 				Status: metav1.ConditionTrue,
 			},
 			{
-				Type:   string(conditions.RenderedTemplatesValidated),
-				Reason: string(conditions.Completed),
+				Type:   string(v1alpha1.RenderedTemplatesValidated),
+				Reason: string(v1alpha1.Completed),
 				Status: metav1.ConditionTrue,
 			},
 			{
-				Type:   string(conditions.RenderedTemplatesApplied),
-				Reason: string(conditions.Completed),
+				Type:   string(v1alpha1.RenderedTemplatesApplied),
+				Reason: string(v1alpha1.Completed),
 				Status: metav1.ConditionTrue,
 			},
 		}

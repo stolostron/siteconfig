@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
+	"github.com/stolostron/siteconfig/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -72,7 +73,7 @@ func TestFindCDConditionType(t *testing.T) {
 
 func TestFindStatusCondition(t *testing.T) {
 	condition := metav1.Condition{
-		Type:   string(ClusterInstanceValidated),
+		Type:   string(v1alpha1.ClusterInstanceValidated),
 		Status: metav1.ConditionTrue,
 	}
 	type args struct {
@@ -89,14 +90,14 @@ func TestFindStatusCondition(t *testing.T) {
 			args: args{
 				conditions: []metav1.Condition{
 					{
-						Type: string(RenderedTemplates),
+						Type: string(v1alpha1.RenderedTemplates),
 					},
 					{
-						Type: string(RenderedTemplatesValidated),
+						Type: string(v1alpha1.RenderedTemplatesValidated),
 					},
 					condition,
 					{
-						Type: string(RenderedTemplatesApplied),
+						Type: string(v1alpha1.RenderedTemplatesApplied),
 					},
 				},
 				conditionType: condition.Type,
@@ -108,13 +109,13 @@ func TestFindStatusCondition(t *testing.T) {
 			args: args{
 				conditions: []metav1.Condition{
 					{
-						Type: string(RenderedTemplates),
+						Type: string(v1alpha1.RenderedTemplates),
 					},
 					{
-						Type: string(RenderedTemplatesValidated),
+						Type: string(v1alpha1.RenderedTemplatesValidated),
 					},
 					{
-						Type: string(RenderedTemplatesApplied),
+						Type: string(v1alpha1.RenderedTemplatesApplied),
 					},
 				},
 				conditionType: condition.Type,
