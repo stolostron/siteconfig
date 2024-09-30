@@ -15,7 +15,7 @@ COPY api/ api/
 COPY internal/ internal/
 
 # Build the binaries
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -mod=vendor -a -o build/manager cmd/main.go
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -mod=vendor -a -o build/manager cmd/main.go
 
 #####################################################################################################
 # Build the controller image
