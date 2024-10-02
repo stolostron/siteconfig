@@ -34,7 +34,7 @@ spec:
 {{ .Spec.CaBundleRef | toYaml | indent 4 }}
 {{ end }}
 {{ if gt (len .Spec.ExtraManifestsRefs) 0 }}
-  extraManifestsRef:
+  extraManifestsRefs:
 {{ .Spec.ExtraManifestsRefs | toYaml | indent 4 }}
 {{ end }}
   bareMetalHostRef:
