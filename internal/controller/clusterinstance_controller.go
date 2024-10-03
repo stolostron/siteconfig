@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"time"
 
@@ -336,42 +337,93 @@ func (r *ClusterInstanceReconciler) renderManifests(
 	return renderedObjects, err
 }
 
+// Copy copies all key/value pairs in src adding them to dst.
+// When a key in src is already present in dst,
+// the value in dst will be overwritten by the value associated
+// with the key in src.
+func mergeMaps(src, dst map[string]string) map[string]string {
+	if len(src) == 0 {
+		return dst
+	}
+	if len(dst) == 0 {
+		return src
+	}
+	maps.Copy(dst, src)
+	return dst
+}
+
 func createOrPatch(
 	ctx context.Context,
 	c client.Client,
-	obj unstructured.Unstructured,
-	f controllerutil.MutateFn,
+	renderedObj unstructured.Unstructured,
+	log logr.Logger,
 ) (controllerutil.OperationResult, error) {
-	existingObj := &unstructured.Unstructured{}
-	existingObj.SetGroupVersionKind(obj.GroupVersionKind())
-	if err := c.Get(ctx, client.ObjectKeyFromObject(&obj), existingObj); err != nil {
+	liveObj := &unstructured.Unstructured{}
+	liveObj.SetGroupVersionKind(renderedObj.GroupVersionKind())
+	if err := c.Get(ctx, client.ObjectKeyFromObject(&renderedObj), liveObj); err != nil {
 		if !errors.IsNotFound(err) {
 			return controllerutil.OperationResultNone, err
 		}
 
-		// Mutate the object
-		if f != nil {
-			if err := f(); err != nil {
-				return controllerutil.OperationResultNone, err
-			}
-		}
-
-		if err := c.Create(ctx, &obj); err != nil {
+		if err := c.Create(ctx, &renderedObj); err != nil {
 			return controllerutil.OperationResultNone, err
 		}
 		return controllerutil.OperationResultCreated, nil
 	}
 
 	// Object exists, update it
-	obj.SetResourceVersion(existingObj.GetResourceVersion())
-	obj.SetOwnerReferences(existingObj.GetOwnerReferences())
-	patch := client.MergeFrom(existingObj)
+	patch := client.MergeFrom(liveObj.DeepCopy())
+	updatedLiveObj := liveObj.DeepCopy()
 
-	if err := c.Patch(ctx, &obj, patch); err != nil {
-		return controllerutil.OperationResultNone, err
+	// If the resource contains a status then remove it from the unstructured
+	// copy to avoid unnecessary patching later.
+	unstructured.RemoveNestedField(updatedLiveObj.Object, "status")
+
+	// Merge metadata.annotations and metadata.labels
+	updatedLiveObj.SetAnnotations(mergeMaps(renderedObj.GetAnnotations(), liveObj.GetAnnotations()))
+	updatedLiveObj.SetLabels(mergeMaps(renderedObj.GetLabels(), liveObj.GetLabels()))
+
+	// Replace updatedLiveObj.spec fields with those in renderedObj.spec
+	spec, ok := renderedObj.Object["spec"].(map[string]interface{})
+	if !ok {
+		return controllerutil.OperationResultNone, fmt.Errorf("missing spec in rendered install template")
+	}
+	for _, key := range maps.Keys(spec) {
+		nestedField := []string{"spec", key}
+		nestedValue, ok, err := unstructured.NestedFieldCopy(renderedObj.Object, nestedField...)
+		if err != nil {
+			return controllerutil.OperationResultNone, err
+		}
+		if !ok {
+			// This situation should never occur, as it implies that a field present in the rendered object spec keys
+			// is somehow missing from the actual rendered object spec.
+			continue
+		}
+		if err := unstructured.SetNestedField(updatedLiveObj.Object, nestedValue, nestedField...); err != nil {
+			return controllerutil.OperationResultNone, err
+		}
 	}
 
-	return controllerutil.OperationResultUpdated, nil
+	resourceId := ci.GetResourceId(
+		updatedLiveObj.GetName(),
+		updatedLiveObj.GetNamespace(),
+		updatedLiveObj.GetKind(),
+	)
+	// Compute difference between the liveObject and updatedLiveObject without "status" fields
+	unstructured.RemoveNestedField(liveObj.Object, "status")
+	if !reflect.DeepEqual(liveObj, updatedLiveObj) {
+		log.Info(fmt.Sprintf("Change detected in resource %s, updating it", resourceId))
+
+		// Only issue a Patch if the before and after resources (minus status) differ
+		if err := c.Patch(ctx, updatedLiveObj, patch); err != nil {
+			log.Info(fmt.Sprintf("Failed to update resource %s", resourceId))
+			return controllerutil.OperationResultNone, err
+		}
+		return controllerutil.OperationResultUpdated, nil
+	}
+	log.Info(fmt.Sprintf("No change detected in resource %s, skipping update request", resourceId))
+
+	return controllerutil.OperationResultNone, nil
 }
 
 // createManifestReference creates a ManifestReference object from a manifest item
@@ -408,7 +460,7 @@ func (r *ClusterInstanceReconciler) executeRenderedManifests(
 			return false, err
 		}
 
-		if result, err := createOrPatch(ctx, c, object.GetObject(), nil); err != nil {
+		if result, err := createOrPatch(ctx, c, object.GetObject(), r.Log); err != nil {
 			ok = false
 			setManifestFailure(manifestRef, err)
 		} else if result != controllerutil.OperationResultNone {

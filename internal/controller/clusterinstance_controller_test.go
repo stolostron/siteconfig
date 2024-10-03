@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 const (
@@ -1509,6 +1510,7 @@ var _ = Describe("executeRenderedManifests", func() {
 		clusterInstance  *v1alpha1.ClusterInstance
 		clusterName      = TestClusterInstanceName
 		clusterNamespace = TestClusterInstanceNamespace
+		baseDomain       = "foobar"
 		key              = types.NamespacedName{
 			Name:      clusterName,
 			Namespace: clusterNamespace,
@@ -1543,6 +1545,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 			Spec: v1alpha1.ClusterInstanceSpec{
 				ClusterName: clusterName,
+				BaseDomain:  baseDomain,
 			},
 		}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
@@ -1552,6 +1555,7 @@ var _ = Describe("executeRenderedManifests", func() {
 				"apiVersion": *expManifest.APIGroup,
 				"kind":       expManifest.Kind,
 				"metadata":   map[string]interface{}{"name": clusterName, "namespace": clusterNamespace},
+				"spec":       map[string]interface{}{"foo": "bar"},
 			},
 		}
 
@@ -1671,6 +1675,170 @@ var _ = Describe("executeRenderedManifests", func() {
 		Expect(manifest).ToNot(BeNil())
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 		Expect(manifest.Message).To(ContainSubstring(testError))
+	})
+
+})
+
+var _ = Describe("createOrPatch", func() {
+	var (
+		c          client.Client
+		ctx        = context.Background()
+		object     unstructured.Unstructured
+		testLogger = ctrl.Log.WithName("createOrPatchTest")
+	)
+
+	BeforeEach(func() {
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			Build()
+
+		object = unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": ClusterDeploymentApiVersion,
+				"kind":       ClusterDeploymentKind,
+				"metadata": map[string]interface{}{
+					"name":      TestClusterInstanceName,
+					"namespace": TestClusterInstanceNamespace,
+				},
+				"spec": map[string]interface{}{
+					"installed": false,
+				},
+			},
+		}
+	})
+
+	It("succeeds in creating a manifest", func() {
+		result, err := createOrPatch(ctx, c, object, testLogger)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result).To(Equal(controllerutil.OperationResultCreated))
+	})
+
+	It("fails to apply the manifest due to an error while creating the kubernetes resource", func() {
+		testError := "create-test-error"
+
+		called := false
+		testClient := fakeclient.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				return apierrors.NewNotFound(schema.GroupResource{Group: "", Resource: ClusterDeploymentKind}, TestClusterInstanceName)
+			},
+			Create: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				called = true
+				return fmt.Errorf("%s", testError)
+			},
+		}).Build()
+
+		result, err := createOrPatch(ctx, testClient, object, testLogger)
+		Expect(err).To(HaveOccurred())
+		Expect(result).To(Equal(controllerutil.OperationResultNone))
+		Expect(called).To(BeTrue())
+	})
+
+	It("successfully patches an existing manifest that has changed", func() {
+
+		Expect(c.Create(ctx, &object)).To(Succeed())
+
+		// Update manifest by:
+		// - change spec.baseDomain value
+		// - change status by adding apiURL
+		updatedObject := unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": object.GetAPIVersion(),
+				"kind":       object.GetKind(),
+				"metadata": map[string]interface{}{
+					"name":      object.GetName(),
+					"namespace": object.GetNamespace(),
+				},
+				"spec": map[string]interface{}{
+					// change baseDomain
+					"baseDomain": "new-domain",
+				},
+				// change status by adding apiUrl
+				"status": map[string]interface{}{
+					"apiURL": "https://api.foo.bar.redhat.com:6443",
+				},
+			},
+		}
+		// - add new label
+		updatedObject.SetLabels(map[string]string{
+			"ownedBy": "foo",
+		})
+		result, err := createOrPatch(ctx, c, updatedObject, testLogger)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result).To(Equal(controllerutil.OperationResultUpdated))
+	})
+
+	It("successfully patches an existing manifest with changes to existing annotation", func() {
+
+		originalAnnotations := map[string]string{
+			"test-annotation": "before",
+		}
+		object.SetAnnotations(originalAnnotations)
+		Expect(c.Create(ctx, &object)).To(Succeed())
+		// Validate that annotation "test-annotation" is set to "before"
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(object.GroupVersionKind())
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(&object), obj)).To(Succeed())
+		Expect(obj.GetAnnotations()).To(Equal(originalAnnotations))
+
+		// Update manifest by:
+		// - update existing annotation "test-annotation"
+		updatedAnnotations := map[string]string{
+			"test-annotation": "after",
+		}
+		updatedObject := object.DeepCopy()
+		updatedObject.SetAnnotations(updatedAnnotations)
+
+		result, err := createOrPatch(ctx, c, *updatedObject, testLogger)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result).To(Equal(controllerutil.OperationResultUpdated))
+
+		// Validate that annotation "test-annotation" is changed to "after"
+		obj = &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(updatedObject.GroupVersionKind())
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(updatedObject), obj)).To(Succeed())
+		Expect(obj.GetAnnotations()).To(Equal(updatedAnnotations))
+	})
+
+	It("does not update a manifest that has not changed", func() {
+
+		Expect(c.Create(ctx, &object)).To(Succeed())
+
+		updatedObject := object.DeepCopy()
+
+		result, err := createOrPatch(ctx, c, *updatedObject, testLogger)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result).To(Equal(controllerutil.OperationResultNone))
+	})
+
+	It("does not update a manifest that has changes in the status only", func() {
+
+		Expect(c.Create(ctx, &object)).To(Succeed())
+
+		// Update manifest by changing the status by adding apiURL
+		existingSpec, ok, err := unstructured.NestedFieldCopy(object.Object, []string{"spec"}...)
+		Expect(ok).To(BeTrue())
+		Expect(err).ToNot(HaveOccurred())
+
+		updatedObject := unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": object.GetAPIVersion(),
+				"kind":       object.GetKind(),
+				"metadata": map[string]interface{}{
+					"name":      object.GetName(),
+					"namespace": object.GetNamespace(),
+				},
+				"spec": existingSpec,
+				// change status by adding apiUrl
+				"status": map[string]interface{}{
+					"apiURL": "https://api.foo.bar.redhat.com:6443",
+				},
+			},
+		}
+
+		result, err := createOrPatch(ctx, c, updatedObject, testLogger)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result).To(Equal(controllerutil.OperationResultNone))
 	})
 
 })
