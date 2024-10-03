@@ -1,6 +1,9 @@
 # Build the manager binary
 FROM registry.access.redhat.com/ubi9/go-toolset:1.21.11-9 AS builder
 
+ARG TARGETOS
+ARG TARGETARCH
+
 # Bring in the go dependencies before anything else so we can take
 # advantage of caching these layers in future builds.
 COPY vendor/ vendor/
@@ -15,7 +18,8 @@ COPY api/ api/
 COPY internal/ internal/
 
 # Build the binaries
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -mod=vendor -a -o build/manager cmd/main.go
+RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} GO111MODULE=on \
+  go build -mod=vendor -a -o build/manager cmd/main.go
 
 #####################################################################################################
 # Build the controller image
