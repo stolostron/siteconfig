@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-logr/logr"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
+	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -46,25 +46,31 @@ import (
 // update the ClusterInstance cluster deployment status conditions
 type ClusterDeploymentReconciler struct {
 	client.Client
-	Log    logr.Logger
+	Log    *zap.Logger
 	Scheme *runtime.Scheme
 }
 
 func (r *ClusterDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+
+	log := r.Log.With(
+		zap.String("name", req.Name),
+		zap.String("namespace", req.Namespace),
+	)
+
 	// Get the ClusterDeployment CR
 	clusterDeployment := &hivev1.ClusterDeployment{}
 	if err := r.Get(ctx, req.NamespacedName, clusterDeployment); err != nil {
 		if errors.IsNotFound(err) {
-			r.Log.Info("ClusterDeployment not found", "name", clusterDeployment.Name)
+			log.Info("ClusterDeployment not found")
 			return doNotRequeue(), nil
 		}
-		r.Log.Error(err, "Failed to get ClusterDeployment")
+		log.Error("Failed to get ClusterDeployment", zap.Error(err))
 		// This is likely a case where the API is down, so requeue and try again shortly
 		return requeueWithError(err)
 	}
 
 	// Fetch ClusterInstance associated with ClusterDeployment object
-	clusterInstance, err := r.getClusterInstance(ctx, clusterDeployment)
+	clusterInstance, err := r.getClusterInstance(ctx, log, clusterDeployment)
 	if clusterInstance == nil {
 		return doNotRequeue(), nil
 	} else if err != nil {
@@ -83,7 +89,7 @@ func (r *ClusterDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		clusterInstance.Status.Conditions,
 		string(v1alpha1.ClusterProvisioned),
 	); provisionedStatus == nil {
-		r.Log.Info("Initializing Provisioned condition", "ClusterInstance", clusterInstance.Name)
+		log.Info("Initializing Provisioned condition", zap.String("ClusterInstance", clusterInstance.Name))
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
 			v1alpha1.ClusterProvisioned,
 			v1alpha1.Unknown,
@@ -91,7 +97,7 @@ func (r *ClusterDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			"Waiting for provisioning to start")
 	}
 
-	updateCIProvisionedStatus(clusterDeployment, clusterInstance, r.Log)
+	updateCIProvisionedStatus(clusterDeployment, clusterInstance, log)
 	updateCIDeploymentConditions(clusterDeployment, clusterInstance)
 	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		return requeueWithError(updateErr)
@@ -109,7 +115,7 @@ func clusterInstallConditionTypes() []hivev1.ClusterDeploymentConditionType {
 	}
 }
 
-func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.ClusterInstance, log logr.Logger) {
+func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.ClusterInstance, log *zap.Logger) {
 
 	installStopped := conditions.FindCDConditionType(cd.Status.Conditions,
 		hivev1.ClusterInstallStoppedClusterDeploymentCondition)
@@ -121,7 +127,7 @@ func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.Cluste
 		hivev1.ClusterInstallFailedClusterDeploymentCondition)
 
 	if installStopped == nil || installCompleted == nil || installFailed == nil {
-		log.Info("Failed to extract condition(s)", "name", cd.Name)
+		log.Debug("Failed to extract ClusterInstall condition(s) from ClusterDeployment object")
 		return
 	}
 
@@ -211,11 +217,12 @@ func isOwnedByClusterInstance(labels map[string]string) bool {
 
 func (r *ClusterDeploymentReconciler) getClusterInstance(
 	ctx context.Context,
+	log *zap.Logger,
 	cd *hivev1.ClusterDeployment,
 ) (*v1alpha1.ClusterInstance, error) {
 	ownedBy := getClusterInstanceOwner(cd.Labels)
 	if ownedBy == "" {
-		r.Log.Info("ClusterInstance owner reference not found for ClusterDeployment", "name", cd.Name)
+		log.Info("ClusterInstance owner reference not found for ClusterDeployment")
 		return nil, nil
 	}
 
@@ -233,10 +240,10 @@ func (r *ClusterDeploymentReconciler) getClusterInstance(
 	if err := r.Get(ctx, clusterInstanceRef,
 		clusterInstance); err != nil {
 		if errors.IsNotFound(err) {
-			r.Log.Info("ClusterInstance not found", "name", clusterInstanceRef)
+			log.Info("ClusterInstance not found", zap.String("name", clusterInstanceRef.String()))
 			return nil, nil
 		}
-		r.Log.Info("Failed to get ClusterInstance", "name", clusterInstanceRef, "ClusterDeployment", cd.Name)
+		log.Info("Failed to get ClusterInstance", zap.String("name", clusterInstanceRef.String()))
 		return nil, err
 	}
 	return clusterInstance, nil

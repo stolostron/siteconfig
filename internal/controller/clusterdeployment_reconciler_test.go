@@ -25,6 +25,7 @@ import (
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
+	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -49,6 +50,7 @@ var _ = Describe("Reconcile", func() {
 		c                client.Client
 		r                *ClusterDeploymentReconciler
 		ctx              = context.Background()
+		testLogger       = zap.NewNop().Named("Test")
 		clusterName      = "test-cluster"
 		clusterNamespace = "test-namespace"
 		clusterInstance  *v1alpha1.ClusterInstance
@@ -58,7 +60,6 @@ var _ = Describe("Reconcile", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("ClusterDeploymentReconciler")
 		r = &ClusterDeploymentReconciler{
 			Client: c,
 			Scheme: scheme.Scheme,

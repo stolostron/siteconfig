@@ -23,7 +23,7 @@ import (
 	"text/template"
 	"unicode"
 
-	"github.com/go-logr/logr"
+	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -39,11 +39,16 @@ const (
 )
 
 type TemplateEngine struct {
-	Log logr.Logger
+	log *zap.Logger
 }
 
-func NewTemplateEngine(pLog logr.Logger) *TemplateEngine {
-	return &TemplateEngine{Log: pLog}
+// SetLogger is to be used to log with ClusterInstance fields
+func (te *TemplateEngine) SetLogger(log1 *zap.Logger) {
+	te.log = log1
+}
+
+func NewTemplateEngine(defaultLogger *zap.Logger) *TemplateEngine {
+	return &TemplateEngine{log: defaultLogger}
 }
 
 func (te *TemplateEngine) ProcessTemplates(
@@ -52,39 +57,34 @@ func (te *TemplateEngine) ProcessTemplates(
 	clusterInstance v1alpha1.ClusterInstance,
 ) (RenderedObjectCollection, error) {
 
+	log := te.log.Named("ProcessTemplates")
+
 	var renderedObjects RenderedObjectCollection
-	te.Log.Info(fmt.Sprintf("Started processing cluster-level install templates for ClusterInstance %s", clusterInstance.Name))
+	log.Info("Started processing cluster-level install templates")
 
 	// Render cluster-level install templates
 	clusterObjects, err := te.renderTemplates(ctx, c, &clusterInstance, nil)
 	if err != nil {
-		te.Log.Info(
-			fmt.Sprintf(
-				"encountered error while processing cluster-level install templates for ClusterInstance %s, err: %s",
-				clusterInstance.Name, err.Error()))
+		log.Error("Encountered error while processing cluster-level install templates", zap.Error(err))
 		return renderedObjects, err
 	}
 
 	if err := renderedObjects.AddObjects(clusterObjects); err != nil {
 		return renderedObjects, err
 	}
-	te.Log.Info(fmt.Sprintf("Finished processing cluster-level install templates for ClusterInstance %s", clusterInstance.Name))
+	log.Info("Finished processing cluster-level install templates")
 
 	// Process node-level install templates
 	numNodes := len(clusterInstance.Spec.Nodes)
 	for nodeId, node := range clusterInstance.Spec.Nodes {
-		te.Log.Info(
-			fmt.Sprintf(
-				"Started processing node-level install templates for ClusterInstance %s [node: %d of %d]",
-				clusterInstance.Name, nodeId+1, numNodes))
+		log.Sugar().Infof("Started processing node-level install templates [node: %d of %d]", nodeId+1, numNodes)
 
 		// Render node-level templates
 		nodeObjects, err := te.renderTemplates(ctx, c, &clusterInstance, &node)
 		if err != nil {
-			te.Log.Info(
-				fmt.Sprintf(
-					"encountered error while processing node-level install templates for ClusterInstance %s [%d of %d], err: %s",
-					clusterInstance.Name, nodeId+1, numNodes, err.Error()))
+			log.Sugar().Errorf(
+				"Encountered error while processing node-level install templates [node: %d of %d], err: %v",
+				nodeId+1, numNodes, err)
 			return renderedObjects, err
 		}
 
@@ -92,9 +92,7 @@ func (te *TemplateEngine) ProcessTemplates(
 			return renderedObjects, err
 		}
 
-		te.Log.Info(fmt.Sprintf(
-			"Finished processing node-level install templates for ClusterInstance %s [node: %d of %d]",
-			clusterInstance.Name, nodeId+1, numNodes))
+		log.Sugar().Infof("Finished processing node-level install templates [node: %d of %d]", nodeId+1, numNodes)
 	}
 
 	return renderedObjects, nil
@@ -121,15 +119,17 @@ func (te *TemplateEngine) renderTemplates(
 		templateRefs = node.TemplateRefs
 	}
 
+	log := te.log.Named("renderTemplates")
+
 	for tId, templateRef := range templateRefs {
-		te.Log.Info(fmt.Sprintf("renderTemplates: processing templateRef %d of %d", tId+1, len(templateRefs)))
+		log.Sugar().Infof("Processing templateRef %d of %d", tId+1, len(templateRefs))
 
 		templatesConfigMap := &corev1.ConfigMap{}
 		if err := c.Get(ctx, types.NamespacedName{
 			Name:      templateRef.Name,
 			Namespace: templateRef.Namespace,
 		}, templatesConfigMap); err != nil {
-			te.Log.Info(fmt.Sprintf("renderTemplates: failed to get ConfigMap, err: %s", err.Error()))
+			log.Error("Failed to get ConfigMap", zap.Error(err))
 			return renderedObjects, err
 		}
 
@@ -189,19 +189,17 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 
 	var object RenderedObject
 
+	log := te.log.Named("renderManifestFromTemplate")
+
 	clusterData, err := buildClusterData(clusterInstance, node)
 	if err != nil {
-		te.Log.Error(err,
-			fmt.Sprintf("renderTemplates: failed to build ClusterInstance data for ClusterInstance %s",
-				clusterInstance.Name))
+		log.Error("Failed to build ClusterInstance data", zap.Error(err))
 		return object, err
 	}
 
 	manifest, err := te.render(templateKey, template, clusterData)
 	if err != nil {
-		te.Log.Error(err,
-			fmt.Sprintf("renderTemplates: failed to render templateRef %s for ClusterInstance %s",
-				templateRefName, clusterInstance.Name))
+		log.Error(fmt.Sprintf("Failed to render templateRef %s", templateRefName), zap.Error(err))
 		return object, err
 	}
 	if manifest == nil {
@@ -209,9 +207,7 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 	}
 
 	if err := object.SetObject(manifest); err != nil {
-		te.Log.Error(err,
-			fmt.Sprintf("renderTemplates: failed to parse rendered template templateRef %s for ClusterInstance %s",
-				templateRefName, clusterInstance.Name))
+		log.Error(fmt.Sprintf("Failed to parse rendered template templateRef %s", templateRefName), zap.Error(err))
 		return object, err
 	}
 
@@ -224,8 +220,7 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 	object.action = actionRender
 
 	// Determine if manifest should be pruned or suppressed
-	suppressManifestLogMsg := fmt.Sprintf("renderTemplates: suppressed manifest %s for ClusterInstance %s",
-		GetResourceId(name, namespace, kind), clusterInstance.Name)
+	suppressManifestLogMsg := fmt.Sprintf("Suppressed manifest %s", GetResourceId(name, namespace, kind))
 	pruneList := clusterInstance.Spec.PruneManifests
 	suppressManifestsList := clusterInstance.Spec.SuppressedManifests
 	if node != nil {
@@ -234,12 +229,12 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 	}
 	if pruneManifest(v1alpha1.ResourceRef{APIVersion: apiVersion, Kind: kind}, pruneList) {
 		object.action = actionPrune
-		te.Log.Info(suppressManifestLogMsg)
+		log.Debug(suppressManifestLogMsg)
 		return object, nil
 	}
 	if suppressManifest(kind, suppressManifestsList) {
 		object.action = actionSuppress
-		te.Log.Info(suppressManifestLogMsg)
+		log.Debug(suppressManifestLogMsg)
 		return object, nil
 	}
 
@@ -253,9 +248,7 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 
 	// Update the rendered object with the labels and annotations applied above
 	if err := object.SetObject(updatedManifest); err != nil {
-		te.Log.Error(err,
-			fmt.Sprintf("renderTemplates: failed to parse rendered template templateRef %s for ClusterInstance %s",
-				templateRefName, clusterInstance.Name))
+		log.Error(fmt.Sprintf("Failed to parse rendered template templateRef %s", templateRefName), zap.Error(err))
 		return object, err
 	}
 

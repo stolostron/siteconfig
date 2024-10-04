@@ -26,6 +26,7 @@ import (
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -83,6 +84,7 @@ var _ = Describe("Reconcile", func() {
 		c          client.Client
 		r          *ClusterInstanceReconciler
 		ctx        = context.Background()
+		testLogger = zap.NewNop().Named("Test")
 		testParams = &ci.TestParams{
 			ClusterName:      TestClusterInstanceName,
 			ClusterNamespace: TestClusterInstanceNamespace,
@@ -97,7 +99,6 @@ var _ = Describe("Reconcile", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("TemplateEngine")
 		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
 			Client:     c,
@@ -201,6 +202,7 @@ var _ = Describe("handleFinalizer", func() {
 		c                client.Client
 		r                *ClusterInstanceReconciler
 		ctx              = context.Background()
+		testLogger       = zap.NewNop().Named("Test")
 		clusterName      = TestClusterInstanceName
 		clusterNamespace = TestClusterInstanceNamespace
 	)
@@ -210,7 +212,6 @@ var _ = Describe("handleFinalizer", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("TemplateEngine")
 		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
 			Client:     c,
@@ -229,7 +230,7 @@ var _ = Describe("handleFinalizer", func() {
 		}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		res, stop, err := r.handleFinalizer(ctx, clusterInstance)
+		res, stop, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
 		Expect(res).To(Equal(ctrl.Result{Requeue: true}))
 		Expect(stop).To(BeTrue())
 		Expect(err).ToNot(HaveOccurred())
@@ -252,7 +253,7 @@ var _ = Describe("handleFinalizer", func() {
 		}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		res, stop, err := r.handleFinalizer(ctx, clusterInstance)
+		res, stop, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
 		Expect(res).To(Equal(ctrl.Result{}))
 		Expect(stop).To(BeFalse())
 		Expect(err).ToNot(HaveOccurred())
@@ -393,7 +394,7 @@ var _ = Describe("handleFinalizer", func() {
 		clusterInstance.ObjectMeta.DeletionTimestamp = &deletionTimeStamp
 
 		// Expect the manifests previously created to be deleted after the handleFinalizer is called
-		res, stop, err := r.handleFinalizer(ctx, clusterInstance)
+		res, stop, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
 		Expect(res).To(Equal(ctrl.Result{}))
 		Expect(stop).To(BeTrue())
 		Expect(err).ToNot(HaveOccurred())
@@ -486,7 +487,7 @@ var _ = Describe("handleFinalizer", func() {
 		clusterInstance.ObjectMeta.DeletionTimestamp = &deletionTimeStamp
 
 		// Expect the manifests previously created to be deleted after the handleFinalizer is called
-		res, stop, err := r.handleFinalizer(ctx, clusterInstance)
+		res, stop, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
 		Expect(res).To(Equal(ctrl.Result{}))
 		Expect(stop).To(BeTrue())
 		Expect(err).ToNot(HaveOccurred())
@@ -500,9 +501,10 @@ var _ = Describe("handleFinalizer", func() {
 var _ = Describe("pruneManifests", func() {
 
 	var (
-		c   client.Client
-		r   *ClusterInstanceReconciler
-		ctx = context.Background()
+		c          client.Client
+		r          *ClusterInstanceReconciler
+		ctx        = context.Background()
+		testLogger = zap.NewNop().Named("Test")
 
 		// objects to create for pruning test
 		cdManifest, bmh1Manifest, bmh2Manifest, mcManifest, cm1Manifest, cm2Manifest map[string]interface{}
@@ -542,7 +544,6 @@ var _ = Describe("pruneManifests", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("TemplateEngine")
 		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
 			Client:     c,
@@ -699,7 +700,7 @@ var _ = Describe("pruneManifests", func() {
 		// Create the ClusterInstance CR
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		ok, err := r.pruneManifests(ctx, clusterInstance, pruneList)
+		ok, err := r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(ok).To(BeTrue())
 
@@ -743,7 +744,7 @@ var _ = Describe("pruneManifests", func() {
 		// Create the ClusterInstance CR
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		ok, err := r.pruneManifests(ctx, clusterInstance, pruneList)
+		ok, err := r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(ok).To(BeTrue())
 
@@ -797,7 +798,7 @@ var _ = Describe("pruneManifests", func() {
 		// Create the ClusterInstance CR
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		ok, err := r.pruneManifests(ctx, clusterInstance, pruneList)
+		ok, err := r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(ok).To(BeTrue())
 
@@ -814,6 +815,7 @@ var _ = Describe("handleValidate", func() {
 		c          client.Client
 		r          *ClusterInstanceReconciler
 		ctx        = context.Background()
+		testLogger = zap.NewNop().Named("Test")
 		testParams = &ci.TestParams{
 			BmcCredentialsName:  TestBMHSecret,
 			ClusterName:         TestClusterInstanceName,
@@ -832,7 +834,6 @@ var _ = Describe("handleValidate", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("TemplateEngine")
 		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
 			Client:     c,
@@ -852,7 +853,7 @@ var _ = Describe("handleValidate", func() {
 	It("successfully sets the ClusterInstanceValidated condition to true for a valid ClusterInstance", func() {
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.handleValidate(ctx, clusterInstance)
+		err := r.handleValidate(ctx, testLogger, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		key := types.NamespacedName{
@@ -873,7 +874,7 @@ var _ = Describe("handleValidate", func() {
 		clusterInstance.Spec.ClusterName = ""
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.handleValidate(ctx, clusterInstance)
+		err := r.handleValidate(ctx, testLogger, clusterInstance)
 		Expect(err).To(HaveOccurred())
 
 		key := types.NamespacedName{
@@ -901,7 +902,7 @@ var _ = Describe("handleValidate", func() {
 		}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.handleValidate(ctx, clusterInstance)
+		err := r.handleValidate(ctx, testLogger, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		key := types.NamespacedName{
@@ -929,7 +930,7 @@ var _ = Describe("handleValidate", func() {
 		}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.handleValidate(ctx, clusterInstance)
+		err := r.handleValidate(ctx, testLogger, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		key := types.NamespacedName{
@@ -953,6 +954,7 @@ var _ = Describe("handleRenderTemplates", func() {
 		c          client.Client
 		r          *ClusterInstanceReconciler
 		ctx        = context.Background()
+		testLogger = zap.NewNop().Named("Test")
 		testParams = &ci.TestParams{
 			BmcCredentialsName:  TestBMHSecret,
 			ClusterName:         TestClusterInstanceName,
@@ -971,7 +973,6 @@ var _ = Describe("handleRenderTemplates", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("TemplateEngine")
 		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
 			Client:     c,
@@ -1023,10 +1024,10 @@ spec:
 		Expect(c.Create(ctx, cm)).To(Succeed())
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.handleValidate(ctx, clusterInstance)
+		err := r.handleValidate(ctx, testLogger, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
-		rendered, err := r.handleRenderTemplates(ctx, clusterInstance)
+		rendered, err := r.handleRenderTemplates(ctx, testLogger, clusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(rendered).To(Equal(false))
 
@@ -1081,10 +1082,10 @@ spec:
 		Expect(c.Create(ctx, cm)).To(Succeed())
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		err := r.handleValidate(ctx, clusterInstance)
+		err := r.handleValidate(ctx, testLogger, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
-		rendered, err := r.handleRenderTemplates(ctx, clusterInstance)
+		rendered, err := r.handleRenderTemplates(ctx, testLogger, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(rendered).To(Equal(true))
 
@@ -1150,7 +1151,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("TemplateEngine")
+		testLogger := zap.NewNop().Named("Test")
 		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r := &ClusterInstanceReconciler{
 			Client:     c,
@@ -1290,7 +1291,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 			suppressList = append(suppressList, object)
 		}
 
-		err := r.updateSuppressedManifestsStatus(ctx, clusterInstance, suppressList)
+		err := r.updateSuppressedManifestsStatus(ctx, testLogger, clusterInstance, suppressList)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify handling of suppression
@@ -1507,6 +1508,7 @@ var _ = Describe("executeRenderedManifests", func() {
 		c                client.Client
 		r                *ClusterInstanceReconciler
 		ctx              = context.Background()
+		testLogger       = zap.NewNop().Named("Test")
 		clusterInstance  *v1alpha1.ClusterInstance
 		clusterName      = TestClusterInstanceName
 		clusterNamespace = TestClusterInstanceNamespace
@@ -1529,7 +1531,6 @@ var _ = Describe("executeRenderedManifests", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		testLogger := ctrl.Log.WithName("TemplateEngine")
 		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
 			Client:     c,
@@ -1582,7 +1583,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}).Build()
 
-		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, objects, expManifest.Status)
+		result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeTrue())
 		Expect(called).To(BeTrue())
@@ -1609,7 +1610,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}).Build()
 
-		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, objects, v1alpha1.ManifestRenderedSuccess)
+		result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, v1alpha1.ManifestRenderedSuccess)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeFalse())
 		Expect(called).To(BeTrue())
@@ -1637,7 +1638,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}).Build()
 
-		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, objects, expManifest.Status)
+		result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeTrue())
 		Expect(called).To(BeTrue())
@@ -1664,7 +1665,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}).Build()
 
-		result, err := r.executeRenderedManifests(ctx, testClient, clusterInstance, objects, expManifest.Status)
+		result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeFalse())
 		Expect(called).To(BeTrue())
@@ -1683,8 +1684,8 @@ var _ = Describe("createOrPatch", func() {
 	var (
 		c          client.Client
 		ctx        = context.Background()
+		testLogger = zap.NewNop().Named("Test")
 		object     unstructured.Unstructured
-		testLogger = ctrl.Log.WithName("createOrPatchTest")
 	)
 
 	BeforeEach(func() {
@@ -1709,7 +1710,7 @@ var _ = Describe("createOrPatch", func() {
 	})
 
 	It("succeeds in creating a manifest", func() {
-		result, err := createOrPatch(ctx, c, object, testLogger)
+		result, err := createOrPatch(ctx, c, testLogger, object)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultCreated))
 	})
@@ -1728,7 +1729,7 @@ var _ = Describe("createOrPatch", func() {
 			},
 		}).Build()
 
-		result, err := createOrPatch(ctx, testClient, object, testLogger)
+		result, err := createOrPatch(ctx, testClient, testLogger, object)
 		Expect(err).To(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultNone))
 		Expect(called).To(BeTrue())
@@ -1763,7 +1764,7 @@ var _ = Describe("createOrPatch", func() {
 		updatedObject.SetLabels(map[string]string{
 			"ownedBy": "foo",
 		})
-		result, err := createOrPatch(ctx, c, updatedObject, testLogger)
+		result, err := createOrPatch(ctx, c, testLogger, updatedObject)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultUpdated))
 	})
@@ -1789,7 +1790,7 @@ var _ = Describe("createOrPatch", func() {
 		updatedObject := object.DeepCopy()
 		updatedObject.SetAnnotations(updatedAnnotations)
 
-		result, err := createOrPatch(ctx, c, *updatedObject, testLogger)
+		result, err := createOrPatch(ctx, c, testLogger, *updatedObject)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultUpdated))
 
@@ -1806,7 +1807,7 @@ var _ = Describe("createOrPatch", func() {
 
 		updatedObject := object.DeepCopy()
 
-		result, err := createOrPatch(ctx, c, *updatedObject, testLogger)
+		result, err := createOrPatch(ctx, c, testLogger, *updatedObject)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultNone))
 	})
@@ -1836,7 +1837,7 @@ var _ = Describe("createOrPatch", func() {
 			},
 		}
 
-		result, err := createOrPatch(ctx, c, updatedObject, testLogger)
+		result, err := createOrPatch(ctx, c, testLogger, updatedObject)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultNone))
 	})

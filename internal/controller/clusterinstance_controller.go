@@ -23,9 +23,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/go-logr/logr"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
+	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -48,7 +48,7 @@ type ClusterInstanceReconciler struct {
 	client.Client
 	Scheme     *runtime.Scheme
 	Recorder   record.EventRecorder
-	Log        logr.Logger
+	Log        *zap.Logger
 	TmplEngine *ci.TemplateEngine
 }
 
@@ -84,61 +84,64 @@ func requeueWithError(err error) (ctrl.Result, error) {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+
+	log := r.Log.With(
+		zap.String("name", req.Name),
+		zap.String("namespace", req.Namespace),
+	)
+
 	defer func() {
-		r.Log.Info("Finished reconciling ClusterInstance", "name", req.NamespacedName)
+		log.Info("Finished reconciling ClusterInstance")
 	}()
 
-	r.Log.Info("Start reconciling ClusterInstance", "name", req.NamespacedName)
+	log.Info("Starting reconcile ClusterInstance")
 
 	// Get the ClusterInstance CR
 	clusterInstance := &v1alpha1.ClusterInstance{}
 	if err := r.Get(ctx, req.NamespacedName, clusterInstance); err != nil {
 		if errors.IsNotFound(err) {
-			r.Log.Info("ClusterInstance not found", "name", req.NamespacedName)
+			log.Error("ClusterInstance not found")
 			return doNotRequeue(), nil
 		}
-		r.Log.Error(err, "Failed to get ClusterInstance", "name", req.NamespacedName)
+		log.Error("Failed to get ClusterInstance", zap.Error(err))
 		// This is likely a case where the API is down, so requeue and try again shortly
 		return requeueWithError(err)
 	}
 
-	r.Log.Info("Loaded ClusterInstance", "name", req.NamespacedName, "version", clusterInstance.GetResourceVersion())
+	log.Info("Loaded ClusterInstance", zap.String("version", clusterInstance.GetResourceVersion()))
 
-	if res, stop, err := r.handleFinalizer(ctx, clusterInstance); !res.IsZero() || stop || err != nil {
+	if res, stop, err := r.handleFinalizer(ctx, log, clusterInstance); !res.IsZero() || stop || err != nil {
 		if err != nil {
-			r.Log.Error(err, "Encountered error while handling finalizer", "ClusterInstance", req.NamespacedName)
+			log.Error("Encountered error while handling finalizer", zap.Error(err))
 		}
 		return res, err
 	}
 
 	// Pre-empt the reconcile-loop when the ObservedGeneration is the same as the ObjectMeta.Generation
 	if clusterInstance.Status.ObservedGeneration == clusterInstance.ObjectMeta.Generation {
-		r.Log.Info("ObservedGeneration and ObjectMeta.Generation are the same, pre-empting reconcile",
-			"ClusterInstance", req.NamespacedName)
+		log.Info("ObservedGeneration and ObjectMeta.Generation are the same, pre-empting reconcile")
 		return doNotRequeue(), nil
 	}
 
 	// Validate ClusterInstance
-	if err := r.handleValidate(ctx, clusterInstance); err != nil {
+	if err := r.handleValidate(ctx, log, clusterInstance); err != nil {
 		return requeueWithError(err)
 	}
 
 	// Render, validate and apply templates
-	ok, err := r.handleRenderTemplates(ctx, clusterInstance)
+	ok, err := r.handleRenderTemplates(ctx, log, clusterInstance)
 	if err != nil {
 		return requeueWithError(err)
 	}
 	if ok {
-		r.Log.Info("ClusterInstance templates are rendered", "name", req.NamespacedName)
+		log.Info("Finished rendering templates")
 	} else {
-		r.Log.Info("Failed to render templates for ClusterInstance", "name", req.NamespacedName)
+		log.Info("Failed to render templates")
 	}
 
 	// Only update the ObservedGeneration when all the above processes have been successfully executed
 	if clusterInstance.Status.ObservedGeneration != clusterInstance.ObjectMeta.Generation {
-		r.Log.Info(
-			fmt.Sprintf("Updating ObservedGeneration to %d", clusterInstance.ObjectMeta.Generation),
-			"ClusterInstance", req.NamespacedName)
+		log.Sugar().Infof("Updating ObservedGeneration to %d", clusterInstance.ObjectMeta.Generation)
 		patch := client.MergeFrom(clusterInstance.DeepCopy())
 		clusterInstance.Status.ObservedGeneration = clusterInstance.ObjectMeta.Generation
 		return ctrl.Result{}, conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
@@ -149,6 +152,7 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 func (r *ClusterInstanceReconciler) finalizeClusterInstance(
 	ctx context.Context,
+	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 ) error {
 
@@ -179,6 +183,7 @@ func (r *ClusterInstanceReconciler) finalizeClusterInstance(
 
 			if err := r.deleteResource(
 				ctx,
+				log,
 				ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
 				obj,
 			); err != nil {
@@ -186,12 +191,13 @@ func (r *ClusterInstanceReconciler) finalizeClusterInstance(
 			}
 		}
 	}
-	r.Log.Info("Successfully finalized ClusterInstance", "name", clusterInstance.Name)
+	log.Info("Successfully finalized ClusterInstance")
 	return nil
 }
 
 func (r *ClusterInstanceReconciler) deleteResource(
 	ctx context.Context,
+	log *zap.Logger,
 	owner string,
 	obj client.Object,
 ) error {
@@ -202,26 +208,24 @@ func (r *ClusterInstanceReconciler) deleteResource(
 	// Check that the manifest is logically owned-by the ClusterInstance
 	if err := r.Client.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
 		if errors.IsNotFound(err) {
-			r.Log.Info(fmt.Sprintf("Skipping deletion of resource %s not found", resourceId))
+			log.Sugar().Infof("Skipping deletion of resource %s not found", resourceId)
 			return nil
 		}
-		r.Log.Info(fmt.Sprintf("Unable to retrieve resource %s for deletion", resourceId))
+		log.Sugar().Infof("Unable to retrieve resource %s for deletion", resourceId)
 		return err
 	}
 	labels := obj.GetLabels()
 	ownedBy, ok := labels[ci.OwnedByLabel]
 	if !ok || ownedBy != owner {
-		r.Log.Info(
-			fmt.Sprintf("Skipping deletion of resource %s not owned-by ClusterInstance %s",
-				resourceId, owner))
+		log.Sugar().Infof("Skipping deletion of resource %s not owned-by ClusterInstance %s", resourceId, owner)
 		return nil
 	}
 
 	// Delete resource
 	if err := r.Client.Delete(ctx, obj); err == nil {
-		r.Log.Info(fmt.Sprintf("Successfully deleted resource %s", resourceId))
+		log.Sugar().Infof("Successfully deleted resource %s", resourceId)
 	} else if !errors.IsNotFound(err) {
-		r.Log.Info(fmt.Sprintf("Failed to delete resource %s", resourceId))
+		log.Sugar().Infof("Failed to delete resource %s", resourceId)
 		return err
 	}
 
@@ -230,6 +234,7 @@ func (r *ClusterInstanceReconciler) deleteResource(
 
 func (r *ClusterInstanceReconciler) handleFinalizer(
 	ctx context.Context,
+	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 ) (ctrl.Result, bool, error) {
 	// Check if the ClusterInstance is marked to be deleted, which is
@@ -246,13 +251,13 @@ func (r *ClusterInstanceReconciler) handleFinalizer(
 		// Run finalization logic for clusterInstanceFinalizer. If the
 		// finalization logic fails, don't remove the finalizer so
 		// that we can retry during the next reconciliation.
-		if err := r.finalizeClusterInstance(ctx, clusterInstance); err != nil {
+		if err := r.finalizeClusterInstance(ctx, log, clusterInstance); err != nil {
 			return ctrl.Result{}, true, err
 		}
 
 		// Remove clusterInstanceFinalizer. Once all finalizers have been
 		// removed, the object will be deleted.
-		r.Log.Info("Removing ClusterInstance finalizer", "name", clusterInstance.Name)
+		log.Info("Removing ClusterInstance finalizer")
 		patch := client.MergeFrom(clusterInstance.DeepCopy())
 		if controllerutil.RemoveFinalizer(clusterInstance, clusterInstanceFinalizer) {
 			return ctrl.Result{}, true, r.Patch(ctx, clusterInstance, patch)
@@ -263,38 +268,38 @@ func (r *ClusterInstanceReconciler) handleFinalizer(
 
 func (r *ClusterInstanceReconciler) handleValidate(
 	ctx context.Context,
+	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 ) error {
 
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
 
 	newCond := metav1.Condition{Type: string(v1alpha1.ClusterInstanceValidated)}
-	r.Log.Info("Starting validation", "ClusterInstance", clusterInstance.Name)
+	log.Info("Starting validation")
 	err := ci.Validate(ctx, r.Client, clusterInstance)
 	if err != nil {
-		r.Log.Error(err, "ClusterInstance validation failed due to error", "ClusterInstance", clusterInstance.Name)
+		log.Error("ClusterInstance validation failed due to error", zap.Error(err))
 
 		newCond.Reason = string(v1alpha1.Failed)
 		newCond.Status = metav1.ConditionFalse
 		newCond.Message = fmt.Sprintf("Validation failed: %s", err.Error())
 
 	} else {
-		r.Log.Info("Validation succeeded", "ClusterInstance", clusterInstance.Name)
+		log.Info("Validation succeeded")
 
 		newCond.Reason = string(v1alpha1.Completed)
 		newCond.Status = metav1.ConditionTrue
 		newCond.Message = "Validation succeeded"
 	}
-	r.Log.Info("Finished validation", "ClusterInstance", clusterInstance.Name)
+	log.Info("Finished validation")
 
 	conditions.SetStatusCondition(&clusterInstance.Status.Conditions, v1alpha1.ClusterInstanceConditionType(newCond.Type),
 		v1alpha1.ClusterInstanceConditionReason(newCond.Reason), newCond.Status, newCond.Message)
 
 	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			r.Log.Info(
-				fmt.Sprintf("Failed to update ClusterInstance %s status after validating ClusterInstance, err: %s",
-					clusterInstance.Name, updateErr.Error()))
+			log.Sugar().Errorf("Failed to update ClusterInstance status after validating ClusterInstance, err: %s",
+				updateErr.Error)
 			err = updateErr
 		}
 	}
@@ -304,20 +309,23 @@ func (r *ClusterInstanceReconciler) handleValidate(
 
 func (r *ClusterInstanceReconciler) renderManifests(
 	ctx context.Context,
+	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 ) (ci.RenderedObjectCollection, error) {
-	r.Log.Info(fmt.Sprintf("Rendering templates for ClusterInstance %s", clusterInstance.Name))
+	log.Info("Starting to render templates")
 
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
+	r.TmplEngine.SetLogger(log.Named("TemplateEngine"))
 	renderedObjects, err := r.TmplEngine.ProcessTemplates(ctx, r.Client, *clusterInstance)
 	if err != nil {
-		r.Log.Error(err, "Failed to render manifests", "ClusterInstance", clusterInstance.Name)
+		log.Error("Failed to render templates", zap.Error(err))
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
 			v1alpha1.RenderedTemplates,
 			v1alpha1.Failed,
 			metav1.ConditionFalse,
 			fmt.Sprintf("Failed to render templates, err= %s", err))
 	} else {
+		log.Info("Successfully rendered templates")
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
 			v1alpha1.RenderedTemplates,
 			v1alpha1.Completed,
@@ -327,13 +335,12 @@ func (r *ClusterInstanceReconciler) renderManifests(
 
 	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			r.Log.Info(
-				fmt.Sprintf("Failed to update ClusterInstance %s status after rendering templates, err: %s",
-					clusterInstance.Name, updateErr.Error()))
+			log.Sugar().Errorf("Failed to update ClusterInstance status after rendering templates, err: %v", updateErr)
 			err = updateErr
 		}
 	}
 
+	log.Info("Finished rendering templates")
 	return renderedObjects, err
 }
 
@@ -355,8 +362,8 @@ func mergeMaps(src, dst map[string]string) map[string]string {
 func createOrPatch(
 	ctx context.Context,
 	c client.Client,
+	log *zap.Logger,
 	renderedObj unstructured.Unstructured,
-	log logr.Logger,
 ) (controllerutil.OperationResult, error) {
 	liveObj := &unstructured.Unstructured{}
 	liveObj.SetGroupVersionKind(renderedObj.GroupVersionKind())
@@ -386,6 +393,8 @@ func createOrPatch(
 	// Replace updatedLiveObj.spec fields with those in renderedObj.spec
 	spec, ok := renderedObj.Object["spec"].(map[string]interface{})
 	if !ok {
+		log.Sugar().Errorf("missing spec field in rendered install template %s",
+			renderedObj.GroupVersionKind().String())
 		return controllerutil.OperationResultNone, fmt.Errorf("missing spec in rendered install template")
 	}
 	for _, key := range maps.Keys(spec) {
@@ -397,6 +406,8 @@ func createOrPatch(
 		if !ok {
 			// This situation should never occur, as it implies that a field present in the rendered object spec keys
 			// is somehow missing from the actual rendered object spec.
+			log.Sugar().Warnf("missing field %s in rendered install template %s",
+				key, renderedObj.GroupVersionKind().String())
 			continue
 		}
 		if err := unstructured.SetNestedField(updatedLiveObj.Object, nestedValue, nestedField...); err != nil {
@@ -412,7 +423,7 @@ func createOrPatch(
 	// Compute difference between the liveObject and updatedLiveObject without "status" fields
 	unstructured.RemoveNestedField(liveObj.Object, "status")
 	if !reflect.DeepEqual(liveObj, updatedLiveObj) {
-		log.Info(fmt.Sprintf("Change detected in resource %s, updating it", resourceId))
+		log.Debug(fmt.Sprintf("Change detected in resource %s, updating it", resourceId))
 
 		// Only issue a Patch if the before and after resources (minus status) differ
 		if err := c.Patch(ctx, updatedLiveObj, patch); err != nil {
@@ -421,7 +432,7 @@ func createOrPatch(
 		}
 		return controllerutil.OperationResultUpdated, nil
 	}
-	log.Info(fmt.Sprintf("No change detected in resource %s, skipping update request", resourceId))
+	log.Debug(fmt.Sprintf("No change detected in resource %s, skipping update request", resourceId))
 
 	return controllerutil.OperationResultNone, nil
 }
@@ -446,6 +457,7 @@ func createManifestReference(object ci.RenderedObject) (*v1alpha1.ManifestRefere
 func (r *ClusterInstanceReconciler) executeRenderedManifests(
 	ctx context.Context,
 	c client.Client,
+	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 	objects []ci.RenderedObject,
 	manifestStatus string) (bool, error) {
@@ -460,7 +472,7 @@ func (r *ClusterInstanceReconciler) executeRenderedManifests(
 			return false, err
 		}
 
-		if result, err := createOrPatch(ctx, c, object.GetObject(), r.Log); err != nil {
+		if result, err := createOrPatch(ctx, c, log, object.GetObject()); err != nil {
 			ok = false
 			setManifestFailure(manifestRef, err)
 		} else if result != controllerutil.OperationResultNone {
@@ -520,21 +532,23 @@ func findManifestRendered(
 
 func (r *ClusterInstanceReconciler) validateRenderedManifests(
 	ctx context.Context,
+	pLog *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 	objects []ci.RenderedObject) (rendered bool, err error) {
 
-	r.Log.Info(fmt.Sprintf("Validating rendered manifests for ClusterInstance %s", clusterInstance.Name))
+	log := pLog.Named("validateRenderedManifests")
+	log.Info("Executing a dry-run validation on the rendered manifests")
+
 	dryRunClient := client.NewDryRunClient(r.Client)
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
-	rendered, err = r.executeRenderedManifests(ctx, dryRunClient, clusterInstance, objects,
+	rendered, err = r.executeRenderedManifests(ctx, dryRunClient, log, clusterInstance, objects,
 		v1alpha1.ManifestRenderedValidated)
 	if err != nil || !rendered {
-		msg := fmt.Sprintf("failed to validate rendered manifests for ClusterInstance %s using dry-run validation",
-			clusterInstance.Name)
+		msg := "failed to validate rendered manifests using dry-run validation"
 		if err != nil {
 			msg = fmt.Sprintf(", err: %v", err)
 		}
-		r.Log.Info(msg)
+		log.Info(msg)
 
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
 			v1alpha1.RenderedTemplatesValidated,
@@ -551,35 +565,39 @@ func (r *ClusterInstanceReconciler) validateRenderedManifests(
 
 	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			r.Log.Info(
-				fmt.Sprintf("failed to update ClusterInstance %s status post validation of rendered templates, err: %s",
-					clusterInstance.Name, updateErr.Error()))
+			log.Error("failed to update ClusterInstance status post validation of rendered templates",
+				zap.Error(updateErr))
 			err = updateErr
 		}
 	}
+
+	log.Info("Finished executing a dry-run validation on the rendered manifests")
 
 	return rendered, err
 }
 
 func (r *ClusterInstanceReconciler) applyRenderedManifests(
 	ctx context.Context,
+	pLog *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 	objects []ci.RenderedObject) (rendered bool, err error) {
 
-	r.Log.Info(fmt.Sprintf("Applying rendered manifests for ClusterInstance %s", clusterInstance.Name))
+	log := pLog.Named("applyRenderedManifests")
+	log.Info("Applying the rendered manifests")
+
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
-	if rendered, err = r.executeRenderedManifests(
-		ctx,
+	if rendered, err = r.executeRenderedManifests(ctx,
 		r.Client,
+		log,
 		clusterInstance,
 		objects,
 		v1alpha1.ManifestRenderedSuccess,
 	); err != nil || !rendered {
-		msg := fmt.Sprintf("failed to apply rendered manifests for ClusterInstance %s", clusterInstance.Name)
+		msg := "failed to apply rendered manifests"
 		if err != nil {
 			msg = fmt.Sprintf(", err: %v", err)
 		}
-		r.Log.Info(msg)
+		log.Info(msg)
 
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
 			v1alpha1.RenderedTemplatesApplied,
@@ -596,17 +614,19 @@ func (r *ClusterInstanceReconciler) applyRenderedManifests(
 
 	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			r.Log.Info(
-				fmt.Sprintf("Failed to update ClusterInstance %s status post creation of rendered templates, err: %s",
-					clusterInstance.Name, updateErr.Error()))
+			log.Error("failed to update ClusterInstance status post creation of rendered templates",
+				zap.Error(updateErr))
 			err = updateErr
 		}
 	}
+
+	log.Info("Finished applying the rendered manifests")
 	return
 }
 
 func (r *ClusterInstanceReconciler) pruneManifests(
 	ctx context.Context,
+	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 	objects []ci.RenderedObject,
 ) (bool, error) {
@@ -625,6 +645,7 @@ func (r *ClusterInstanceReconciler) pruneManifests(
 		obj := object.GetObject()
 		if err := r.deleteResource(
 			ctx,
+			log,
 			ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
 			&obj,
 		); err == nil {
@@ -643,6 +664,7 @@ func (r *ClusterInstanceReconciler) pruneManifests(
 
 func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(
 	ctx context.Context,
+	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 	objects []ci.RenderedObject,
 ) error {
@@ -658,7 +680,7 @@ func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(
 		manifestRef.Status = v1alpha1.ManifestSuppressed
 		manifestRef.Message = ""
 		updateClusterInstanceStatus(clusterInstance, manifestRef)
-		r.Log.Info(fmt.Sprintf("Suppressed manifest %s", resourceId))
+		log.Sugar().Infof("Suppressed manifest %s", resourceId)
 	}
 
 	return conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
@@ -666,14 +688,15 @@ func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(
 
 func (r *ClusterInstanceReconciler) handleRenderTemplates(
 	ctx context.Context,
+	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 ) (ok bool, err error) {
 
 	ok = false
 
 	// Render templates manifests
-	r.Log.Info(fmt.Sprintf("Rendering templates for ClusterInstance %s", clusterInstance.Name))
-	objects, err := r.renderManifests(ctx, clusterInstance)
+	log.Info("Starting to render templates")
+	objects, err := r.renderManifests(ctx, log, clusterInstance)
 	if err != nil {
 		r.Log.Info(
 			fmt.Sprintf("encountered error while rendering templates for ClusterInstance %s, err: %v",
@@ -682,23 +705,23 @@ func (r *ClusterInstanceReconciler) handleRenderTemplates(
 	}
 
 	// Prune resources in descending order of sync-wave
-	if ok, err = r.pruneManifests(ctx, clusterInstance, objects.GetPruneObjects()); !ok || err != nil {
+	if ok, err = r.pruneManifests(ctx, log, clusterInstance, objects.GetPruneObjects()); !ok || err != nil {
 		return
 	}
 
 	// Update status for manifests previously rendered, but  have been listed for suppression
-	if err = r.updateSuppressedManifestsStatus(ctx, clusterInstance, objects.GetSuppressObjects()); err != nil {
+	if err = r.updateSuppressedManifestsStatus(ctx, log, clusterInstance, objects.GetSuppressObjects()); err != nil {
 		return
 	}
 
 	// Validate rendered manifests using kubernetes dry-run
 	renderList := objects.GetRenderObjects()
-	if ok, err = r.validateRenderedManifests(ctx, clusterInstance, renderList); !ok || err != nil {
+	if ok, err = r.validateRenderedManifests(ctx, log, clusterInstance, renderList); !ok || err != nil {
 		return
 	}
 
 	// Apply the rendered manifests
-	ok, err = r.applyRenderedManifests(ctx, clusterInstance, renderList)
+	ok, err = r.applyRenderedManifests(ctx, log, clusterInstance, renderList)
 
 	return
 }

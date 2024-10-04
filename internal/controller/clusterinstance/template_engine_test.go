@@ -22,17 +22,16 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/go-logr/logr"
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	aiv1beta1 "github.com/openshift/assisted-service/api/v1beta1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -107,9 +106,6 @@ func TestTemplateEngineRender(t *testing.T) {
 
 	TestData, _ := buildClusterData(TestClusterInstance, &TestClusterInstance.Spec.Nodes[0])
 
-	type fields struct {
-		Log logr.Logger
-	}
 	type args struct {
 		templateType string
 		templateStr  string
@@ -117,7 +113,6 @@ func TestTemplateEngineRender(t *testing.T) {
 	}
 	tests := []struct {
 		name    string
-		fields  fields
 		args    args
 		want    map[string]interface{}
 		wantErr bool
@@ -232,7 +227,7 @@ metadata:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmplEngine := &TemplateEngine{
-				Log: tt.fields.Log,
+				log: zap.NewNop(),
 			}
 			got, err := tmplEngine.render(tt.args.templateType, tt.args.templateStr, tt.args.data)
 			if (err != nil) != tt.wantErr {
@@ -261,7 +256,7 @@ var _ = Describe("renderTemplates", func() {
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 
-		testLogger := ctrl.Log.WithName("TemplateEngine")
+		testLogger := zap.NewNop().Named("Test")
 		tmplEngine = NewTemplateEngine(testLogger)
 
 		TestClusterInstance = &v1alpha1.ClusterInstance{
@@ -636,8 +631,7 @@ var _ = Describe("ProcessTemplates", func() {
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 
-		testLogger := ctrl.Log.WithName("TemplateEngine")
-		tmplEngine = NewTemplateEngine(testLogger)
+		tmplEngine = NewTemplateEngine(zap.NewNop())
 
 		TestClusterInstance = v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{

@@ -20,14 +20,13 @@ import (
 	"context"
 	"testing"
 
+	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -41,9 +40,9 @@ func TestMain(t *testing.T) {
 var _ = Describe("initConfigMapTemplates", func() {
 	var (
 		c                   client.Client
-		ctx                             = context.Background()
-		log                 logr.Logger = ctrl.Log.WithName("controllers").WithName("SiteConfig")
-		SiteConfigNamespace             = getSiteConfigNamespace(log)
+		ctx                 = context.Background()
+		testLogger          = zap.NewNop().Named("Test")
+		SiteConfigNamespace = getSiteConfigNamespace(testLogger)
 	)
 
 	BeforeEach(func() {
@@ -60,7 +59,7 @@ var _ = Describe("initConfigMapTemplates", func() {
 	})
 
 	It("should create default assisted install and image based install cluster templates on initialization", func() {
-		err := initConfigMapTemplates(ctx, c, log)
+		err := initConfigMapTemplates(ctx, c, testLogger)
 		Expect(err).ToNot(HaveOccurred())
 
 		cm := &corev1.ConfigMap{}
@@ -79,7 +78,7 @@ var _ = Describe("initConfigMapTemplates", func() {
 	})
 
 	It("should create default assisted install and image based install node templates on initialization", func() {
-		err := initConfigMapTemplates(ctx, c, log)
+		err := initConfigMapTemplates(ctx, c, testLogger)
 		Expect(err).ToNot(HaveOccurred())
 
 		cm := &corev1.ConfigMap{}
@@ -113,7 +112,7 @@ var _ = Describe("initConfigMapTemplates", func() {
 			Namespace: SiteConfigNamespace,
 		}
 
-		err := initConfigMapTemplates(ctx, c, log)
+		err := initConfigMapTemplates(ctx, c, testLogger)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify that the existing ConfigMap is not over-written
