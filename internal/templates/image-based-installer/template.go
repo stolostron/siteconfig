@@ -13,7 +13,13 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 */
 
-package imagebasedinstall
+package imagebasedinstaller
+
+// Default image-based installer install template names
+const (
+	ClusterLevelInstallTemplates = "ibi-cluster-templates-v1"
+	NodeLevelInstallTemplates    = "ibi-node-templates-v1"
+)
 
 const ImageClusterInstall = `apiVersion: extensions.hive.openshift.io/v1alpha1
 kind: ImageClusterInstall

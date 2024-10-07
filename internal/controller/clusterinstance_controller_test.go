@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
 
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
@@ -26,6 +27,8 @@ import (
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
+	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1841,4 +1844,227 @@ var _ = Describe("createOrPatch", func() {
 		Expect(result).To(Equal(controllerutil.OperationResultNone))
 	})
 
+})
+
+var _ = Describe("applyACMBackupLabelToInstallTemplates", func() {
+	var (
+		c                   client.Client
+		r                   *ClusterInstanceReconciler
+		ctx                 = context.Background()
+		testLogger          = zap.NewNop().Named("Test")
+		siteConfigNamespace = os.Getenv("POD_NAMESPACE")
+	)
+
+	BeforeEach(func() {
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			Build()
+		tmplEngine := ci.NewTemplateEngine()
+		r = &ClusterInstanceReconciler{
+			Client:     c,
+			Scheme:     scheme.Scheme,
+			Log:        testLogger,
+			TmplEngine: tmplEngine,
+		}
+
+		siteConfigNS := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: siteConfigNamespace,
+			},
+		}
+		Expect(c.Create(ctx, siteConfigNS)).To(Succeed())
+	})
+
+	It("adds the ACM DR backup label to custom install template ConfigMaps", func() {
+		clusterInstance := &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      TestClusterInstanceName,
+				Namespace: TestClusterInstanceNamespace,
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				TemplateRefs: []v1alpha1.TemplateRef{
+					{
+						Name:      "test1",
+						Namespace: siteConfigNamespace,
+					},
+					{
+						Name:      "test2",
+						Namespace: siteConfigNamespace,
+					},
+				},
+				Nodes: []v1alpha1.NodeSpec{
+					{
+						TemplateRefs: []v1alpha1.TemplateRef{
+							{
+								Name:      "test3",
+								Namespace: siteConfigNamespace,
+							},
+							{
+								Name:      "test4",
+								Namespace: siteConfigNamespace,
+							},
+						},
+					},
+				},
+			},
+		}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		// Create install template ConfigMaps
+		installTemplateConfigMaps := []*corev1.ConfigMap{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test1",
+					Namespace: siteConfigNamespace,
+				},
+				Data: map[string]string{
+					"ClusterDeployment": "foo: bar",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test2",
+					Namespace: siteConfigNamespace,
+				},
+				Data: map[string]string{
+					"ClusterDeployment": "foo: bar",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test3",
+					Namespace: siteConfigNamespace,
+				},
+				Data: map[string]string{
+					"BareMetalHost": "foo: bar",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test4",
+					Namespace: siteConfigNamespace,
+				},
+				Data: map[string]string{
+					"BareMetalHost": "foo: bar",
+				},
+			},
+		}
+		for _, cm := range installTemplateConfigMaps {
+			Expect(c.Create(ctx, cm)).To(Succeed())
+		}
+
+		err := r.applyACMBackupLabelToInstallTemplates(ctx, testLogger, clusterInstance)
+		Expect(err).ToNot(HaveOccurred())
+
+		for _, cm := range installTemplateConfigMaps {
+			installTemplateCM := &corev1.ConfigMap{}
+			key := types.NamespacedName{
+				Name:      cm.Name,
+				Namespace: cm.Namespace,
+			}
+			Expect(c.Get(ctx, key, installTemplateCM)).To(Succeed())
+			Expect(installTemplateCM.GetLabels()).To(
+				HaveKeyWithValue(acmBackupLabel, acmBackupLabelValue),
+				"Install template ConfigMap %s/%s missing ACM DR backup label",
+				installTemplateCM.Namespace, installTemplateCM.Name,
+			)
+		}
+	})
+
+	It("does not add the label to the default provided install template ConfigMaps", func() {
+		clusterInstance := &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      TestClusterInstanceName,
+				Namespace: TestClusterInstanceNamespace,
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				TemplateRefs: []v1alpha1.TemplateRef{
+					{
+						Name:      ai_templates.ClusterLevelInstallTemplates,
+						Namespace: siteConfigNamespace,
+					},
+					{
+						Name:      ibi_templates.ClusterLevelInstallTemplates,
+						Namespace: siteConfigNamespace,
+					},
+				},
+				Nodes: []v1alpha1.NodeSpec{
+					{
+						TemplateRefs: []v1alpha1.TemplateRef{
+							{
+								Name:      ai_templates.NodeLevelInstallTemplates,
+								Namespace: siteConfigNamespace,
+							},
+							{
+								Name:      ibi_templates.NodeLevelInstallTemplates,
+								Namespace: siteConfigNamespace,
+							},
+						},
+					},
+				},
+			},
+		}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		// Create install template ConfigMaps
+		installTemplateConfigMaps := []*corev1.ConfigMap{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      ai_templates.ClusterLevelInstallTemplates,
+					Namespace: siteConfigNamespace,
+				},
+				Data: map[string]string{
+					"ClusterDeployment": "foo: bar",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      ibi_templates.ClusterLevelInstallTemplates,
+					Namespace: siteConfigNamespace,
+				},
+				Data: map[string]string{
+					"ClusterDeployment": "foo: bar",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      ai_templates.NodeLevelInstallTemplates,
+					Namespace: siteConfigNamespace,
+				},
+				Data: map[string]string{
+					"BareMetalHost": "foo: bar",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      ibi_templates.NodeLevelInstallTemplates,
+					Namespace: siteConfigNamespace,
+				},
+				Data: map[string]string{
+					"BareMetalHost": "foo: bar",
+				},
+			},
+		}
+		for _, cm := range installTemplateConfigMaps {
+			Expect(c.Create(ctx, cm)).To(Succeed())
+		}
+
+		err := r.applyACMBackupLabelToInstallTemplates(ctx, testLogger, clusterInstance)
+		Expect(err).ToNot(HaveOccurred())
+
+		for _, cm := range installTemplateConfigMaps {
+			installTemplateCM := &corev1.ConfigMap{}
+			key := types.NamespacedName{
+				Name:      cm.Name,
+				Namespace: cm.Namespace,
+			}
+			Expect(c.Get(ctx, key, installTemplateCM)).To(Succeed())
+			Expect(installTemplateCM.GetLabels()).ToNot(
+				HaveKeyWithValue(acmBackupLabel, acmBackupLabelValue),
+				"Default provided install template ConfigMap %s/%s should not contain the ACM DR backup label",
+				installTemplateCM.Namespace, installTemplateCM.Name,
+			)
+		}
+	})
 })

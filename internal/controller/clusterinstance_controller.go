@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
 	"reflect"
 	"sort"
 	"time"
@@ -27,10 +28,12 @@ import (
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,9 +42,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
+	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 )
 
 const clusterInstanceFinalizer = "clusterinstance." + v1alpha1.Group + "/finalizer"
+
+// Disaster recovery constants
+const (
+	acmBackupLabel      = "cluster.open-cluster-management.io/backup"
+	acmBackupLabelValue = ""
+)
 
 // ClusterInstanceReconciler reconciles a ClusterInstance object
 type ClusterInstanceReconciler struct {
@@ -147,7 +158,91 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
 	}
 
+	// Apply the ACM disaster recovery backup labels to the install template ConfigMaps
+	if err := r.applyACMBackupLabelToInstallTemplates(ctx, log, clusterInstance); err != nil {
+		return requeueWithError(err)
+	}
+
 	return doNotRequeue(), nil
+}
+
+func (r *ClusterInstanceReconciler) applyACMBackupLabelToInstallTemplates(
+	ctx context.Context,
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) error {
+
+	log = log.Named("applyACMBackupLabelToInstallTemplates")
+
+	// Only apply the ACM disaster recovery backup label to install templates other than those provided
+	// by the SiteConfig Operator
+	siteConfigNS := os.Getenv("POD_NAMESPACE")
+	if siteConfigNS == "" {
+		log.Warn("Could not determine the SiteConfig Operator Namespace")
+	}
+
+	defaultInstallTemplates := []string{
+		ai_templates.ClusterLevelInstallTemplates, ai_templates.NodeLevelInstallTemplates,
+		ibi_templates.ClusterLevelInstallTemplates, ibi_templates.NodeLevelInstallTemplates,
+	}
+
+	applyDRLabelFn := func(ref v1alpha1.TemplateRef) error {
+
+		// check if the install template reference is one of the default provided templates
+		if ref.Namespace == siteConfigNS {
+			for _, defaultTempl := range defaultInstallTemplates {
+				if ref.Name == defaultTempl {
+					// ignore install template
+					return nil
+				}
+			}
+		}
+
+		cm := &corev1.ConfigMap{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, cm); err != nil {
+			return err
+		}
+
+		labels := cm.GetLabels()
+		if labels == nil {
+			labels = make(map[string]string)
+		} else if labels[acmBackupLabel] == acmBackupLabelValue {
+			// nothing to do
+			return nil
+		}
+
+		patch := client.MergeFrom(cm.DeepCopy())
+		labels[acmBackupLabel] = acmBackupLabelValue
+		cm.SetLabels(labels)
+		return r.Patch(ctx, cm, patch)
+	}
+
+	applyDRLabelToTemplatesFn := func(refs []v1alpha1.TemplateRef) error {
+		for _, ref := range refs {
+			if err := applyDRLabelFn(ref); err != nil {
+				log.Sugar().Errorf(
+					"Failed to apply disaster recovery label to install template ConfigMap %s/%s, err: %v",
+					ref.Namespace, ref.Name, err,
+				)
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Process cluster-level install templates
+	if err := applyDRLabelToTemplatesFn(clusterInstance.Spec.TemplateRefs); err != nil {
+		return err
+	}
+
+	// Process node-level install templates
+	for _, node := range clusterInstance.Spec.Nodes {
+		if err := applyDRLabelToTemplatesFn(node.TemplateRefs); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (r *ClusterInstanceReconciler) finalizeClusterInstance(
@@ -697,9 +792,7 @@ func (r *ClusterInstanceReconciler) handleRenderTemplates(
 	log.Info("Starting to render templates")
 	objects, err := r.renderManifests(ctx, log, clusterInstance)
 	if err != nil {
-		r.Log.Info(
-			fmt.Sprintf("encountered error while rendering templates for ClusterInstance %s, err: %v",
-				clusterInstance.Name, err))
+		log.Error("encountered error while rendering templates", zap.Error(err))
 		return
 	}
 

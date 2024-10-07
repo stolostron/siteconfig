@@ -29,6 +29,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
+	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 )
 
 func TestMain(t *testing.T) {
@@ -64,14 +66,14 @@ var _ = Describe("initConfigMapTemplates", func() {
 
 		cm := &corev1.ConfigMap{}
 		key := types.NamespacedName{
-			Name:      AssistedInstallerClusterTemplates,
+			Name:      ai_templates.ClusterLevelInstallTemplates,
 			Namespace: SiteConfigNamespace,
 		}
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
 
 		cm = &corev1.ConfigMap{}
 		key = types.NamespacedName{
-			Name:      ImageBasedInstallClusterTemplates,
+			Name:      ibi_templates.ClusterLevelInstallTemplates,
 			Namespace: SiteConfigNamespace,
 		}
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
@@ -83,14 +85,14 @@ var _ = Describe("initConfigMapTemplates", func() {
 
 		cm := &corev1.ConfigMap{}
 		key := types.NamespacedName{
-			Name:      AssistedInstallerNodeTemplates,
+			Name:      ai_templates.NodeLevelInstallTemplates,
 			Namespace: SiteConfigNamespace,
 		}
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
 
 		cm = &corev1.ConfigMap{}
 		key = types.NamespacedName{
-			Name:      ImageBasedInstallNodeTemplates,
+			Name:      ibi_templates.NodeLevelInstallTemplates,
 			Namespace: SiteConfigNamespace,
 		}
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
@@ -100,7 +102,7 @@ var _ = Describe("initConfigMapTemplates", func() {
 		data := map[string]string{"test": "foobar"}
 		cm := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      AssistedInstallerNodeTemplates,
+				Name:      ai_templates.NodeLevelInstallTemplates,
 				Namespace: SiteConfigNamespace,
 			},
 			Data: data,
@@ -108,7 +110,7 @@ var _ = Describe("initConfigMapTemplates", func() {
 		Expect(c.Create(ctx, cm)).To(Succeed())
 
 		key := types.NamespacedName{
-			Name:      AssistedInstallerNodeTemplates,
+			Name:      ai_templates.NodeLevelInstallTemplates,
 			Namespace: SiteConfigNamespace,
 		}
 
