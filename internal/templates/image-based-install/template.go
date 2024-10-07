@@ -153,6 +153,7 @@ spec:
   bootMACAddress: "{{ .SpecialVars.CurrentNode.BootMACAddress }}"
   automatedCleaningMode: "{{ .SpecialVars.CurrentNode.AutomatedCleaningMode }}"
   online: true
+  externallyProvisioned: true
 {{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:
 {{ .SpecialVars.CurrentNode.RootDeviceHints | toYaml | indent 4 }}
