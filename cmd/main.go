@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/go-logr/logr"
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	"github.com/openshift/assisted-service/api/v1beta1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
@@ -45,7 +44,9 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlruntimezap "sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	"go.uber.org/zap"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	"github.com/stolostron/siteconfig/internal/controller"
@@ -55,8 +56,7 @@ import (
 )
 
 var (
-	scheme   = runtime.NewScheme()
-	setupLog = ctrl.Log.WithName("setup")
+	scheme = runtime.NewScheme()
 )
 
 const (
@@ -86,13 +86,18 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	opts := zap.Options{
+	opts := ctrlruntimezap.Options{
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	ctrl.SetLogger(ctrlruntimezap.New(ctrlruntimezap.UseFlagOptions(&opts)))
+
+	siteconfigLogger := zap.Must(zap.NewDevelopment())
+	defer siteconfigLogger.Sync() //nolint:errcheck
+
+	setupLog := siteconfigLogger.Named("SiteConfigSetup")
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
@@ -117,60 +122,71 @@ func main() {
 		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error("Unable to start manager", zap.Error(err))
 		os.Exit(1)
 	}
 
 	// Check that the SiteConfig namespace value is defined
 	if getSiteConfigNamespace(setupLog) == "" {
-		setupLog.Info("unable to retrieve SiteConfig namespace")
+		setupLog.Error("Unable to retrieve the SiteConfig namespace")
 		os.Exit(1)
 	}
 
-	if err := initConfigMapTemplates(context.TODO(), mgr.GetClient(), setupLog); err != nil {
-		setupLog.Error(err, "unable to initialize default reference ConfigMap templates")
+	// Initialize the default install template ConfigMaps
+	if err := initConfigMapTemplates(
+		context.TODO(),
+		mgr.GetClient(),
+		setupLog,
+	); err != nil {
+		setupLog.Error("Unable to initialize the default reference install template ConfigMaps",
+			zap.Error(err))
 		os.Exit(1)
 	}
 
-	log := ctrl.Log.WithName("controllers").WithName("ClusterInstance")
+	clusterInstanceLogger := siteconfigLogger.Named("ClusterInstanceController")
 	if err = (&controller.ClusterInstanceReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		Recorder:   mgr.GetEventRecorderFor("ClusterInstance-controller"),
-		Log:        log,
-		TmplEngine: ci.NewTemplateEngine(log.WithName("TemplateEngine")),
+		Recorder:   mgr.GetEventRecorderFor("ClusterInstanceController"),
+		Log:        clusterInstanceLogger,
+		TmplEngine: ci.NewTemplateEngine(clusterInstanceLogger.Named("TemplateEngine")),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ClusterInstance")
+		setupLog.Error("Unable to create controller",
+			zap.String("controller", "ClusterInstance"),
+			zap.Error(err),
+		)
 		os.Exit(1)
 	}
 
 	if err = (&controller.ClusterDeploymentReconciler{
 		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("ClusterDeploymentReconciler"),
+		Log:    siteconfigLogger.Named("ClusterDeploymentReconciler"),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ClusterDeploymentReconciler")
+		setupLog.Error("Unable to create controller",
+			zap.String("controller", "ClusterDeploymentReconciler"),
+			zap.Error(err))
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
+		setupLog.Error("Unable to set up health check", zap.Error(err))
 		os.Exit(1)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
+		setupLog.Error("Unable to set up ready check", zap.Error(err))
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting manager")
+	setupLog.Info("Starting SiteConfig manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
+		setupLog.Error("Encountered an error starting SiteConfig manager", zap.Error(err))
 		os.Exit(1)
 	}
 }
 
-func getSiteConfigNamespace(log logr.Logger) string {
+func getSiteConfigNamespace(log *zap.Logger) string {
 	namespace := os.Getenv("POD_NAMESPACE")
 	if namespace == "" {
 		log.Info("POD_NAMESPACE environment variable is not defined")
@@ -178,7 +194,7 @@ func getSiteConfigNamespace(log logr.Logger) string {
 	return namespace
 }
 
-func initConfigMapTemplates(ctx context.Context, c client.Client, log logr.Logger) error {
+func initConfigMapTemplates(ctx context.Context, c client.Client, log *zap.Logger) error {
 	templates := make(map[string]map[string]string, 4)
 	templates[AssistedInstallerClusterTemplates] = assistedinstaller.GetClusterTemplates()
 	templates[AssistedInstallerNodeTemplates] = assistedinstaller.GetNodeTemplates()
@@ -201,11 +217,12 @@ func initConfigMapTemplates(ctx context.Context, c client.Client, log logr.Logge
 		if err := retry.RetryOnConflictOrRetriable(k8sretry.DefaultBackoff, func() error {
 			return client.IgnoreAlreadyExists(c.Create(ctx, configMap))
 		}); err != nil {
-			return fmt.Errorf("failed to create default reference template ConfigMap %s/%s during init, error: %w",
+			return fmt.Errorf(
+				"failed to create default reference install template ConfigMap %s/%s, error: %w",
 				siteConfigNamespace, k, err)
 		}
 
-		log.Info(fmt.Sprintf("created default reference template ConfigMap %s/%s", siteConfigNamespace, k))
+		log.Sugar().Infof("Created default reference install template ConfigMap %s/%s", siteConfigNamespace, k)
 	}
 
 	return nil

@@ -3,7 +3,7 @@ module github.com/stolostron/siteconfig
 go 1.21
 
 require (
-	github.com/go-logr/logr v1.4.1
+	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/onsi/ginkgo/v2 v2.13.0
 	github.com/onsi/gomega v1.29.0
 	github.com/openshift/assisted-service/models v0.0.0 // indirect
@@ -21,6 +21,7 @@ require (
 	github.com/metal3-io/baremetal-operator/apis v0.5.1
 	github.com/openshift/assisted-service/api v0.0.0-20240405132132-484ec5c683c6
 	github.com/stretchr/testify v1.8.4
+	go.uber.org/zap v1.26.0
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
 	open-cluster-management.io/api v0.13.0
 	sigs.k8s.io/yaml v1.3.0
@@ -77,7 +78,6 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	go.mongodb.org/mongo-driver v1.10.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.26.0 // indirect
 	golang.org/x/net v0.25.0 // indirect
 	golang.org/x/oauth2 v0.10.0 // indirect
 	golang.org/x/sys v0.21.0 // indirect
