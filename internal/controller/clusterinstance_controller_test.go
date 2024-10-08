@@ -26,6 +26,8 @@ import (
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/common"
+	"github.com/stolostron/siteconfig/internal/templates/engine"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -99,12 +101,10 @@ var _ = Describe("Reconcile", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
-			Client:     c,
-			Scheme:     scheme.Scheme,
-			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			Client: c,
+			Scheme: scheme.Scheme,
+			Log:    testLogger,
 		}
 
 		Expect(c.Create(ctx, testParams.GeneratePullSecret())).To(Succeed())
@@ -212,12 +212,10 @@ var _ = Describe("handleFinalizer", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
-			Client:     c,
-			Scheme:     scheme.Scheme,
-			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			Client: c,
+			Scheme: scheme.Scheme,
+			Log:    testLogger,
 		}
 	})
 
@@ -322,7 +320,7 @@ var _ = Describe("handleFinalizer", func() {
 				Name:      manifestName,
 				Namespace: clusterNamespace,
 				Labels: map[string]string{
-					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
 				},
 			},
 		}
@@ -333,7 +331,7 @@ var _ = Describe("handleFinalizer", func() {
 				Name:      manifestName,
 				Namespace: clusterNamespace,
 				Labels: map[string]string{
-					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
 				},
 			},
 		}
@@ -343,7 +341,7 @@ var _ = Describe("handleFinalizer", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: manifestName,
 				Labels: map[string]string{
-					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
 				},
 			},
 		}
@@ -364,7 +362,7 @@ var _ = Describe("handleFinalizer", func() {
 				Name:      manifestName,
 				Namespace: clusterNamespace,
 				Labels: map[string]string{
-					ci.OwnedByLabel: OwnedByOtherCI,
+					common.OwnedByLabel: OwnedByOtherCI,
 				},
 			},
 		}
@@ -451,7 +449,7 @@ var _ = Describe("handleFinalizer", func() {
 				Name:      manifestName,
 				Namespace: clusterNamespace,
 				Labels: map[string]string{
-					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
 				},
 			},
 		}
@@ -461,7 +459,7 @@ var _ = Describe("handleFinalizer", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: manifestName,
 				Labels: map[string]string{
-					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
 				},
 			},
 		}
@@ -510,16 +508,16 @@ var _ = Describe("pruneManifests", func() {
 		cdManifest, bmh1Manifest, bmh2Manifest, mcManifest, cm1Manifest, cm2Manifest map[string]interface{}
 
 		// RenderedObject
-		cdRenderedObject, bmh1RenderedObject, bmh2RenderedObject, mcRenderedObject, cm1RenderedObject, cm2RenderedObject ci.RenderedObject
+		cdRenderedObject, bmh1RenderedObject, bmh2RenderedObject, mcRenderedObject, cm1RenderedObject, cm2RenderedObject engine.RenderedObject
 		// list of objects
-		objects []ci.RenderedObject
+		objects []engine.RenderedObject
 
 		// references for retrieving the objects
 		cdKey, bmh1Key, bmh2Key, mcKey, cm1Key, cm2Key types.NamespacedName
 		// list of keys
 		objectKeys []types.NamespacedName
 
-		verifyPruningFn = func(pruneList, doNotPruneList []ci.RenderedObject, pruneKeys, doNotPruneKeys []types.NamespacedName) {
+		verifyPruningFn = func(pruneList, doNotPruneList []engine.RenderedObject, pruneKeys, doNotPruneKeys []types.NamespacedName) {
 			Expect(len(pruneList)).To(Equal(len(pruneKeys)))
 			Expect(len(doNotPruneList)).To(Equal(len(doNotPruneKeys)))
 
@@ -544,19 +542,17 @@ var _ = Describe("pruneManifests", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
-			Client:     c,
-			Scheme:     scheme.Scheme,
-			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			Client: c,
+			Scheme: scheme.Scheme,
+			Log:    testLogger,
 		}
 
 		annotations := map[string]string{
-			ci.WaveAnnotation: "0",
+			common.WaveAnnotation: "0",
 		}
 		labels := map[string]string{
-			ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(TestClusterInstanceNamespace, TestClusterInstanceName),
+			common.OwnedByLabel: common.GenerateOwnedByLabelValue(TestClusterInstanceNamespace, TestClusterInstanceName),
 		}
 
 		cdManifest = map[string]interface{}{
@@ -640,7 +636,7 @@ var _ = Describe("pruneManifests", func() {
 		Expect(cm1RenderedObject.SetObject(cm1Manifest)).ToNot(HaveOccurred())
 		Expect(cm2RenderedObject.SetObject(cm2Manifest)).ToNot(HaveOccurred())
 
-		objects = []ci.RenderedObject{cdRenderedObject, bmh1RenderedObject, bmh2RenderedObject, mcRenderedObject, cm1RenderedObject, cm2RenderedObject}
+		objects = []engine.RenderedObject{cdRenderedObject, bmh1RenderedObject, bmh2RenderedObject, mcRenderedObject, cm1RenderedObject, cm2RenderedObject}
 		objectKeys = []types.NamespacedName{cdKey, bmh1Key, bmh2Key, mcKey, cm1Key, cm2Key}
 
 		// Create the manifests and confirm they exist
@@ -655,12 +651,12 @@ var _ = Describe("pruneManifests", func() {
 
 	It("prunes manifests defined at the cluster-level", func() {
 
-		pruneList := []ci.RenderedObject{
+		pruneList := []engine.RenderedObject{
 			cdRenderedObject, bmh1RenderedObject, bmh2RenderedObject, mcRenderedObject, cm1RenderedObject, cm2RenderedObject,
 		}
 		pruneKeys := []types.NamespacedName{cdKey, bmh1Key, bmh2Key, mcKey, cm1Key, cm2Key}
 
-		doNotPruneList := []ci.RenderedObject{}
+		doNotPruneList := []engine.RenderedObject{}
 		doNotPruneKeys := []types.NamespacedName{}
 
 		clusterInstance := &v1alpha1.ClusterInstance{
@@ -710,10 +706,10 @@ var _ = Describe("pruneManifests", func() {
 
 	It("prunes manifests defined at the node-level", func() {
 
-		pruneList := []ci.RenderedObject{bmh1RenderedObject}
+		pruneList := []engine.RenderedObject{bmh1RenderedObject}
 		pruneKeys := []types.NamespacedName{bmh1Key}
 
-		doNotPruneList := []ci.RenderedObject{
+		doNotPruneList := []engine.RenderedObject{
 			cdRenderedObject, bmh2RenderedObject, mcRenderedObject, cm1RenderedObject, cm2RenderedObject,
 		}
 		doNotPruneKeys := []types.NamespacedName{cdKey, bmh2Key, mcKey, cm1Key, cm2Key}
@@ -754,11 +750,11 @@ var _ = Describe("pruneManifests", func() {
 
 	It("does not prune manifests not-owned by the ClusterInstance", func() {
 
-		pruneList := []ci.RenderedObject{
+		pruneList := []engine.RenderedObject{
 			mcRenderedObject, cm1RenderedObject, cm2RenderedObject,
 		}
 
-		doNotPruneList := []ci.RenderedObject{
+		doNotPruneList := []engine.RenderedObject{
 			cdRenderedObject, bmh1RenderedObject, bmh2RenderedObject, mcRenderedObject, cm1RenderedObject, cm2RenderedObject,
 		}
 		doNotPruneKeys := []types.NamespacedName{cdKey, bmh1Key, bmh2Key, mcKey, cm1Key, cm2Key}
@@ -803,7 +799,7 @@ var _ = Describe("pruneManifests", func() {
 		Expect(ok).To(BeTrue())
 
 		// Expect the objects previously created to be deleted after pruneManifests is called
-		expectedPruneList := []ci.RenderedObject{}
+		expectedPruneList := []engine.RenderedObject{}
 		expectedPruneKeys := []types.NamespacedName{}
 		verifyPruningFn(expectedPruneList, doNotPruneList, expectedPruneKeys, doNotPruneKeys)
 	})
@@ -834,12 +830,10 @@ var _ = Describe("handleValidate", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
-			Client:     c,
-			Scheme:     scheme.Scheme,
-			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			Client: c,
+			Scheme: scheme.Scheme,
+			Log:    testLogger,
 		}
 
 		ci.SetupTestResources(ctx, c, testParams)
@@ -973,12 +967,10 @@ var _ = Describe("handleRenderTemplates", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
-			Client:     c,
-			Scheme:     scheme.Scheme,
-			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			Client: c,
+			Scheme: scheme.Scheme,
+			Log:    testLogger,
 		}
 
 		ci.SetupTestResources(ctx, c, testParams)
@@ -1152,12 +1144,10 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 		testLogger := zap.NewNop().Named("Test")
-		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r := &ClusterInstanceReconciler{
-			Client:     c,
-			Scheme:     scheme.Scheme,
-			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			Client: c,
+			Scheme: scheme.Scheme,
+			Log:    testLogger,
 		}
 
 		clusterInstance := &v1alpha1.ClusterInstance{
@@ -1246,7 +1236,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 		// Create the ClusterInstance CR
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		suppressList := make([]ci.RenderedObject, 0)
+		suppressList := make([]engine.RenderedObject, 0)
 		for _, manifestRef := range clusterInstance.Status.ManifestsRendered {
 
 			shouldSuppress := false
@@ -1271,7 +1261,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 				continue
 			}
 
-			object := ci.RenderedObject{}
+			object := engine.RenderedObject{}
 			err := object.SetObject(map[string]interface{}{
 				"apiVersion": *manifestRef.APIGroup,
 				"kind":       manifestRef.Kind,
@@ -1279,10 +1269,10 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 					"name":      manifestRef.Name,
 					"namespace": manifestRef.Namespace,
 					"annotations": map[string]string{
-						ci.WaveAnnotation: fmt.Sprintf("%d", manifestRef.SyncWave),
+						common.WaveAnnotation: fmt.Sprintf("%d", manifestRef.SyncWave),
 					},
 					"labels": map[string]string{
-						ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace,
+						common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterInstance.Namespace,
 							clusterInstance.Name),
 					},
 				},
@@ -1523,7 +1513,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			Kind:     ClusterDeploymentKind,
 			Name:     clusterName,
 		}
-		objects []ci.RenderedObject
+		objects []engine.RenderedObject
 	)
 
 	BeforeEach(func() {
@@ -1531,12 +1521,10 @@ var _ = Describe("executeRenderedManifests", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		tmplEngine := ci.NewTemplateEngine(testLogger)
 		r = &ClusterInstanceReconciler{
-			Client:     c,
-			Scheme:     scheme.Scheme,
-			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			Client: c,
+			Scheme: scheme.Scheme,
+			Log:    testLogger,
 		}
 
 		clusterInstance = &v1alpha1.ClusterInstance{
@@ -1560,9 +1548,9 @@ var _ = Describe("executeRenderedManifests", func() {
 			},
 		}
 
-		objects = make([]ci.RenderedObject, 0)
+		objects = make([]engine.RenderedObject, 0)
 		for _, manifest := range manifests {
-			object := ci.RenderedObject{}
+			object := engine.RenderedObject{}
 			err := object.SetObject(manifest)
 			Expect(err).ToNot(HaveOccurred())
 			objects = append(objects, object)

@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/retry"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -50,8 +49,8 @@ import (
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	"github.com/stolostron/siteconfig/internal/controller"
-	assistedinstaller "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
-	imagebasedinstall "github.com/stolostron/siteconfig/internal/templates/image-based-install"
+	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
+	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -60,10 +59,10 @@ var (
 )
 
 const (
-	AssistedInstallerClusterTemplates = "ai-cluster-templates-v1"
-	AssistedInstallerNodeTemplates    = "ai-node-templates-v1"
-	ImageBasedInstallClusterTemplates = "ibi-cluster-templates-v1"
-	ImageBasedInstallNodeTemplates    = "ibi-node-templates-v1"
+	AssistedInstallerClusterTemplates   = "ai-cluster-templates-v1"
+	AssistedInstallerNodeTemplates      = "ai-node-templates-v1"
+	ImageBasedInstallerClusterTemplates = "ibi-cluster-templates-v1"
+	ImageBasedInstallerNodeTemplates    = "ibi-node-templates-v1"
 )
 
 func init() {
@@ -145,11 +144,10 @@ func main() {
 
 	clusterInstanceLogger := siteconfigLogger.Named("ClusterInstanceController")
 	if err = (&controller.ClusterInstanceReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Recorder:   mgr.GetEventRecorderFor("ClusterInstanceController"),
-		Log:        clusterInstanceLogger,
-		TmplEngine: ci.NewTemplateEngine(clusterInstanceLogger.Named("TemplateEngine")),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("ClusterInstanceController"),
+		Log:      clusterInstanceLogger,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error("Unable to create controller",
 			zap.String("controller", "ClusterInstance"),
@@ -196,10 +194,10 @@ func getSiteConfigNamespace(log *zap.Logger) string {
 
 func initConfigMapTemplates(ctx context.Context, c client.Client, log *zap.Logger) error {
 	templates := make(map[string]map[string]string, 4)
-	templates[AssistedInstallerClusterTemplates] = assistedinstaller.GetClusterTemplates()
-	templates[AssistedInstallerNodeTemplates] = assistedinstaller.GetNodeTemplates()
-	templates[ImageBasedInstallClusterTemplates] = imagebasedinstall.GetClusterTemplates()
-	templates[ImageBasedInstallNodeTemplates] = imagebasedinstall.GetNodeTemplates()
+	templates[AssistedInstallerClusterTemplates] = ai_templates.GetClusterTemplates()
+	templates[AssistedInstallerNodeTemplates] = ai_templates.GetNodeTemplates()
+	templates[ImageBasedInstallerClusterTemplates] = ibi_templates.GetClusterTemplates()
+	templates[ImageBasedInstallerNodeTemplates] = ibi_templates.GetNodeTemplates()
 
 	siteConfigNamespace := getSiteConfigNamespace(log)
 

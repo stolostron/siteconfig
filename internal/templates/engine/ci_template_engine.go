@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package clusterinstance
+package engine
 
 import (
 	"bytes"
@@ -30,40 +30,41 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/common"
 )
 
-const (
-	WaveAnnotation        = v1alpha1.Group + "/sync-wave"
-	DefaultWaveAnnotation = "0"
-	OwnedByLabel          = v1alpha1.Group + "/owned-by"
-)
+// CITemplateEngine is a concrete implementation of the TemplateEngine interface for the
+// ClusterInstance resource
+type CITemplateEngine struct{}
 
-type TemplateEngine struct {
-	log *zap.Logger
+// NewCITemplateEngine creates a new instance of CITemplateEngine
+func NewCITemplateEngine() TemplateEngine {
+	return &CITemplateEngine{}
 }
 
-// SetLogger is to be used to log with ClusterInstance fields
-func (te *TemplateEngine) SetLogger(log1 *zap.Logger) {
-	te.log = log1
-}
-
-func NewTemplateEngine(defaultLogger *zap.Logger) *TemplateEngine {
-	return &TemplateEngine{log: defaultLogger}
-}
-
-func (te *TemplateEngine) ProcessTemplates(
+func (te *CITemplateEngine) ProcessTemplates(
 	ctx context.Context,
 	c client.Client,
-	clusterInstance v1alpha1.ClusterInstance,
+	log *zap.Logger,
+	object interface{},
 ) (RenderedObjectCollection, error) {
 
-	log := te.log.Named("ProcessTemplates")
+	log = log.Named("ProcessTemplates")
 
 	var renderedObjects RenderedObjectCollection
+
+	// Type assertion to handle specific object types
+	clusterInstance, ok := object.(v1alpha1.ClusterInstance)
+	if !ok {
+		log.Error("Invalid object type. Expected v1alpha1.ClusterInstance")
+		return renderedObjects, fmt.Errorf("invalid object type")
+	}
+
 	log.Info("Started processing cluster-level install templates")
 
 	// Render cluster-level install templates
-	clusterObjects, err := te.renderTemplates(ctx, c, &clusterInstance, nil)
+	clusterObjects, err := te.renderTemplates(ctx, c, log, &clusterInstance, nil)
 	if err != nil {
 		log.Error("Encountered error while processing cluster-level install templates", zap.Error(err))
 		return renderedObjects, err
@@ -80,7 +81,7 @@ func (te *TemplateEngine) ProcessTemplates(
 		log.Sugar().Infof("Started processing node-level install templates [node: %d of %d]", nodeId+1, numNodes)
 
 		// Render node-level templates
-		nodeObjects, err := te.renderTemplates(ctx, c, &clusterInstance, &node)
+		nodeObjects, err := te.renderTemplates(ctx, c, log, &clusterInstance, &node)
 		if err != nil {
 			log.Sugar().Errorf(
 				"Encountered error while processing node-level install templates [node: %d of %d], err: %v",
@@ -98,9 +99,10 @@ func (te *TemplateEngine) ProcessTemplates(
 	return renderedObjects, nil
 }
 
-func (te *TemplateEngine) renderTemplates(
+func (te *CITemplateEngine) renderTemplates(
 	ctx context.Context,
 	c client.Client,
+	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 	node *v1alpha1.NodeSpec,
 ) ([]RenderedObject, error) {
@@ -119,7 +121,7 @@ func (te *TemplateEngine) renderTemplates(
 		templateRefs = node.TemplateRefs
 	}
 
-	log := te.log.Named("renderTemplates")
+	log = log.Named("renderTemplates")
 
 	for tId, templateRef := range templateRefs {
 		log.Sugar().Infof("Processing templateRef %d of %d", tId+1, len(templateRefs))
@@ -137,6 +139,7 @@ func (te *TemplateEngine) renderTemplates(
 		for templateKey, template := range templatesConfigMap.Data {
 
 			object, err := te.renderManifestFromTemplate(
+				log,
 				clusterInstance,
 				node,
 				templateRef.Name,
@@ -151,7 +154,82 @@ func (te *TemplateEngine) renderTemplates(
 	return renderedObjects, nil
 }
 
-func appendAnnotationsAndLabels(
+func (te *CITemplateEngine) renderManifestFromTemplate(
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+	node *v1alpha1.NodeSpec,
+	templateRefName, templateKey, template string,
+) (RenderedObject, error) {
+
+	var object RenderedObject
+
+	log = log.Named("renderManifestFromTemplate")
+
+	clusterData, err := ci.BuildClusterData(clusterInstance, node)
+	if err != nil {
+		log.Error("Failed to build ClusterInstance data", zap.Error(err))
+		return object, err
+	}
+
+	manifest, err := te.render(templateKey, template, clusterData)
+	if err != nil {
+		log.Error(fmt.Sprintf("Failed to render templateRef %s", templateRefName), zap.Error(err))
+		return object, err
+	}
+	if manifest == nil {
+		return object, nil
+	}
+
+	if err := object.SetObject(manifest); err != nil {
+		log.Error(fmt.Sprintf("Failed to parse rendered template templateRef %s", templateRefName), zap.Error(err))
+		return object, err
+	}
+
+	apiVersion := object.GetAPIVersion()
+	kind := object.GetKind()
+	name := object.GetName()
+	namespace := object.GetNamespace()
+
+	// Default action is to render the manifest
+	object.action = actionRender
+
+	// Determine if manifest should be pruned or suppressed
+	suppressManifestLogMsg := fmt.Sprintf("Suppressed manifest %s", common.GetResourceId(name, namespace, kind))
+	pruneList := clusterInstance.Spec.PruneManifests
+	suppressManifestsList := clusterInstance.Spec.SuppressedManifests
+	if node != nil {
+		pruneList = append(pruneList, node.PruneManifests...)
+		suppressManifestsList = append(suppressManifestsList, node.SuppressedManifests...)
+	}
+	if pruneManifest(v1alpha1.ResourceRef{APIVersion: apiVersion, Kind: kind}, pruneList) {
+		object.action = actionPrune
+		log.Debug(suppressManifestLogMsg)
+		return object, nil
+	}
+	if suppressManifest(kind, suppressManifestsList) {
+		object.action = actionSuppress
+		log.Debug(suppressManifestLogMsg)
+		return object, nil
+	}
+
+	// Append Annotations and Labels to rendered manifest
+	updatedManifest := te.appendAnnotationsAndLabels(clusterInstance, node, object.GetObject().Object, kind)
+
+	// Add owned-by label
+	updatedManifest = appendManifestLabels(map[string]string{
+		common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+	}, updatedManifest)
+
+	// Update the rendered object with the labels and annotations applied above
+	if err := object.SetObject(updatedManifest); err != nil {
+		log.Error(fmt.Sprintf("Failed to parse rendered template templateRef %s", templateRefName), zap.Error(err))
+		return object, err
+	}
+
+	return object, nil
+}
+
+func (te *CITemplateEngine) appendAnnotationsAndLabels(
 	clusterInstance *v1alpha1.ClusterInstance,
 	node *v1alpha1.NodeSpec,
 	manifest map[string]interface{},
@@ -181,81 +259,7 @@ func appendAnnotationsAndLabels(
 	return manifest
 }
 
-func (te *TemplateEngine) renderManifestFromTemplate(
-	clusterInstance *v1alpha1.ClusterInstance,
-	node *v1alpha1.NodeSpec,
-	templateRefName, templateKey, template string,
-) (RenderedObject, error) {
-
-	var object RenderedObject
-
-	log := te.log.Named("renderManifestFromTemplate")
-
-	clusterData, err := buildClusterData(clusterInstance, node)
-	if err != nil {
-		log.Error("Failed to build ClusterInstance data", zap.Error(err))
-		return object, err
-	}
-
-	manifest, err := te.render(templateKey, template, clusterData)
-	if err != nil {
-		log.Error(fmt.Sprintf("Failed to render templateRef %s", templateRefName), zap.Error(err))
-		return object, err
-	}
-	if manifest == nil {
-		return object, nil
-	}
-
-	if err := object.SetObject(manifest); err != nil {
-		log.Error(fmt.Sprintf("Failed to parse rendered template templateRef %s", templateRefName), zap.Error(err))
-		return object, err
-	}
-
-	apiVersion := object.GetAPIVersion()
-	kind := object.GetKind()
-	name := object.GetName()
-	namespace := object.GetNamespace()
-
-	// Default action is to render the manifest
-	object.action = actionRender
-
-	// Determine if manifest should be pruned or suppressed
-	suppressManifestLogMsg := fmt.Sprintf("Suppressed manifest %s", GetResourceId(name, namespace, kind))
-	pruneList := clusterInstance.Spec.PruneManifests
-	suppressManifestsList := clusterInstance.Spec.SuppressedManifests
-	if node != nil {
-		pruneList = append(pruneList, node.PruneManifests...)
-		suppressManifestsList = append(suppressManifestsList, node.SuppressedManifests...)
-	}
-	if pruneManifest(v1alpha1.ResourceRef{APIVersion: apiVersion, Kind: kind}, pruneList) {
-		object.action = actionPrune
-		log.Debug(suppressManifestLogMsg)
-		return object, nil
-	}
-	if suppressManifest(kind, suppressManifestsList) {
-		object.action = actionSuppress
-		log.Debug(suppressManifestLogMsg)
-		return object, nil
-	}
-
-	// Append Annotations and Labels to rendered manifest
-	updatedManifest := appendAnnotationsAndLabels(clusterInstance, node, object.GetObject().Object, kind)
-
-	// Add owned-by label
-	updatedManifest = appendManifestLabels(map[string]string{
-		OwnedByLabel: GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
-	}, updatedManifest)
-
-	// Update the rendered object with the labels and annotations applied above
-	if err := object.SetObject(updatedManifest); err != nil {
-		log.Error(fmt.Sprintf("Failed to parse rendered template templateRef %s", templateRefName), zap.Error(err))
-		return object, err
-	}
-
-	return object, nil
-}
-
-func validateRenderedTemplate(manifest map[string]interface{}, templateKey string) error {
+func (te *CITemplateEngine) validateRenderedTemplate(manifest map[string]interface{}, templateKey string) error {
 	if _, ok := manifest["apiVersion"].(string); !ok {
 		return fmt.Errorf("missing apiVersion in template %s", templateKey)
 	}
@@ -276,7 +280,7 @@ func validateRenderedTemplate(manifest map[string]interface{}, templateKey strin
 	return nil
 }
 
-func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterData) (map[string]interface{}, error) {
+func (te *CITemplateEngine) render(templateKey, templateStr string, data *ci.ClusterData) (map[string]interface{}, error) {
 
 	renderedTemplate := make(map[string]interface{})
 	fMap := funcMap()
@@ -297,7 +301,7 @@ func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterD
 			if err := yaml.Unmarshal(buffer.Bytes(), &renderedTemplate); err != nil {
 				return renderedTemplate, err
 			}
-			return renderedTemplate, validateRenderedTemplate(renderedTemplate, templateKey)
+			return renderedTemplate, te.validateRenderedTemplate(renderedTemplate, templateKey)
 		}
 	}
 

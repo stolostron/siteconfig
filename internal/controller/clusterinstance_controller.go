@@ -23,8 +23,6 @@ import (
 	"sort"
 	"time"
 
-	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
-	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -39,6 +37,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/common"
+	"github.com/stolostron/siteconfig/internal/controller/conditions"
+	"github.com/stolostron/siteconfig/internal/templates/engine"
 )
 
 const clusterInstanceFinalizer = "clusterinstance." + v1alpha1.Group + "/finalizer"
@@ -46,10 +48,9 @@ const clusterInstanceFinalizer = "clusterinstance." + v1alpha1.Group + "/finaliz
 // ClusterInstanceReconciler reconciles a ClusterInstance object
 type ClusterInstanceReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	Recorder   record.EventRecorder
-	Log        *zap.Logger
-	TmplEngine *ci.TemplateEngine
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
+	Log      *zap.Logger
 }
 
 func doNotRequeue() ctrl.Result {
@@ -184,7 +185,7 @@ func (r *ClusterInstanceReconciler) finalizeClusterInstance(
 			if err := r.deleteResource(
 				ctx,
 				log,
-				ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+				common.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
 				obj,
 			); err != nil {
 				return err
@@ -202,7 +203,7 @@ func (r *ClusterInstanceReconciler) deleteResource(
 	obj client.Object,
 ) error {
 
-	resourceId := ci.GetResourceId(
+	resourceId := common.GetResourceId(
 		obj.GetObjectKind().GroupVersionKind().Kind, obj.GetNamespace(), obj.GetName(),
 	)
 	// Check that the manifest is logically owned-by the ClusterInstance
@@ -215,7 +216,7 @@ func (r *ClusterInstanceReconciler) deleteResource(
 		return err
 	}
 	labels := obj.GetLabels()
-	ownedBy, ok := labels[ci.OwnedByLabel]
+	ownedBy, ok := labels[common.OwnedByLabel]
 	if !ok || ownedBy != owner {
 		log.Sugar().Infof("Skipping deletion of resource %s not owned-by ClusterInstance %s", resourceId, owner)
 		return nil
@@ -311,12 +312,12 @@ func (r *ClusterInstanceReconciler) renderManifests(
 	ctx context.Context,
 	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
-) (ci.RenderedObjectCollection, error) {
+) (engine.RenderedObjectCollection, error) {
 	log.Info("Starting to render templates")
 
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
-	r.TmplEngine.SetLogger(log.Named("TemplateEngine"))
-	renderedObjects, err := r.TmplEngine.ProcessTemplates(ctx, r.Client, *clusterInstance)
+	renderedObjects, err := engine.NewCITemplateEngine().ProcessTemplates(
+		ctx, r.Client, log.Named("CITemplateEngine"), *clusterInstance)
 	if err != nil {
 		log.Error("Failed to render templates", zap.Error(err))
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
@@ -415,7 +416,7 @@ func createOrPatch(
 		}
 	}
 
-	resourceId := ci.GetResourceId(
+	resourceId := common.GetResourceId(
 		updatedLiveObj.GetName(),
 		updatedLiveObj.GetNamespace(),
 		updatedLiveObj.GetKind(),
@@ -438,7 +439,7 @@ func createOrPatch(
 }
 
 // createManifestReference creates a ManifestReference object from a manifest item
-func createManifestReference(object ci.RenderedObject) (*v1alpha1.ManifestReference, error) {
+func createManifestReference(object engine.RenderedObject) (*v1alpha1.ManifestReference, error) {
 	apiVersion := object.GetAPIVersion()
 	syncWave, err := object.GetSyncWave()
 	if err != nil {
@@ -459,7 +460,7 @@ func (r *ClusterInstanceReconciler) executeRenderedManifests(
 	c client.Client,
 	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
-	objects []ci.RenderedObject,
+	objects []engine.RenderedObject,
 	manifestStatus string) (bool, error) {
 
 	ok := true
@@ -534,7 +535,7 @@ func (r *ClusterInstanceReconciler) validateRenderedManifests(
 	ctx context.Context,
 	pLog *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
-	objects []ci.RenderedObject) (rendered bool, err error) {
+	objects []engine.RenderedObject) (rendered bool, err error) {
 
 	log := pLog.Named("validateRenderedManifests")
 	log.Info("Executing a dry-run validation on the rendered manifests")
@@ -580,7 +581,7 @@ func (r *ClusterInstanceReconciler) applyRenderedManifests(
 	ctx context.Context,
 	pLog *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
-	objects []ci.RenderedObject) (rendered bool, err error) {
+	objects []engine.RenderedObject) (rendered bool, err error) {
 
 	log := pLog.Named("applyRenderedManifests")
 	log.Info("Applying the rendered manifests")
@@ -628,7 +629,7 @@ func (r *ClusterInstanceReconciler) pruneManifests(
 	ctx context.Context,
 	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
-	objects []ci.RenderedObject,
+	objects []engine.RenderedObject,
 ) (bool, error) {
 	ok := true
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
@@ -646,7 +647,7 @@ func (r *ClusterInstanceReconciler) pruneManifests(
 		if err := r.deleteResource(
 			ctx,
 			log,
-			ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+			common.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
 			&obj,
 		); err == nil {
 			// Remove rendered manifest information from status.RenderedManifests
@@ -666,13 +667,13 @@ func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(
 	ctx context.Context,
 	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
-	objects []ci.RenderedObject,
+	objects []engine.RenderedObject,
 ) error {
 
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
 
 	for _, object := range objects {
-		resourceId := ci.GetResourceId(object.GetKind(), object.GetNamespace(), object.GetName())
+		resourceId := common.GetResourceId(object.GetKind(), object.GetNamespace(), object.GetName())
 		manifestRef, err := createManifestReference(object)
 		if err != nil {
 			return err
@@ -695,7 +696,6 @@ func (r *ClusterInstanceReconciler) handleRenderTemplates(
 	ok = false
 
 	// Render templates manifests
-	log.Info("Starting to render templates")
 	objects, err := r.renderManifests(ctx, log, clusterInstance)
 	if err != nil {
 		r.Log.Info(

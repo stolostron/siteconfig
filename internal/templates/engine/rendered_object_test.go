@@ -14,12 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package clusterinstance
+package engine
 
 import (
 	"reflect"
 	"testing"
 
+	"github.com/stolostron/siteconfig/internal/controller/common"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -222,13 +223,13 @@ func TestRenderedObjectGetSyncWave(t *testing.T) {
 		},
 		{
 			name:    "syncWave is specified",
-			input:   map[string]interface{}{"metadata": map[string]interface{}{"annotations": map[string]string{WaveAnnotation: "1"}}},
+			input:   map[string]interface{}{"metadata": map[string]interface{}{"annotations": map[string]string{common.WaveAnnotation: "1"}}},
 			want:    1,
 			wantErr: false,
 		},
 		{
 			name:    "non-integer syncWave is specified",
-			input:   map[string]interface{}{"metadata": map[string]interface{}{"annotations": map[string]string{WaveAnnotation: "one"}}},
+			input:   map[string]interface{}{"metadata": map[string]interface{}{"annotations": map[string]string{common.WaveAnnotation: "one"}}},
 			want:    0,
 			wantErr: true,
 		},

@@ -23,7 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
-	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/common"
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
@@ -118,7 +118,7 @@ var _ = Describe("Reconcile", func() {
 				Name:      clusterName,
 				Namespace: clusterNamespace,
 				Labels: map[string]string{
-					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, "not-the-owner"),
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterNamespace, "not-the-owner"),
 				},
 			},
 			Status: hivev1.ClusterDeploymentStatus{
@@ -153,7 +153,7 @@ var _ = Describe("Reconcile", func() {
 				Name:      clusterName,
 				Namespace: clusterNamespace,
 				Labels: map[string]string{
-					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
 				},
 			},
 		}
@@ -208,7 +208,7 @@ var _ = Describe("Reconcile", func() {
 				Name:      clusterName,
 				Namespace: clusterNamespace,
 				Labels: map[string]string{
-					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
 				},
 			},
 		}
@@ -314,7 +314,7 @@ var _ = Describe("Reconcile", func() {
 				Name:      clusterName,
 				Namespace: clusterNamespace,
 				Labels: map[string]string{
-					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
 				},
 			},
 			Spec: hivev1.ClusterDeploymentSpec{
@@ -380,7 +380,7 @@ var _ = Describe("Reconcile", func() {
 				Name:      clusterName,
 				Namespace: clusterNamespace,
 				Labels: map[string]string{
-					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
 				},
 			},
 			Spec: hivev1.ClusterDeploymentSpec{
@@ -447,7 +447,7 @@ var _ = Describe("Reconcile", func() {
 				Name:      clusterName,
 				Namespace: clusterNamespace,
 				Labels: map[string]string{
-					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
 				},
 			},
 			Spec: hivev1.ClusterDeploymentSpec{

@@ -14,13 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package clusterinstance
+package engine
 
 import (
 	"encoding/json"
 	"sort"
 	"strconv"
 
+	"github.com/stolostron/siteconfig/internal/controller/common"
 	"golang.org/x/exp/maps"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -84,16 +85,16 @@ func (r *RenderedObject) GetLabels() map[string]string {
 }
 
 func (r *RenderedObject) GetSyncWave() (int, error) {
-	syncWaveStr, ok := r.GetAnnotations()[WaveAnnotation]
+	syncWaveStr, ok := r.GetAnnotations()[common.WaveAnnotation]
 	if !ok {
-		syncWaveStr = DefaultWaveAnnotation
+		syncWaveStr = common.DefaultWaveAnnotation
 	}
 
 	return strconv.Atoi(syncWaveStr)
 }
 
 func (r *RenderedObject) GetResourceId() string {
-	return GetResourceId(r.GetName(), r.GetNamespace(), r.GetKind())
+	return common.GetResourceId(r.GetName(), r.GetNamespace(), r.GetKind())
 }
 
 func (s *syncWaveMap) getAscendingSyncWaves() []int {
