@@ -100,9 +100,6 @@ metadata:
 spec:
   clusterName: "{{ .Spec.ClusterName }}"
   clusterNamespace: "{{ .Spec.ClusterName }}"
-  clusterLabels:
-    cloud: auto-detect
-    vendor: auto-detect
   applicationManager:
     enabled: true
   certPolicyController:
@@ -120,6 +117,9 @@ metadata:
   name: "{{ .Spec.ClusterName }}"
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "2"
+  labels:
+    cloud: auto-detect
+    vendor: auto-detect
 spec:
   hubAcceptsClient: true`
 
