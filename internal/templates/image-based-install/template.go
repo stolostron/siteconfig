@@ -158,7 +158,9 @@ spec:
   rootDeviceHints:
 {{ .SpecialVars.CurrentNode.RootDeviceHints | toYaml | indent 4 }}
 {{ end }}
-  preprovisioningNetworkDataName: {{ .SpecialVars.CurrentNode.HostName }}`
+{{ if .SpecialVars.CurrentNode.NodeNetwork }}
+  preprovisioningNetworkDataName: {{ .SpecialVars.CurrentNode.HostName }}
+{{ end }}`
 
 func GetClusterTemplates() map[string]string {
 	data := make(map[string]string)
