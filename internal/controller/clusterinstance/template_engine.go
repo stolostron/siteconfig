@@ -38,32 +38,26 @@ const (
 	OwnedByLabel          = v1alpha1.Group + "/owned-by"
 )
 
-type TemplateEngine struct {
-	log *zap.Logger
-}
+type TemplateEngine struct{}
 
-// SetLogger is to be used to log with ClusterInstance fields
-func (te *TemplateEngine) SetLogger(log1 *zap.Logger) {
-	te.log = log1
-}
-
-func NewTemplateEngine(defaultLogger *zap.Logger) *TemplateEngine {
-	return &TemplateEngine{log: defaultLogger}
+func NewTemplateEngine() *TemplateEngine {
+	return &TemplateEngine{}
 }
 
 func (te *TemplateEngine) ProcessTemplates(
 	ctx context.Context,
 	c client.Client,
+	log *zap.Logger,
 	clusterInstance v1alpha1.ClusterInstance,
 ) (RenderedObjectCollection, error) {
 
-	log := te.log.Named("ProcessTemplates")
+	log = log.Named("ProcessTemplates")
 
 	var renderedObjects RenderedObjectCollection
 	log.Info("Started processing cluster-level install templates")
 
 	// Render cluster-level install templates
-	clusterObjects, err := te.renderTemplates(ctx, c, &clusterInstance, nil)
+	clusterObjects, err := te.renderTemplates(ctx, c, log, &clusterInstance, nil)
 	if err != nil {
 		log.Error("Encountered error while processing cluster-level install templates", zap.Error(err))
 		return renderedObjects, err
@@ -80,7 +74,7 @@ func (te *TemplateEngine) ProcessTemplates(
 		log.Sugar().Infof("Started processing node-level install templates [node: %d of %d]", nodeId+1, numNodes)
 
 		// Render node-level templates
-		nodeObjects, err := te.renderTemplates(ctx, c, &clusterInstance, &node)
+		nodeObjects, err := te.renderTemplates(ctx, c, log, &clusterInstance, &node)
 		if err != nil {
 			log.Sugar().Errorf(
 				"Encountered error while processing node-level install templates [node: %d of %d], err: %v",
@@ -101,6 +95,7 @@ func (te *TemplateEngine) ProcessTemplates(
 func (te *TemplateEngine) renderTemplates(
 	ctx context.Context,
 	c client.Client,
+	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 	node *v1alpha1.NodeSpec,
 ) ([]RenderedObject, error) {
@@ -119,7 +114,7 @@ func (te *TemplateEngine) renderTemplates(
 		templateRefs = node.TemplateRefs
 	}
 
-	log := te.log.Named("renderTemplates")
+	log = log.Named("renderTemplates")
 
 	for tId, templateRef := range templateRefs {
 		log.Sugar().Infof("Processing templateRef %d of %d", tId+1, len(templateRefs))
@@ -137,6 +132,7 @@ func (te *TemplateEngine) renderTemplates(
 		for templateKey, template := range templatesConfigMap.Data {
 
 			object, err := te.renderManifestFromTemplate(
+				log,
 				clusterInstance,
 				node,
 				templateRef.Name,
@@ -182,6 +178,7 @@ func appendAnnotationsAndLabels(
 }
 
 func (te *TemplateEngine) renderManifestFromTemplate(
+	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 	node *v1alpha1.NodeSpec,
 	templateRefName, templateKey, template string,
@@ -189,7 +186,7 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 
 	var object RenderedObject
 
-	log := te.log.Named("renderManifestFromTemplate")
+	log = log.Named("renderManifestFromTemplate")
 
 	clusterData, err := buildClusterData(clusterInstance, node)
 	if err != nil {

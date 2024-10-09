@@ -149,7 +149,7 @@ func main() {
 		Scheme:     mgr.GetScheme(),
 		Recorder:   mgr.GetEventRecorderFor("ClusterInstanceController"),
 		Log:        clusterInstanceLogger,
-		TmplEngine: ci.NewTemplateEngine(clusterInstanceLogger.Named("TemplateEngine")),
+		TmplEngine: ci.NewTemplateEngine(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error("Unable to create controller",
 			zap.String("controller", "ClusterInstance"),

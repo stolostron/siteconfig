@@ -315,8 +315,7 @@ func (r *ClusterInstanceReconciler) renderManifests(
 	log.Info("Starting to render templates")
 
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
-	r.TmplEngine.SetLogger(log.Named("TemplateEngine"))
-	renderedObjects, err := r.TmplEngine.ProcessTemplates(ctx, r.Client, *clusterInstance)
+	renderedObjects, err := r.TmplEngine.ProcessTemplates(ctx, r.Client, log.Named("TemplateEngine"), *clusterInstance)
 	if err != nil {
 		log.Error("Failed to render templates", zap.Error(err))
 		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
