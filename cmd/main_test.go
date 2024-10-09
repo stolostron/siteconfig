@@ -71,7 +71,7 @@ var _ = Describe("initConfigMapTemplates", func() {
 
 		cm = &corev1.ConfigMap{}
 		key = types.NamespacedName{
-			Name:      ImageBasedInstallClusterTemplates,
+			Name:      ImageBasedInstallerClusterTemplates,
 			Namespace: SiteConfigNamespace,
 		}
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
@@ -90,7 +90,7 @@ var _ = Describe("initConfigMapTemplates", func() {
 
 		cm = &corev1.ConfigMap{}
 		key = types.NamespacedName{
-			Name:      ImageBasedInstallNodeTemplates,
+			Name:      ImageBasedInstallerNodeTemplates,
 			Namespace: SiteConfigNamespace,
 		}
 		Expect(c.Get(ctx, key, cm)).To(Succeed())

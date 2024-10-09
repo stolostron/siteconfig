@@ -14,12 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package clusterinstance
+package engine
 
 import (
 	"context"
 	"reflect"
-	"sort"
 	"testing"
 
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
@@ -27,30 +26,21 @@ import (
 	. "github.com/onsi/gomega"
 	aiv1beta1 "github.com/openshift/assisted-service/api/v1beta1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/common"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func isEqualRenderedObject(got, expected []RenderedObject) bool {
-	sort.Slice(got, func(x, y int) bool {
-		return got[x].GetKind() < got[y].GetKind()
-	})
-
-	sort.Slice(expected, func(x, y int) bool {
-		return expected[x].GetKind() < expected[y].GetKind()
-	})
-
-	return reflect.DeepEqual(got, expected)
-}
-
 func TestTemplateEngineRender(t *testing.T) {
 
-	NetConfig := GetMockNetConfig()
+	te := &CITemplateEngine{}
+
+	NetConfig := ci.GetMockNetConfig()
 	TestClusterInstance := &v1alpha1.ClusterInstance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "site-sno-du-1",
@@ -104,12 +94,12 @@ func TestTemplateEngineRender(t *testing.T) {
 		},
 	}
 
-	TestData, _ := buildClusterData(TestClusterInstance, &TestClusterInstance.Spec.Nodes[0])
+	TestData, _ := ci.BuildClusterData(TestClusterInstance, &TestClusterInstance.Spec.Nodes[0])
 
 	type args struct {
 		templateType string
 		templateStr  string
-		data         *ClusterData
+		data         *ci.ClusterData
 	}
 	tests := []struct {
 		name    string
@@ -132,7 +122,7 @@ func TestTemplateEngineRender(t *testing.T) {
 			name: "Test with a valid AgentClusterInstall-like template",
 			args: args{
 				templateType: "AgentClusterInstall",
-				templateStr:  GetMockAgentClusterInstallTemplate(),
+				templateStr:  ci.GetMockAgentClusterInstallTemplate(),
 				data:         TestData,
 			},
 			want: map[string]interface{}{
@@ -165,7 +155,7 @@ func TestTemplateEngineRender(t *testing.T) {
 			name: "Test with valid NMState-like template",
 			args: args{
 				templateType: "NMStateConfig",
-				templateStr:  GetMockNMStateConfigTemplate(),
+				templateStr:  ci.GetMockNMStateConfigTemplate(),
 				data:         TestData,
 			},
 			want: map[string]interface{}{
@@ -226,27 +216,25 @@ metadata:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmplEngine := &TemplateEngine{
-				log: zap.NewNop(),
-			}
-			got, err := tmplEngine.render(tt.args.templateType, tt.args.templateStr, tt.args.data)
+			got, err := te.render(tt.args.templateType, tt.args.templateStr, tt.args.data)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("TemplateEngine.render() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("CITemplateEngine.render() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("TemplateEngine.render() = %v, want %v", got, tt.want)
+				t.Errorf("CITemplateEngine.render() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-var _ = Describe("renderTemplates", func() {
+var _ = Describe("CITemplateEngine.renderTemplates", func() {
 	var (
 		c                   client.Client
 		ctx                 = context.Background()
-		tmplEngine          *TemplateEngine
+		te                  = &CITemplateEngine{}
+		testLogger          = zap.NewNop().Named("Test")
 		TestClusterInstance *v1alpha1.ClusterInstance
 	)
 
@@ -255,9 +243,6 @@ var _ = Describe("renderTemplates", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-
-		testLogger := zap.NewNop().Named("Test")
-		tmplEngine = NewTemplateEngine(testLogger)
 
 		TestClusterInstance = &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
@@ -276,11 +261,11 @@ var _ = Describe("renderTemplates", func() {
 	It("fails when the template reference cannot be retrieved", func() {
 		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{{Name: "does-not-exist", Namespace: "test"}}
 
-		_, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
+		_, err := te.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
 		Expect(err).To(HaveOccurred())
 	})
 
-	It("fails to render template because it cannot build the site data", func() {
+	It("fails to render template because it cannot build the cluster data", func() {
 		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "cluster-level", Namespace: "test"},
 		}
@@ -288,13 +273,13 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA": GetMockBasicClusterTemplate("TestA"),
+				"TestA": ci.GetMockBasicClusterTemplate("TestA"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
 		TestClusterInstance.Spec.InstallConfigOverrides = "{foobar}"
-		_, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
+		_, err := te.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("invalid json parameter set at installConfigOverride")))
 	})
@@ -312,7 +297,7 @@ var _ = Describe("renderTemplates", func() {
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
-		_, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
+		_, err := te.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("field doesNotExist")))
 	})
@@ -326,56 +311,51 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA": GetMockBasicClusterTemplate("TestA"),
-				"TestB": GetMockBasicClusterTemplate("TestB"),
+				"TestA": ci.GetMockBasicClusterTemplate("TestA"),
+				"TestB": ci.GetMockBasicClusterTemplate("TestB"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
 		TestClusterInstance.Spec.SuppressedManifests = []string{"TestA", "TestC"}
 
-		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
+		got, err := te.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(2))
 
-		expected := []RenderedObject{
-			{
-				action: actionSuppress,
-				object: unstructured.Unstructured{Object: map[string]interface{}{
-					"apiVersion": "test.io/v1",
-					"kind":       "TestA",
-					"metadata": map[string]interface{}{
-						"name":      TestClusterInstance.Name,
-						"namespace": TestClusterInstance.Namespace,
-						// should not contain labels
-					},
-					"spec": map[string]interface{}{
-						"name": "site-sno-du-1",
-					},
-				}},
+		expected := make([]RenderedObject, 2)
+		expected[0].action = actionSuppress
+		_ = expected[0].SetObject(map[string]interface{}{
+			"apiVersion": "test.io/v1",
+			"kind":       "TestA",
+			"metadata": map[string]interface{}{
+				"name":      TestClusterInstance.Name,
+				"namespace": TestClusterInstance.Namespace,
+				// should not contain labels
 			},
-			{
-				action: actionRender,
-				object: unstructured.Unstructured{Object: map[string]interface{}{
-					"apiVersion": "test.io/v1",
-					"kind":       "TestB",
-					"metadata": map[string]interface{}{
-						"name":      TestClusterInstance.Name,
-						"namespace": TestClusterInstance.Namespace,
-						"labels": map[string]interface{}{
-							OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
-								TestClusterInstance.Name),
-						},
-					},
-					"spec": map[string]interface{}{
-						"name": "site-sno-du-1",
-					},
-				}},
+			"spec": map[string]interface{}{
+				"name": "site-sno-du-1",
 			},
-		}
+		})
+		expected[1].action = actionRender
+		_ = expected[1].SetObject(map[string]interface{}{
+			"apiVersion": "test.io/v1",
+			"kind":       "TestB",
+			"metadata": map[string]interface{}{
+				"name":      TestClusterInstance.Name,
+				"namespace": TestClusterInstance.Namespace,
+				"labels": map[string]interface{}{
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
+						TestClusterInstance.Name),
+				},
+			},
+			"spec": map[string]interface{}{
+				"name": "site-sno-du-1",
+			},
+		})
 
-		Expect(isEqualRenderedObject(got, expected)).To(BeTrue())
+		Expect(renderedObjectsEqual(got, expected)).To(BeTrue())
 	})
 
 	It("suppresses rendering manifests at node-level", func() {
@@ -388,53 +368,48 @@ var _ = Describe("renderTemplates", func() {
 		nodeTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "node-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestC": GetMockBasicNodeTemplate("TestC"),
-				"TestD": GetMockBasicNodeTemplate("TestD"),
+				"TestC": ci.GetMockBasicNodeTemplate("TestC"),
+				"TestD": ci.GetMockBasicNodeTemplate("TestD"),
 			},
 		}
 		Expect(c.Create(ctx, nodeTemplates)).To(Succeed())
 
 		node.SuppressedManifests = []string{"TestA", "TestC"}
 
-		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
+		got, err := te.renderTemplates(ctx, c, testLogger, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
-		expected := []RenderedObject{
-			{
-				action: actionSuppress,
-				object: unstructured.Unstructured{Object: map[string]interface{}{
-					"apiVersion": "test.io/v1",
-					"kind":       "TestC",
-					"metadata": map[string]interface{}{
-						"name":      TestClusterInstance.Spec.Nodes[0].HostName,
-						"namespace": TestClusterInstance.Namespace,
-					},
-					"spec": map[string]interface{}{
-						"name": "node1",
-					},
-				},
-				}},
-			{
-				action: actionRender,
-				object: unstructured.Unstructured{Object: map[string]interface{}{
-					"apiVersion": "test.io/v1",
-					"kind":       "TestD",
-					"metadata": map[string]interface{}{
-						"name":      TestClusterInstance.Spec.Nodes[0].HostName,
-						"namespace": TestClusterInstance.Namespace,
-						"labels": map[string]interface{}{
-							OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
-								TestClusterInstance.Name),
-						},
-					},
-					"spec": map[string]interface{}{
-						"name": "node1",
-					},
-				}},
+		expected := make([]RenderedObject, 2)
+		expected[0].action = actionSuppress
+		_ = expected[0].SetObject(map[string]interface{}{
+			"apiVersion": "test.io/v1",
+			"kind":       "TestC",
+			"metadata": map[string]interface{}{
+				"name":      TestClusterInstance.Spec.Nodes[0].HostName,
+				"namespace": TestClusterInstance.Namespace,
 			},
-		}
+			"spec": map[string]interface{}{
+				"name": "node1",
+			},
+		})
+		expected[1].action = actionRender
+		_ = expected[1].SetObject(map[string]interface{}{
+			"apiVersion": "test.io/v1",
+			"kind":       "TestD",
+			"metadata": map[string]interface{}{
+				"name":      TestClusterInstance.Spec.Nodes[0].HostName,
+				"namespace": TestClusterInstance.Namespace,
+				"labels": map[string]interface{}{
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
+						TestClusterInstance.Name),
+				},
+			},
+			"spec": map[string]interface{}{
+				"name": "node1",
+			},
+		})
 
-		Expect(isEqualRenderedObject(got, expected)).To(BeTrue())
+		Expect(renderedObjectsEqual(got, expected)).To(BeTrue())
 	})
 
 	It("renders a cluster-level template with extra annotations and labels", func() {
@@ -446,7 +421,7 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"Cluster": GetMockBasicClusterTemplate("Cluster"),
+				"Cluster": ci.GetMockBasicClusterTemplate("Cluster"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
@@ -463,36 +438,33 @@ var _ = Describe("renderTemplates", func() {
 				"extra-labels-l2": "test",
 			},
 		}
-		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
+		got, err := te.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
 		Expect(err).ToNot(HaveOccurred())
 
-		expected := []RenderedObject{
-			{
-				action: actionRender,
-				object: unstructured.Unstructured{Object: map[string]interface{}{
-					"apiVersion": "test.io/v1",
-					"kind":       "Cluster",
-					"metadata": map[string]interface{}{
-						"name":      TestClusterInstance.Spec.ClusterName,
-						"namespace": TestClusterInstance.Namespace,
-						"annotations": map[string]interface{}{
-							"extra-annotation-l1": "test",
-							"extra-annotation-l2": "test",
-						},
-						"labels": map[string]interface{}{
-							OwnedByLabel:      GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
-							"extra-labels-l1": "test",
-							"extra-labels-l2": "test",
-						},
-					},
-					"spec": map[string]interface{}{
-						"name": "site-sno-du-1",
-					},
-				}},
+		expected := make([]RenderedObject, 1)
+		expected[0].action = actionRender
+		_ = expected[0].SetObject(map[string]interface{}{
+			"apiVersion": "test.io/v1",
+			"kind":       "Cluster",
+			"metadata": map[string]interface{}{
+				"name":      TestClusterInstance.Spec.ClusterName,
+				"namespace": TestClusterInstance.Namespace,
+				"annotations": map[string]interface{}{
+					"extra-annotation-l1": "test",
+					"extra-annotation-l2": "test",
+				},
+				"labels": map[string]interface{}{
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(TestClusterInstance.Namespace, TestClusterInstance.Name),
+					"extra-labels-l1":   "test",
+					"extra-labels-l2":   "test",
+				},
 			},
-		}
+			"spec": map[string]interface{}{
+				"name": "site-sno-du-1",
+			},
+		})
 
-		Expect(isEqualRenderedObject(got, expected)).To(BeTrue())
+		Expect(renderedObjectsEqual(got, expected)).To(BeTrue())
 	})
 
 	It("renders a node-level template with extra annotations and labels defined at cluster-level", func() {
@@ -504,7 +476,7 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "node-level", Namespace: "test"},
 			Data: map[string]string{
-				"Node": GetMockBasicNodeTemplate("Node"),
+				"Node": ci.GetMockBasicNodeTemplate("Node"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
@@ -522,37 +494,34 @@ var _ = Describe("renderTemplates", func() {
 				"extra-labels-l2": "test",
 			},
 		}
-		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
+		got, err := te.renderTemplates(ctx, c, testLogger, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
-		expected := []RenderedObject{
-			{
-				action: actionRender,
-				object: unstructured.Unstructured{Object: map[string]interface{}{
-					"apiVersion": "test.io/v1",
-					"kind":       "Node",
-					"metadata": map[string]interface{}{
-						"name":      TestClusterInstance.Spec.Nodes[0].HostName,
-						"namespace": TestClusterInstance.Namespace,
-						"annotations": map[string]interface{}{
-							"extra-node-annotation-l1": "test",
-							"extra-node-annotation-l2": "test",
-						},
-						"labels": map[string]interface{}{
-							OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
-								TestClusterInstance.Name),
-							"extra-labels-l1": "test",
-							"extra-labels-l2": "test",
-						},
-					},
-					"spec": map[string]interface{}{
-						"name": TestClusterInstance.Spec.Nodes[0].HostName,
-					},
-				}},
+		expected := make([]RenderedObject, 1)
+		expected[0].action = actionRender
+		_ = expected[0].SetObject(map[string]interface{}{
+			"apiVersion": "test.io/v1",
+			"kind":       "Node",
+			"metadata": map[string]interface{}{
+				"name":      TestClusterInstance.Spec.Nodes[0].HostName,
+				"namespace": TestClusterInstance.Namespace,
+				"annotations": map[string]interface{}{
+					"extra-node-annotation-l1": "test",
+					"extra-node-annotation-l2": "test",
+				},
+				"labels": map[string]interface{}{
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
+						TestClusterInstance.Name),
+					"extra-labels-l1": "test",
+					"extra-labels-l2": "test",
+				},
 			},
-		}
+			"spec": map[string]interface{}{
+				"name": TestClusterInstance.Spec.Nodes[0].HostName,
+			},
+		})
 
-		Expect(isEqualRenderedObject(got, expected)).To(BeTrue())
+		Expect(renderedObjectsEqual(got, expected)).To(BeTrue())
 	})
 
 	It("renders a node-level template with extra annotations and labels defined at node-level", func() {
@@ -564,7 +533,7 @@ var _ = Describe("renderTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "node-level", Namespace: "test"},
 			Data: map[string]string{
-				"Node": GetMockBasicNodeTemplate("Node"),
+				"Node": ci.GetMockBasicNodeTemplate("Node"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
@@ -582,46 +551,44 @@ var _ = Describe("renderTemplates", func() {
 				"extra-node-labels-l2": "test",
 			},
 		}
-		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
+		got, err := te.renderTemplates(ctx, c, testLogger, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
-		expected := []RenderedObject{
-			{
-				action: actionRender,
-				object: unstructured.Unstructured{Object: map[string]interface{}{
-					"apiVersion": "test.io/v1",
-					"kind":       "Node",
-					"metadata": map[string]interface{}{
-						"name":      TestClusterInstance.Spec.Nodes[0].HostName,
-						"namespace": TestClusterInstance.Namespace,
-						"annotations": map[string]interface{}{
-							"extra-node-annotation-l1": "test",
-							"extra-node-annotation-l2": "test",
-						},
-						"labels": map[string]interface{}{
-							OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
-								TestClusterInstance.Name),
-							"extra-node-labels-l1": "test",
-							"extra-node-labels-l2": "test",
-						},
-					},
-					"spec": map[string]interface{}{
-						"name": TestClusterInstance.Spec.Nodes[0].HostName,
-					},
-				}},
+		expected := make([]RenderedObject, 1)
+		expected[0].action = actionRender
+		_ = expected[0].SetObject(map[string]interface{}{
+			"apiVersion": "test.io/v1",
+			"kind":       "Node",
+			"metadata": map[string]interface{}{
+				"name":      TestClusterInstance.Spec.Nodes[0].HostName,
+				"namespace": TestClusterInstance.Namespace,
+				"annotations": map[string]interface{}{
+					"extra-node-annotation-l1": "test",
+					"extra-node-annotation-l2": "test",
+				},
+				"labels": map[string]interface{}{
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
+						TestClusterInstance.Name),
+					"extra-node-labels-l1": "test",
+					"extra-node-labels-l2": "test",
+				},
 			},
-		}
+			"spec": map[string]interface{}{
+				"name": TestClusterInstance.Spec.Nodes[0].HostName,
+			},
+		})
 
-		Expect(isEqualRenderedObject(got, expected)).To(BeTrue())
+		Expect(renderedObjectsEqual(got, expected)).To(BeTrue())
 	})
 
 })
 
-var _ = Describe("ProcessTemplates", func() {
+var _ = Describe("CITemplateEngine.ProcessTemplates", func() {
 	var (
 		c                   client.Client
 		ctx                 = context.Background()
-		tmplEngine          *TemplateEngine
+		te                  = &CITemplateEngine{}
+		testLogger          = zap.NewNop()
 		TestClusterInstance v1alpha1.ClusterInstance
 	)
 
@@ -630,8 +597,6 @@ var _ = Describe("ProcessTemplates", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-
-		tmplEngine = NewTemplateEngine(zap.NewNop())
 
 		TestClusterInstance = v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
@@ -652,7 +617,7 @@ var _ = Describe("ProcessTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA": GetMockBasicClusterTemplate("TestA"),
+				"TestA": ci.GetMockBasicClusterTemplate("TestA"),
 				"TestB": `{{.foobar}}`,
 			},
 		}
@@ -662,7 +627,7 @@ var _ = Describe("ProcessTemplates", func() {
 			{Name: "cluster-level", Namespace: "test"},
 		}
 
-		_, err := tmplEngine.ProcessTemplates(ctx, c, TestClusterInstance)
+		_, err := te.ProcessTemplates(ctx, c, testLogger, TestClusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("can't evaluate field")))
 	})
@@ -672,7 +637,7 @@ var _ = Describe("ProcessTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA": GetMockBasicClusterTemplate("TestA"),
+				"TestA": ci.GetMockBasicClusterTemplate("TestA"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
@@ -686,7 +651,7 @@ var _ = Describe("ProcessTemplates", func() {
 		nodeTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "node-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestC": GetMockBasicNodeTemplate("TestC"),
+				"TestC": ci.GetMockBasicNodeTemplate("TestC"),
 				"TestD": `{{.foobar}}`,
 			},
 		}
@@ -695,7 +660,7 @@ var _ = Describe("ProcessTemplates", func() {
 			{Name: "node-level", Namespace: "test"},
 		}
 
-		_, err := tmplEngine.ProcessTemplates(ctx, c, TestClusterInstance)
+		_, err := te.ProcessTemplates(ctx, c, testLogger, TestClusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("can't evaluate field")))
 	})
@@ -706,8 +671,8 @@ var _ = Describe("ProcessTemplates", func() {
 		clusterTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestA": GetMockBasicClusterTemplate("TestA"),
-				"TestB": GetMockBasicClusterTemplate("TestB"),
+				"TestA": ci.GetMockBasicClusterTemplate("TestA"),
+				"TestB": ci.GetMockBasicClusterTemplate("TestB"),
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
@@ -724,8 +689,8 @@ var _ = Describe("ProcessTemplates", func() {
 		nodeTemplates := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "node-level", Namespace: "test"},
 			Data: map[string]string{
-				"TestC": GetMockBasicNodeTemplate("TestC"),
-				"TestD": GetMockBasicNodeTemplate("TestD"),
+				"TestC": ci.GetMockBasicNodeTemplate("TestC"),
+				"TestD": ci.GetMockBasicNodeTemplate("TestD"),
 			},
 		}
 		Expect(c.Create(ctx, nodeTemplates)).To(Succeed())
@@ -758,86 +723,78 @@ var _ = Describe("ProcessTemplates", func() {
 			},
 		}
 
-		got, err := tmplEngine.ProcessTemplates(ctx, c, TestClusterInstance)
+		got, err := te.ProcessTemplates(ctx, c, testLogger, TestClusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify manifest suppression
-		expectedSlice := []RenderedObject{
-			{
-				// Verify rendering and extra annotations & labels are successfully executed for cluster-level templates
-				action: actionRender,
-				object: unstructured.Unstructured{Object: map[string]interface{}{
-					"apiVersion": "test.io/v1",
-					"kind":       "TestA",
-					"metadata": map[string]interface{}{
-						"name":      TestClusterInstance.Spec.ClusterName,
-						"namespace": TestClusterInstance.Namespace,
-						"annotations": map[string]interface{}{
-							"extra-annotation-l1": "test",
-						},
-						"labels": map[string]interface{}{
-							OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
-								TestClusterInstance.Name),
-							"extra-label-l1": "test",
-						},
-					},
-					"spec": map[string]interface{}{
-						"name": TestClusterInstance.Spec.ClusterName,
-					},
-				}},
+		expectedSlice := make([]RenderedObject, 4)
+		// Verify rendering and extra annotations & labels are successfully executed for cluster-level templates
+		expectedSlice[0].action = actionRender
+		_ = expectedSlice[0].SetObject(map[string]interface{}{
+			"apiVersion": "test.io/v1",
+			"kind":       "TestA",
+			"metadata": map[string]interface{}{
+				"name":      TestClusterInstance.Spec.ClusterName,
+				"namespace": TestClusterInstance.Namespace,
+				"annotations": map[string]interface{}{
+					"extra-annotation-l1": "test",
+				},
+				"labels": map[string]interface{}{
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
+						TestClusterInstance.Name),
+					"extra-label-l1": "test",
+				},
 			},
-			{
-				action: actionSuppress,
-				object: unstructured.Unstructured{Object: map[string]interface{}{
-					"apiVersion": "test.io/v1",
-					"kind":       "TestB",
-					"metadata": map[string]interface{}{
-						"name":      TestClusterInstance.Spec.ClusterName,
-						"namespace": TestClusterInstance.Namespace,
-					},
-					"spec": map[string]interface{}{
-						"name": TestClusterInstance.Spec.ClusterName,
-					},
-				}},
+			"spec": map[string]interface{}{
+				"name": TestClusterInstance.Spec.ClusterName,
 			},
-			{
-				action: actionSuppress,
-				object: unstructured.Unstructured{Object: map[string]interface{}{
-					"apiVersion": "test.io/v1",
-					"kind":       "TestC",
-					"metadata": map[string]interface{}{
-						"name":      TestClusterInstance.Spec.Nodes[0].HostName,
-						"namespace": TestClusterInstance.Namespace,
-					},
-					"spec": map[string]interface{}{
-						"name": TestClusterInstance.Spec.Nodes[0].HostName,
-					},
-				}},
+		})
+		expectedSlice[1].action = actionSuppress
+		_ = expectedSlice[1].SetObject(map[string]interface{}{
+			"apiVersion": "test.io/v1",
+			"kind":       "TestB",
+			"metadata": map[string]interface{}{
+				"name":      TestClusterInstance.Spec.ClusterName,
+				"namespace": TestClusterInstance.Namespace,
 			},
-			{
-				// Verify rendering and extra annotations & labels are successfully executed for node-level templates
-				action: actionRender,
-				object: unstructured.Unstructured{Object: map[string]interface{}{
-					"apiVersion": "test.io/v1",
-					"kind":       "TestD",
-					"metadata": map[string]interface{}{
-						"name":      TestClusterInstance.Spec.Nodes[0].HostName,
-						"namespace": TestClusterInstance.Namespace,
-						"annotations": map[string]interface{}{
-							"extra-node-annotation-l1": "test",
-						},
-						"labels": map[string]interface{}{
-							OwnedByLabel: GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
-								TestClusterInstance.Name),
-							"extra-node-label-l1": "test",
-						},
-					},
-					"spec": map[string]interface{}{
-						"name": TestClusterInstance.Spec.Nodes[0].HostName,
-					},
-				}},
+			"spec": map[string]interface{}{
+				"name": TestClusterInstance.Spec.ClusterName,
 			},
-		}
+		})
+		expectedSlice[2].action = actionSuppress
+		_ = expectedSlice[2].SetObject(map[string]interface{}{
+			"apiVersion": "test.io/v1",
+			"kind":       "TestC",
+			"metadata": map[string]interface{}{
+				"name":      TestClusterInstance.Spec.Nodes[0].HostName,
+				"namespace": TestClusterInstance.Namespace,
+			},
+			"spec": map[string]interface{}{
+				"name": TestClusterInstance.Spec.Nodes[0].HostName,
+			},
+		})
+		// Verify rendering and extra annotations & labels are successfully executed for node-level templates
+		expectedSlice[3].action = actionRender
+		_ = expectedSlice[3].SetObject(map[string]interface{}{
+			"apiVersion": "test.io/v1",
+			"kind":       "TestD",
+			"metadata": map[string]interface{}{
+				"name":      TestClusterInstance.Spec.Nodes[0].HostName,
+				"namespace": TestClusterInstance.Namespace,
+				"annotations": map[string]interface{}{
+					"extra-node-annotation-l1": "test",
+				},
+				"labels": map[string]interface{}{
+					common.OwnedByLabel: common.GenerateOwnedByLabelValue(TestClusterInstance.Namespace,
+						TestClusterInstance.Name),
+					"extra-node-label-l1": "test",
+				},
+			},
+			"spec": map[string]interface{}{
+				"name": TestClusterInstance.Spec.Nodes[0].HostName,
+			},
+		})
+
 		expected := RenderedObjectCollection{}
 		err = expected.AddObjects(expectedSlice)
 		Expect(err).ToNot(HaveOccurred())

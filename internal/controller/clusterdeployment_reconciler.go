@@ -23,7 +23,7 @@ import (
 
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
-	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/common"
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
@@ -209,7 +209,7 @@ func updateCIDeploymentConditions(cd *hivev1.ClusterDeployment, ci *v1alpha1.Clu
 }
 
 func getClusterInstanceOwner(labels map[string]string) string {
-	return labels[ci.OwnedByLabel]
+	return labels[common.OwnedByLabel]
 }
 func isOwnedByClusterInstance(labels map[string]string) bool {
 	return getClusterInstanceOwner(labels) != ""
@@ -226,7 +226,7 @@ func (r *ClusterDeploymentReconciler) getClusterInstance(
 		return nil, nil
 	}
 
-	clusterInstanceRef, err := ci.GetNamespacedNameFromOwnedByLabel(ownedBy)
+	clusterInstanceRef, err := common.GetNamespacedNameFromOwnedByLabel(ownedBy)
 	if err != nil {
 		return nil, err
 	}
