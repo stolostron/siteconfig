@@ -226,9 +226,7 @@ metadata:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmplEngine := &TemplateEngine{
-				log: zap.NewNop(),
-			}
+			tmplEngine := NewTemplateEngine()
 			got, err := tmplEngine.render(tt.args.templateType, tt.args.templateStr, tt.args.data)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("TemplateEngine.render() error = %v, wantErr %v", err, tt.wantErr)
@@ -246,7 +244,8 @@ var _ = Describe("renderTemplates", func() {
 	var (
 		c                   client.Client
 		ctx                 = context.Background()
-		tmplEngine          *TemplateEngine
+		testLogger          = zap.NewNop().Named("Test")
+		tmplEngine          = NewTemplateEngine()
 		TestClusterInstance *v1alpha1.ClusterInstance
 	)
 
@@ -255,9 +254,6 @@ var _ = Describe("renderTemplates", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-
-		testLogger := zap.NewNop().Named("Test")
-		tmplEngine = NewTemplateEngine(testLogger)
 
 		TestClusterInstance = &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
@@ -276,7 +272,7 @@ var _ = Describe("renderTemplates", func() {
 	It("fails when the template reference cannot be retrieved", func() {
 		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{{Name: "does-not-exist", Namespace: "test"}}
 
-		_, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
+		_, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
 		Expect(err).To(HaveOccurred())
 	})
 
@@ -294,7 +290,7 @@ var _ = Describe("renderTemplates", func() {
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
 		TestClusterInstance.Spec.InstallConfigOverrides = "{foobar}"
-		_, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
+		_, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("invalid json parameter set at installConfigOverride")))
 	})
@@ -312,7 +308,7 @@ var _ = Describe("renderTemplates", func() {
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
-		_, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
+		_, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("field doesNotExist")))
 	})
@@ -334,7 +330,7 @@ var _ = Describe("renderTemplates", func() {
 
 		TestClusterInstance.Spec.SuppressedManifests = []string{"TestA", "TestC"}
 
-		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
+		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(2))
@@ -396,7 +392,7 @@ var _ = Describe("renderTemplates", func() {
 
 		node.SuppressedManifests = []string{"TestA", "TestC"}
 
-		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
+		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
 		expected := []RenderedObject{
@@ -463,7 +459,7 @@ var _ = Describe("renderTemplates", func() {
 				"extra-labels-l2": "test",
 			},
 		}
-		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, nil)
+		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
 		Expect(err).ToNot(HaveOccurred())
 
 		expected := []RenderedObject{
@@ -522,7 +518,7 @@ var _ = Describe("renderTemplates", func() {
 				"extra-labels-l2": "test",
 			},
 		}
-		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
+		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
 		expected := []RenderedObject{
@@ -582,7 +578,7 @@ var _ = Describe("renderTemplates", func() {
 				"extra-node-labels-l2": "test",
 			},
 		}
-		got, err := tmplEngine.renderTemplates(ctx, c, TestClusterInstance, node)
+		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, node)
 		Expect(err).ToNot(HaveOccurred())
 
 		expected := []RenderedObject{
@@ -621,7 +617,8 @@ var _ = Describe("ProcessTemplates", func() {
 	var (
 		c                   client.Client
 		ctx                 = context.Background()
-		tmplEngine          *TemplateEngine
+		tmplEngine          = NewTemplateEngine()
+		testLogger          = zap.NewNop().Named("Test")
 		TestClusterInstance v1alpha1.ClusterInstance
 	)
 
@@ -630,8 +627,6 @@ var _ = Describe("ProcessTemplates", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-
-		tmplEngine = NewTemplateEngine(zap.NewNop())
 
 		TestClusterInstance = v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
@@ -662,7 +657,7 @@ var _ = Describe("ProcessTemplates", func() {
 			{Name: "cluster-level", Namespace: "test"},
 		}
 
-		_, err := tmplEngine.ProcessTemplates(ctx, c, TestClusterInstance)
+		_, err := tmplEngine.ProcessTemplates(ctx, c, testLogger, TestClusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("can't evaluate field")))
 	})
@@ -695,7 +690,7 @@ var _ = Describe("ProcessTemplates", func() {
 			{Name: "node-level", Namespace: "test"},
 		}
 
-		_, err := tmplEngine.ProcessTemplates(ctx, c, TestClusterInstance)
+		_, err := tmplEngine.ProcessTemplates(ctx, c, testLogger, TestClusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("can't evaluate field")))
 	})
@@ -758,7 +753,7 @@ var _ = Describe("ProcessTemplates", func() {
 			},
 		}
 
-		got, err := tmplEngine.ProcessTemplates(ctx, c, TestClusterInstance)
+		got, err := tmplEngine.ProcessTemplates(ctx, c, testLogger, TestClusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify manifest suppression

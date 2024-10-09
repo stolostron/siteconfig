@@ -99,12 +99,12 @@ var _ = Describe("Reconcile", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		tmplEngine := ci.NewTemplateEngine(testLogger)
+
 		r = &ClusterInstanceReconciler{
 			Client:     c,
 			Scheme:     scheme.Scheme,
 			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			TmplEngine: ci.NewTemplateEngine(),
 		}
 
 		Expect(c.Create(ctx, testParams.GeneratePullSecret())).To(Succeed())
@@ -212,12 +212,11 @@ var _ = Describe("handleFinalizer", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		tmplEngine := ci.NewTemplateEngine(testLogger)
+
 		r = &ClusterInstanceReconciler{
-			Client:     c,
-			Scheme:     scheme.Scheme,
-			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			Client: c,
+			Scheme: scheme.Scheme,
+			Log:    testLogger,
 		}
 	})
 
@@ -544,12 +543,12 @@ var _ = Describe("pruneManifests", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		tmplEngine := ci.NewTemplateEngine(testLogger)
+
 		r = &ClusterInstanceReconciler{
 			Client:     c,
 			Scheme:     scheme.Scheme,
 			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			TmplEngine: ci.NewTemplateEngine(),
 		}
 
 		annotations := map[string]string{
@@ -834,12 +833,12 @@ var _ = Describe("handleValidate", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		tmplEngine := ci.NewTemplateEngine(testLogger)
+
 		r = &ClusterInstanceReconciler{
 			Client:     c,
 			Scheme:     scheme.Scheme,
 			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			TmplEngine: ci.NewTemplateEngine(),
 		}
 
 		ci.SetupTestResources(ctx, c, testParams)
@@ -973,12 +972,12 @@ var _ = Describe("handleRenderTemplates", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		tmplEngine := ci.NewTemplateEngine(testLogger)
+
 		r = &ClusterInstanceReconciler{
 			Client:     c,
 			Scheme:     scheme.Scheme,
 			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			TmplEngine: ci.NewTemplateEngine(),
 		}
 
 		ci.SetupTestResources(ctx, c, testParams)
@@ -1152,12 +1151,12 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
 		testLogger := zap.NewNop().Named("Test")
-		tmplEngine := ci.NewTemplateEngine(testLogger)
+
 		r := &ClusterInstanceReconciler{
 			Client:     c,
 			Scheme:     scheme.Scheme,
 			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			TmplEngine: ci.NewTemplateEngine(),
 		}
 
 		clusterInstance := &v1alpha1.ClusterInstance{
@@ -1531,12 +1530,12 @@ var _ = Describe("executeRenderedManifests", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
-		tmplEngine := ci.NewTemplateEngine(testLogger)
+
 		r = &ClusterInstanceReconciler{
 			Client:     c,
 			Scheme:     scheme.Scheme,
 			Log:        testLogger,
-			TmplEngine: tmplEngine,
+			TmplEngine: ci.NewTemplateEngine(),
 		}
 
 		clusterInstance = &v1alpha1.ClusterInstance{
