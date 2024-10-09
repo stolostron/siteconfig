@@ -29,18 +29,18 @@ import (
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 
-	siteconfigv1alpha1 "github.com/stolostron/siteconfig/api/v1alpha1"
+	"github.com/stolostron/siteconfig/api/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
-
+	t.Setenv("POD_NAMESPACE", "siteconfig-operator")
 	RunSpecs(t, "ControllerSuite")
 }
 
 var _ = BeforeSuite(func() {
-	Expect(siteconfigv1alpha1.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(v1alpha1.AddToScheme(scheme.Scheme)).To(Succeed())
 	Expect(hivev1.AddToScheme(scheme.Scheme)).To(Succeed())
 	Expect(v1beta1.AddToScheme(scheme.Scheme)).To(Succeed())
 	Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())

@@ -15,6 +15,12 @@ See the License for the specific language governing permissions and
 
 package assistedinstaller
 
+// Default assisted installer install template names
+const (
+	ClusterLevelInstallTemplates = "ai-cluster-templates-v1"
+	NodeLevelInstallTemplates    = "ai-node-templates-v1"
+)
+
 const AgentClusterInstall = `apiVersion: extensions.hive.openshift.io/v1beta1
 kind: AgentClusterInstall
 metadata:

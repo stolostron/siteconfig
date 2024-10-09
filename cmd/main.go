@@ -50,20 +50,13 @@ import (
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	"github.com/stolostron/siteconfig/internal/controller"
-	assistedinstaller "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
-	imagebasedinstall "github.com/stolostron/siteconfig/internal/templates/image-based-install"
+	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
+	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 	//+kubebuilder:scaffold:imports
 )
 
 var (
 	scheme = runtime.NewScheme()
-)
-
-const (
-	AssistedInstallerClusterTemplates = "ai-cluster-templates-v1"
-	AssistedInstallerNodeTemplates    = "ai-node-templates-v1"
-	ImageBasedInstallClusterTemplates = "ibi-cluster-templates-v1"
-	ImageBasedInstallNodeTemplates    = "ibi-node-templates-v1"
 )
 
 func init() {
@@ -196,10 +189,10 @@ func getSiteConfigNamespace(log *zap.Logger) string {
 
 func initConfigMapTemplates(ctx context.Context, c client.Client, log *zap.Logger) error {
 	templates := make(map[string]map[string]string, 4)
-	templates[AssistedInstallerClusterTemplates] = assistedinstaller.GetClusterTemplates()
-	templates[AssistedInstallerNodeTemplates] = assistedinstaller.GetNodeTemplates()
-	templates[ImageBasedInstallClusterTemplates] = imagebasedinstall.GetClusterTemplates()
-	templates[ImageBasedInstallNodeTemplates] = imagebasedinstall.GetNodeTemplates()
+	templates[ai_templates.ClusterLevelInstallTemplates] = ai_templates.GetClusterTemplates()
+	templates[ai_templates.NodeLevelInstallTemplates] = ai_templates.GetNodeTemplates()
+	templates[ibi_templates.ClusterLevelInstallTemplates] = ibi_templates.GetClusterTemplates()
+	templates[ibi_templates.NodeLevelInstallTemplates] = ibi_templates.GetNodeTemplates()
 
 	siteConfigNamespace := getSiteConfigNamespace(log)
 
