@@ -39,7 +39,7 @@ spec:
   caBundleRef:
 {{ .Spec.CaBundleRef | toYaml | indent 4 }}
 {{ end }}
-{{ if gt (len .Spec.ExtraManifestsRefs) 0 }}
+{{ if .Spec.ExtraManifestsRefs }}
   extraManifestsRefs:
 {{ .Spec.ExtraManifestsRefs | toYaml | indent 4 }}
 {{ end }}
@@ -47,8 +47,7 @@ spec:
     name: "{{ .SpecialVars.CurrentNode.HostName }}"
     namespace: "{{ .Spec.ClusterName }}"
 {{ if .Spec.MachineNetwork }}
-machineNetwork:
-{{ .Spec.MachineNetwork | toYaml | indent 4 }}
+  machineNetwork: "{{ (index .Spec.MachineNetwork 0).CIDR }}"
 {{ end }}
 {{ if .Spec.Proxy }}
   proxy:
