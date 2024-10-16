@@ -243,6 +243,42 @@ spec:
     name: "{{ .Spec.ClusterName }}"`
 }
 
+func GetMockImageClusterInstallTemplate() string {
+	return `apiVersion: extensions.hive.openshift.io/v1alpha1
+kind: ImageClusterInstall
+metadata:
+  name: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
+  annotations:
+    siteconfig.open-cluster-management.io/sync-wave: "1"
+spec:
+  clusterDeploymentRef:
+    name: "{{ .Spec.ClusterName }}"
+  imageSetRef:
+    name: "{{ .Spec.ClusterImageSetNameRef }}"
+  hostname: "{{ .SpecialVars.CurrentNode.HostName }}"
+  sshKey: "{{ .Spec.SSHPublicKey }}"
+{{ if .Spec.CaBundleRef }}
+  caBundleRef:
+{{ .Spec.CaBundleRef | toYaml | indent 4 }}
+{{ end }}
+{{ if .Spec.ExtraManifestsRefs }}
+  extraManifestsRefs:
+{{ .Spec.ExtraManifestsRefs | toYaml | indent 4 }}
+{{ end }}
+  bareMetalHostRef:
+    name: "{{ .SpecialVars.CurrentNode.HostName }}"
+    namespace: "{{ .Spec.ClusterName }}"
+{{ if .Spec.MachineNetwork }}
+  machineNetwork: "{{ (index .Spec.MachineNetwork 0).CIDR }}"
+{{ end }}
+{{ if .Spec.Proxy }}
+  proxy:
+{{ .Spec.Proxy | toYaml | indent 4 }}
+{{ end }}
+`
+}
+
 func GetMockNMStateConfigTemplate() string {
 	return `apiVersion: agent-install.openshift.io/v1beta1
 kind: NMStateConfig
