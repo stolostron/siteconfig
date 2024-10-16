@@ -186,6 +186,42 @@ func TestTemplateEngineRender(t *testing.T) {
 		},
 
 		{
+			name: "Test with a valid ImageClusterInstall-like template",
+			args: args{
+				templateType: "ImageClusterInstall",
+				templateStr:  GetMockImageClusterInstallTemplate(),
+				data:         TestData,
+			},
+			want: map[string]interface{}{
+				"apiVersion": "extensions.hive.openshift.io/v1alpha1",
+				"kind":       "ImageClusterInstall",
+				"metadata": map[string]interface{}{
+					"annotations": map[string]interface{}{
+						"siteconfig.open-cluster-management.io/sync-wave": "1"},
+					"name":      "site-sno-du-1",
+					"namespace": "site-sno-du-1",
+				},
+				"spec": map[string]interface{}{
+					"hostname":             "node1",
+					"clusterDeploymentRef": map[string]interface{}{"name": "site-sno-du-1"},
+					"imageSetRef":          map[string]interface{}{"name": "openshift-test"},
+					"proxy":                map[string]interface{}{"noProxy": "foobar"},
+					"extraManifestsRefs": []interface{}{
+						map[string]interface{}{
+							"name": "foobar1",
+						},
+						map[string]interface{}{
+							"name": "foobar2",
+						},
+					},
+					"machineNetwork":   "203.0.113.0/24",
+					"bareMetalHostRef": map[string]interface{}{"name": "node1", "namespace": "site-sno-du-1"},
+					"sshKey":           "ssh-rsa",
+				}},
+			wantErr: false,
+		},
+
+		{
 			name: "Test with valid BMH-like template",
 			args: args{
 				templateType: "BareMetalHost",
