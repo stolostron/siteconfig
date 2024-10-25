@@ -71,10 +71,7 @@ spec:
     version: v1alpha1
   clusterName: "{{ .Spec.ClusterName }}"
   platform:
-    agentBareMetal:
-      agentSelector:
-        matchLabels:
-          cluster-name: "{{ .Spec.ClusterName }}"
+    none: {}
   pullSecretRef:
     name: "{{ .Spec.PullSecretRef.Name }}"`
 
