@@ -27,6 +27,7 @@ import (
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/configuration"
 	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 	"go.uber.org/zap"
@@ -104,10 +105,11 @@ var _ = Describe("Reconcile", func() {
 			Build()
 
 		r = &ClusterInstanceReconciler{
-			Client:     c,
-			Scheme:     scheme.Scheme,
-			Log:        testLogger,
-			TmplEngine: ci.NewTemplateEngine(),
+			Client:      c,
+			Scheme:      scheme.Scheme,
+			Log:         testLogger,
+			TmplEngine:  ci.NewTemplateEngine(),
+			ConfigStore: configuration.NewConfigurationStore(configuration.NewDefaultConfiguration()),
 		}
 
 		Expect(c.Create(ctx, testParams.GeneratePullSecret())).To(Succeed())

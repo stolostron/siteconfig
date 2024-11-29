@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"go.uber.org/zap"
@@ -29,6 +30,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stolostron/siteconfig/internal/controller/configuration"
 	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 )
@@ -44,7 +46,7 @@ var _ = Describe("initConfigMapTemplates", func() {
 		c                   client.Client
 		ctx                 = context.Background()
 		testLogger          = zap.NewNop().Named("Test")
-		SiteConfigNamespace = getSiteConfigNamespace(testLogger)
+		SiteConfigNamespace = configuration.GetPodNamespace(testLogger)
 	)
 
 	BeforeEach(func() {
@@ -121,5 +123,78 @@ var _ = Describe("initConfigMapTemplates", func() {
 		aiNodeCM := &corev1.ConfigMap{}
 		Expect(c.Get(ctx, key, aiNodeCM)).To(Succeed())
 		Expect(aiNodeCM.Data).To(Equal(data))
+	})
+
+	It("creates a default SiteConfig Operator configuration ConfigMap on initialization if not created previously", func() {
+		initConfig, err := getSiteConfigConfiguration(ctx, c, SiteConfigNamespace, testLogger)
+		// Given that a configuration CM has not been created, the initConfig is expected to be the default configuration
+		Expect(err).ToNot(HaveOccurred())
+		Expect(reflect.DeepEqual(initConfig, configuration.NewDefaultConfiguration())).To(BeTrue())
+
+		// retrieve the configuration CM and verify that the data is correctly set to the default configuration
+		cm := &corev1.ConfigMap{}
+		key := types.NamespacedName{
+			Name:      configuration.SiteConfigOperatorConfigMap,
+			Namespace: SiteConfigNamespace,
+		}
+		Expect(c.Get(ctx, key, cm)).To(Succeed())
+		config, err := configuration.FromMap(cm.Data)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(reflect.DeepEqual(config, configuration.NewDefaultConfiguration())).To(BeTrue())
+	})
+
+	It("uses an existing SiteConfig Operator configuration ConfigMap on initialization", func() {
+		expectedConfig := &configuration.Configuration{
+			AllowReinstalls:         true,
+			MaxConcurrentReconciles: 10,
+		}
+		// create the configuration CM
+		key := types.NamespacedName{
+			Name:      configuration.SiteConfigOperatorConfigMap,
+			Namespace: SiteConfigNamespace,
+		}
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      key.Name,
+				Namespace: key.Namespace,
+			},
+			Data: expectedConfig.ToMap(),
+		}
+		Expect(c.Create(ctx, cm)).To(Succeed())
+
+		// retrieve the configuration CM and verify that the data is correctly set
+		actualConfig, err := getSiteConfigConfiguration(ctx, c, SiteConfigNamespace, testLogger)
+		// Given that a configuration CM has not been created, the initConfig is expected to be the default configuration
+		Expect(err).ToNot(HaveOccurred())
+		Expect(reflect.DeepEqual(actualConfig, expectedConfig)).To(BeTrue())
+
+		Expect(c.Get(ctx, key, cm)).To(Succeed())
+		gotConfig, err := configuration.FromMap(cm.Data)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(reflect.DeepEqual(gotConfig, expectedConfig)).To(BeTrue())
+	})
+
+	It("exits when encounters an error with the configuration object", func() {
+		// create the configuration CM
+		key := types.NamespacedName{
+			Name:      configuration.SiteConfigOperatorConfigMap,
+			Namespace: SiteConfigNamespace,
+		}
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      key.Name,
+				Namespace: key.Namespace,
+			},
+			Data: map[string]string{
+				"allowReinstalls":         "foobar",
+				"maxConcurrentReconciles": "1",
+			},
+		}
+		Expect(c.Create(ctx, cm)).To(Succeed())
+
+		// retrieve the configuration CM
+		_, err := getSiteConfigConfiguration(ctx, c, SiteConfigNamespace, testLogger)
+		// Given that a configuration CM has not been created, the initConfig is expected to be the default configuration
+		Expect(err).To(HaveOccurred())
 	})
 })

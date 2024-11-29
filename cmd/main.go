@@ -33,12 +33,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/configuration"
 	"github.com/stolostron/siteconfig/internal/controller/retry"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -120,8 +122,9 @@ func main() {
 	}
 
 	// Check that the SiteConfig namespace value is defined
-	if getSiteConfigNamespace(setupLog) == "" {
-		setupLog.Error("Unable to retrieve the SiteConfig namespace")
+	siteConfigNamespace := configuration.GetPodNamespace(setupLog)
+	if siteConfigNamespace == "" {
+		setupLog.Error("Unable to retrieve the SiteConfig Operator namespace")
 		os.Exit(1)
 	}
 
@@ -131,18 +134,46 @@ func main() {
 		mgr.GetClient(),
 		setupLog,
 	); err != nil {
-		setupLog.Error("Unable to initialize the default reference install template ConfigMaps",
+		setupLog.Error("Unable to initialize the default reference installation template ConfigMaps",
 			zap.Error(err))
 		os.Exit(1)
 	}
 
+	// Create initial SiteConfig Operator configuration
+	operatorConfig, err := getSiteConfigConfiguration(context.TODO(), mgr.GetClient(), siteConfigNamespace, setupLog)
+	if err != nil {
+		setupLog.Error("Failed to process SiteConfig Operator configuration",
+			zap.Error(err))
+		os.Exit(1)
+	}
+	sharedConfigStore := configuration.NewConfigurationStore(operatorConfig)
+	if sharedConfigStore == nil {
+		setupLog.Error("Failed to initialize the ConfigurationStore for the SiteConfig Operator")
+		os.Exit(1)
+	}
+
+	// Create configuration monitor controller to track SiteConfig Operator configuration change(s)
+	if err = (&controller.ConfigurationMonitor{
+		Client:      mgr.GetClient(),
+		Log:         siteconfigLogger.Named("ConfigurationMonitor"),
+		Scheme:      mgr.GetScheme(),
+		ConfigStore: sharedConfigStore,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error("Unable to create controller",
+			zap.String("controller", "ConfigurationMonitor"),
+			zap.Error(err))
+		os.Exit(1)
+	}
+
+	// Create ClusterInstance controller for reconciling ClusterInstance CRs
 	clusterInstanceLogger := siteconfigLogger.Named("ClusterInstanceController")
 	if err = (&controller.ClusterInstanceReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Recorder:   mgr.GetEventRecorderFor("ClusterInstanceController"),
-		Log:        clusterInstanceLogger,
-		TmplEngine: ci.NewTemplateEngine(),
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Recorder:    mgr.GetEventRecorderFor("ClusterInstanceController"),
+		Log:         clusterInstanceLogger,
+		TmplEngine:  ci.NewTemplateEngine(),
+		ConfigStore: sharedConfigStore,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error("Unable to create controller",
 			zap.String("controller", "ClusterInstance"),
@@ -151,6 +182,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create ClusterDeployment controller for monitoring cluster provisioning progress
 	if err = (&controller.ClusterDeploymentReconciler{
 		Client: mgr.GetClient(),
 		Log:    siteconfigLogger.Named("ClusterDeploymentReconciler"),
@@ -179,14 +211,6 @@ func main() {
 	}
 }
 
-func getSiteConfigNamespace(log *zap.Logger) string {
-	namespace := os.Getenv("POD_NAMESPACE")
-	if namespace == "" {
-		log.Info("POD_NAMESPACE environment variable is not defined")
-	}
-	return namespace
-}
-
 func initConfigMapTemplates(ctx context.Context, c client.Client, log *zap.Logger) error {
 	templates := make(map[string]map[string]string, 4)
 	templates[ai_templates.ClusterLevelInstallTemplates] = ai_templates.GetClusterTemplates()
@@ -194,7 +218,7 @@ func initConfigMapTemplates(ctx context.Context, c client.Client, log *zap.Logge
 	templates[ibi_templates.ClusterLevelInstallTemplates] = ibi_templates.GetClusterTemplates()
 	templates[ibi_templates.NodeLevelInstallTemplates] = ibi_templates.GetNodeTemplates()
 
-	siteConfigNamespace := getSiteConfigNamespace(log)
+	siteConfigNamespace := configuration.GetPodNamespace(log)
 
 	for k, v := range templates {
 		immutable := true
@@ -219,4 +243,23 @@ func initConfigMapTemplates(ctx context.Context, c client.Client, log *zap.Logge
 	}
 
 	return nil
+}
+
+func getSiteConfigConfiguration(
+	ctx context.Context,
+	c client.Client,
+	siteConfigNamespace string,
+	log *zap.Logger,
+) (*configuration.Configuration, error) {
+	config, err := configuration.LoadFromConfigMap(ctx, c, siteConfigNamespace)
+	if err != nil && k8serrors.IsNotFound(err) {
+		// Configuration CM not found, creating default
+		config, err = configuration.CreateDefaultConfigurationConfigMap(ctx, c, siteConfigNamespace)
+		if err != nil {
+			log.Error("Unable to create the default SiteConfig Operator configuration ConfigMap",
+				zap.Error(err))
+			return nil, err
+		}
+	}
+	return config, err
 }

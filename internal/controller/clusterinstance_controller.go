@@ -26,6 +26,7 @@ import (
 
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
+	"github.com/stolostron/siteconfig/internal/controller/configuration"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	corev1 "k8s.io/api/core/v1"
@@ -57,10 +58,11 @@ const (
 // ClusterInstanceReconciler reconciles a ClusterInstance object
 type ClusterInstanceReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	Recorder   record.EventRecorder
-	Log        *zap.Logger
-	TmplEngine *ci.TemplateEngine
+	Scheme      *runtime.Scheme
+	Recorder    record.EventRecorder
+	Log         *zap.Logger
+	TmplEngine  *ci.TemplateEngine
+	ConfigStore *configuration.ConfigurationStore
 }
 
 func doNotRequeue() ctrl.Result {
@@ -132,6 +134,12 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if clusterInstance.Status.ObservedGeneration == clusterInstance.ObjectMeta.Generation {
 		log.Info("ObservedGeneration and ObjectMeta.Generation are the same, pre-empting reconcile")
 		return doNotRequeue(), nil
+	}
+
+	if r.ConfigStore.GetConfiguration().AllowReinstalls {
+		log.Info("SiteConfig Operator is configured to allow reinstalls")
+	} else {
+		log.Info("SiteConfig Operator is not configured for reinstalls")
 	}
 
 	// Validate ClusterInstance
@@ -825,6 +833,6 @@ func (r *ClusterInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.ClusterInstance{}).
 		WithEventFilter(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{})).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: r.ConfigStore.GetConfiguration().MaxConcurrentReconciles}).
 		Complete(r)
 }
