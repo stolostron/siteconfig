@@ -26,6 +26,7 @@ import (
 	"github.com/openshift/assisted-service/api/v1beta1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sretry "k8s.io/client-go/util/retry"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
@@ -33,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/configuration"
 	"github.com/stolostron/siteconfig/internal/controller/retry"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -92,7 +94,8 @@ func main() {
 
 	setupLog := siteconfigLogger.Named("SiteConfigSetup")
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	cfg := ctrl.GetConfigOrDie()
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme,
 		Metrics: server.Options{
 			BindAddress: metricsAddr,
@@ -120,29 +123,56 @@ func main() {
 	}
 
 	// Check that the SiteConfig namespace value is defined
-	if getSiteConfigNamespace(setupLog) == "" {
-		setupLog.Error("Unable to retrieve the SiteConfig namespace")
+	siteConfigNamespace := getSiteConfigNamespace(setupLog)
+	if siteConfigNamespace == "" {
+		setupLog.Error("Unable to retrieve the SiteConfig Operator namespace")
+		os.Exit(1)
+	}
+
+	// Create an uncached client to initialize ConfigMaps
+	tmpClient, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error("Failed to create temporary client", zap.Error(err))
 		os.Exit(1)
 	}
 
 	// Initialize the default install template ConfigMaps
-	if err := initConfigMapTemplates(
-		context.TODO(),
-		mgr.GetClient(),
-		setupLog,
-	); err != nil {
-		setupLog.Error("Unable to initialize the default reference install template ConfigMaps",
+	if err := initConfigMapTemplates(context.TODO(), tmpClient, siteConfigNamespace, setupLog); err != nil {
+		setupLog.Error("Unable to initialize the default reference installation template ConfigMaps",
 			zap.Error(err))
 		os.Exit(1)
 	}
 
+	// Initialize the SiteConfig Operator configuration store
+	sharedConfigStore, err := createConfigurationStore(context.TODO(), tmpClient, siteConfigNamespace, setupLog)
+	if err != nil {
+		setupLog.Error("Failed to initialize the ConfigurationStore for the SiteConfig Operator")
+		os.Exit(1)
+	}
+
+	// Create configuration monitor controller to track SiteConfig Operator configuration change(s)
+	if err = (&controller.ConfigurationMonitor{
+		Client:      mgr.GetClient(),
+		Log:         siteconfigLogger.Named("ConfigurationMonitor"),
+		Scheme:      mgr.GetScheme(),
+		Namespace:   siteConfigNamespace,
+		ConfigStore: sharedConfigStore,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error("Unable to create controller",
+			zap.String("controller", "ConfigurationMonitor"),
+			zap.Error(err))
+		os.Exit(1)
+	}
+
+	// Create ClusterInstance controller for reconciling ClusterInstance CRs
 	clusterInstanceLogger := siteconfigLogger.Named("ClusterInstanceController")
 	if err = (&controller.ClusterInstanceReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Recorder:   mgr.GetEventRecorderFor("ClusterInstanceController"),
-		Log:        clusterInstanceLogger,
-		TmplEngine: ci.NewTemplateEngine(),
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Recorder:    mgr.GetEventRecorderFor("ClusterInstanceController"),
+		Log:         clusterInstanceLogger,
+		TmplEngine:  ci.NewTemplateEngine(),
+		ConfigStore: sharedConfigStore,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error("Unable to create controller",
 			zap.String("controller", "ClusterInstance"),
@@ -151,6 +181,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create ClusterDeployment controller for monitoring cluster provisioning progress
 	if err = (&controller.ClusterDeploymentReconciler{
 		Client: mgr.GetClient(),
 		Log:    siteconfigLogger.Named("ClusterDeploymentReconciler"),
@@ -179,29 +210,32 @@ func main() {
 	}
 }
 
+// getSiteConfigNamespace retrieves the namespace where the SiteConfig Operator is running.
+// It reads the namespace from the POD_NAMESPACE environment variable.
+// If the environment variable is not set, the function logs a warning and returns an empty string.
 func getSiteConfigNamespace(log *zap.Logger) string {
 	namespace := os.Getenv("POD_NAMESPACE")
 	if namespace == "" {
-		log.Info("POD_NAMESPACE environment variable is not defined")
+		log.Warn("POD_NAMESPACE environment variable is not defined")
 	}
 	return namespace
 }
 
-func initConfigMapTemplates(ctx context.Context, c client.Client, log *zap.Logger) error {
+// initConfigMapTemplates initializes default ConfigMaps consisting of the Assisted Installer and Image-based Installer
+// installation templates in the specified namespace.
+func initConfigMapTemplates(ctx context.Context, c client.Client, namespace string, log *zap.Logger) error {
 	templates := make(map[string]map[string]string, 4)
 	templates[ai_templates.ClusterLevelInstallTemplates] = ai_templates.GetClusterTemplates()
 	templates[ai_templates.NodeLevelInstallTemplates] = ai_templates.GetNodeTemplates()
 	templates[ibi_templates.ClusterLevelInstallTemplates] = ibi_templates.GetClusterTemplates()
 	templates[ibi_templates.NodeLevelInstallTemplates] = ibi_templates.GetNodeTemplates()
 
-	siteConfigNamespace := getSiteConfigNamespace(log)
-
 	for k, v := range templates {
 		immutable := true
 		configMap := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      k,
-				Namespace: siteConfigNamespace,
+				Namespace: namespace,
 			},
 			Immutable: &immutable,
 			Data:      v,
@@ -211,12 +245,81 @@ func initConfigMapTemplates(ctx context.Context, c client.Client, log *zap.Logge
 			return client.IgnoreAlreadyExists(c.Create(ctx, configMap))
 		}); err != nil {
 			return fmt.Errorf(
-				"failed to create default reference install template ConfigMap %s/%s, error: %w",
-				siteConfigNamespace, k, err)
+				"failed to create default reference installation template ConfigMap %s/%s, error: %w",
+				namespace, k, err)
 		}
 
-		log.Sugar().Infof("Created default reference install template ConfigMap %s/%s", siteConfigNamespace, k)
+		log.Sugar().Infof("Created default reference installation template ConfigMap %s/%s", namespace, k)
 	}
 
 	return nil
+}
+
+// createConfigurationStore initializes and returns a ConfigurationStore instance for the SiteConfig Operator.
+// This function ensures that the necessary configuration ConfigMap exists in the given namespace and
+// retrieves its data. If the ConfigMap does not exist, a default configuration is created.
+func createConfigurationStore(
+	ctx context.Context,
+	client client.Client,
+	namespace string,
+	log *zap.Logger,
+) (*configuration.ConfigurationStore, error) {
+	// Attempt to initialize the SiteConfig Operator configuration
+	data, err := initializeConfiguration(ctx, client, namespace, log)
+	if err != nil {
+		log.Error("Failed to initialize the SiteConfig Operator configuration", zap.Error(err))
+		return nil, err
+	}
+
+	if len(data) == 0 {
+		log.Error("SiteConfig Operator configuration data is empty")
+		return nil, fmt.Errorf("configuration data is empty")
+	}
+
+	// Parse configuration from the retrieved data
+	config := &configuration.Configuration{}
+	if err := config.FromMap(data); err != nil {
+		log.Error("Failed to parse SiteConfig Operator configuration", zap.Error(err))
+		return nil, err
+	}
+
+	return configuration.NewConfigurationStore(config)
+}
+
+// initializeConfiguration ensures that the SiteConfig Operator configuration ConfigMap exists.
+// If the ConfigMap does not exist, it creates it with default values and returns those defaults.
+// If the ConfigMap exists, it retrieves and returns its data.
+func initializeConfiguration(
+	ctx context.Context,
+	client client.Client,
+	namespace string,
+	log *zap.Logger,
+) (data map[string]string, err error) {
+	// Retry logic for handling transient errors or resource conflicts
+	if err = retry.RetryOnConflictOrRetriable(k8sretry.DefaultBackoff, func() error {
+		// Attempt to retrieve the ConfigMap
+		data, err = controller.GetConfigurationData(ctx, client, namespace)
+		if err == nil {
+			return nil // Successfully retrieved ConfigMap data
+		}
+
+		// If ConfigMap is missing, create it with default values
+		if errors.IsNotFound(err) {
+			log.Info("SiteConfig configuration ConfigMap not found; creating one with default values")
+			if createErr := controller.CreateDefaultConfigurationConfigMap(ctx, client, namespace); createErr != nil {
+				log.Error("Failed to create default configuration ConfigMap", zap.Error(createErr))
+				return createErr // Retry if creation fails
+			}
+			// Use default configuration if creation succeeds
+			data = configuration.NewDefaultConfiguration().ToMap()
+			return nil
+		}
+
+		// Log and return other errors for retry
+		log.Error("Failed to retrieve configuration ConfigMap", zap.Error(err))
+		return err
+	}); err != nil {
+		log.Error("Error during configuration initialization", zap.Error(err))
+	}
+	return
 }
