@@ -251,7 +251,7 @@ func (r *ClusterDeploymentReconciler) getClusterInstance(
 
 func (r *ClusterDeploymentReconciler) mapClusterInstanceToCD(
 	ctx context.Context,
-	obj client.Object,
+	obj *v1alpha1.ClusterInstance,
 ) []reconcile.Request {
 	clusterInstance := &v1alpha1.ClusterInstance{}
 	if err := r.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()},
@@ -288,7 +288,9 @@ func (r *ClusterDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					return isOwnedByClusterInstance(e.ObjectNew.GetLabels())
 				},
 			})).
-		WatchesRawSource(source.Kind(mgr.GetCache(), &v1alpha1.ClusterInstance{}),
-			handler.EnqueueRequestsFromMapFunc(r.mapClusterInstanceToCD)).
+		WatchesRawSource(source.TypedKind(mgr.GetCache(),
+			&v1alpha1.ClusterInstance{},
+			handler.TypedEnqueueRequestsFromMapFunc(r.mapClusterInstanceToCD),
+		)).
 		Complete(r)
 }

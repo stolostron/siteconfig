@@ -1,8 +1,10 @@
-# Build the manager binary
-FROM registry.access.redhat.com/ubi9/go-toolset:1.21.11-9 AS builder
+# Build the siteconfig-manager binary
+FROM registry.redhat.io/ubi9/go-toolset:1.22.7 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
+
+WORKDIR /opt/app-root/src
 
 # Bring in the go dependencies before anything else so we can take
 # advantage of caching these layers in future builds.
@@ -19,21 +21,21 @@ COPY internal/ internal/
 
 # Build the binaries
 RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} GO111MODULE=on \
-  go build -mod=vendor -a -o build/manager cmd/main.go
+  go build -mod=vendor -a -o build/siteconfig-manager cmd/main.go
 
 #####################################################################################################
 # Build the controller image
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.4-1227.1725849298
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
 
 COPY --from=builder \
-    /opt/app-root/src/build/manager \
+    /opt/app-root/src/build/siteconfig-manager \
     /usr/local/bin/
 
 # Copy the licence
 COPY LICENSE /licenses/LICENSE
 
-ENV USER_UID=1001
+ENV USER_UID=65532
 
 USER ${USER_UID}
 
-ENTRYPOINT ["/usr/local/bin/manager"]
+ENTRYPOINT ["/usr/local/bin/siteconfig-manager"]
