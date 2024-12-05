@@ -44,7 +44,7 @@ spec:
           type: RuntimeDefault
       containers:
       - command:
-        - /usr/local/bin/manager
+        - /usr/local/bin/siteconfig-manager
         args:
         - --leader-elect
         env:
