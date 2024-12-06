@@ -8,6 +8,7 @@ package models
 import (
 	"context"
 
+	"github.com/go-openapi/errors"
 	"github.com/go-openapi/strfmt"
 	"github.com/go-openapi/swag"
 )
@@ -17,20 +18,75 @@ import (
 // swagger:model boot
 type Boot struct {
 
+	// command line
+	CommandLine string `json:"command_line,omitempty"`
+
 	// current boot mode
 	CurrentBootMode string `json:"current_boot_mode,omitempty"`
 
 	// pxe interface
 	PxeInterface string `json:"pxe_interface,omitempty"`
+
+	// secure boot state
+	SecureBootState SecureBootState `json:"secure_boot_state,omitempty"`
 }
 
 // Validate validates this boot
 func (m *Boot) Validate(formats strfmt.Registry) error {
+	var res []error
+
+	if err := m.validateSecureBootState(formats); err != nil {
+		res = append(res, err)
+	}
+
+	if len(res) > 0 {
+		return errors.CompositeValidationError(res...)
+	}
 	return nil
 }
 
-// ContextValidate validates this boot based on context it is used
+func (m *Boot) validateSecureBootState(formats strfmt.Registry) error {
+	if swag.IsZero(m.SecureBootState) { // not required
+		return nil
+	}
+
+	if err := m.SecureBootState.Validate(formats); err != nil {
+		if ve, ok := err.(*errors.Validation); ok {
+			return ve.ValidateName("secure_boot_state")
+		} else if ce, ok := err.(*errors.CompositeError); ok {
+			return ce.ValidateName("secure_boot_state")
+		}
+		return err
+	}
+
+	return nil
+}
+
+// ContextValidate validate this boot based on the context it is used
 func (m *Boot) ContextValidate(ctx context.Context, formats strfmt.Registry) error {
+	var res []error
+
+	if err := m.contextValidateSecureBootState(ctx, formats); err != nil {
+		res = append(res, err)
+	}
+
+	if len(res) > 0 {
+		return errors.CompositeValidationError(res...)
+	}
+	return nil
+}
+
+func (m *Boot) contextValidateSecureBootState(ctx context.Context, formats strfmt.Registry) error {
+
+	if err := m.SecureBootState.ContextValidate(ctx, formats); err != nil {
+		if ve, ok := err.(*errors.Validation); ok {
+			return ve.ValidateName("secure_boot_state")
+		} else if ce, ok := err.(*errors.CompositeError); ok {
+			return ce.ValidateName("secure_boot_state")
+		}
+		return err
+	}
+
 	return nil
 }
 
