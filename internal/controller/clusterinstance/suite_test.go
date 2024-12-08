@@ -33,7 +33,7 @@ import (
 	//+kubebuilder:scaffold:imports
 )
 
-func TestControllers(t *testing.T) {
+func TestClusterInstance(t *testing.T) {
 	RegisterFailHandler(Fail)
 
 	RunSpecs(t, "ClusterInstanceSuite")
