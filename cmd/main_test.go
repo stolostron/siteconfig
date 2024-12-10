@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"go.uber.org/zap"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -29,6 +30,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/stolostron/siteconfig/internal/controller"
+	"github.com/stolostron/siteconfig/internal/controller/configuration"
 	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 )
@@ -41,10 +45,10 @@ func TestMain(t *testing.T) {
 
 var _ = Describe("initConfigMapTemplates", func() {
 	var (
-		c                   client.Client
-		ctx                 = context.Background()
-		testLogger          = zap.NewNop().Named("Test")
-		SiteConfigNamespace = getSiteConfigNamespace(testLogger)
+		c             client.Client
+		ctx           = context.Background()
+		testLogger    = zap.NewNop().Named("Test")
+		testNamespace = getSiteConfigNamespace(testLogger)
 	)
 
 	BeforeEach(func() {
@@ -54,46 +58,46 @@ var _ = Describe("initConfigMapTemplates", func() {
 
 		siteConfigNS := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: SiteConfigNamespace,
+				Name: testNamespace,
 			},
 		}
 		Expect(c.Create(ctx, siteConfigNS)).To(Succeed())
 	})
 
 	It("should create default assisted install and image based install cluster templates on initialization", func() {
-		err := initConfigMapTemplates(ctx, c, testLogger)
+		err := initConfigMapTemplates(ctx, c, testNamespace, testLogger)
 		Expect(err).ToNot(HaveOccurred())
 
 		cm := &corev1.ConfigMap{}
 		key := types.NamespacedName{
 			Name:      ai_templates.ClusterLevelInstallTemplates,
-			Namespace: SiteConfigNamespace,
+			Namespace: testNamespace,
 		}
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
 
 		cm = &corev1.ConfigMap{}
 		key = types.NamespacedName{
 			Name:      ibi_templates.ClusterLevelInstallTemplates,
-			Namespace: SiteConfigNamespace,
+			Namespace: testNamespace,
 		}
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
 	})
 
 	It("should create default assisted install and image based install node templates on initialization", func() {
-		err := initConfigMapTemplates(ctx, c, testLogger)
+		err := initConfigMapTemplates(ctx, c, testNamespace, testLogger)
 		Expect(err).ToNot(HaveOccurred())
 
 		cm := &corev1.ConfigMap{}
 		key := types.NamespacedName{
 			Name:      ai_templates.NodeLevelInstallTemplates,
-			Namespace: SiteConfigNamespace,
+			Namespace: testNamespace,
 		}
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
 
 		cm = &corev1.ConfigMap{}
 		key = types.NamespacedName{
 			Name:      ibi_templates.NodeLevelInstallTemplates,
-			Namespace: SiteConfigNamespace,
+			Namespace: testNamespace,
 		}
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
 	})
@@ -103,7 +107,7 @@ var _ = Describe("initConfigMapTemplates", func() {
 		cm := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      ai_templates.NodeLevelInstallTemplates,
-				Namespace: SiteConfigNamespace,
+				Namespace: testNamespace,
 			},
 			Data: data,
 		}
@@ -111,15 +115,79 @@ var _ = Describe("initConfigMapTemplates", func() {
 
 		key := types.NamespacedName{
 			Name:      ai_templates.NodeLevelInstallTemplates,
-			Namespace: SiteConfigNamespace,
+			Namespace: testNamespace,
 		}
 
-		err := initConfigMapTemplates(ctx, c, testLogger)
+		err := initConfigMapTemplates(ctx, c, testNamespace, testLogger)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Verify that the existing ConfigMap is not over-written
 		aiNodeCM := &corev1.ConfigMap{}
 		Expect(c.Get(ctx, key, aiNodeCM)).To(Succeed())
 		Expect(aiNodeCM.Data).To(Equal(data))
+	})
+
+	It("creates a default SiteConfig Operator configuration ConfigMap on initialization if not created previously", func() {
+		_, err := createConfigurationStore(ctx, c, testNamespace, testLogger)
+		// Given that a configuration CM has not been created, the initConfig is expected to be the default configuration
+		Expect(err).ToNot(HaveOccurred())
+
+		// retrieve the configuration CM and verify that the data is correctly set to the default configuration
+		data, err := controller.GetConfigurationData(ctx, c, testNamespace)
+		Expect(err).ToNot(HaveOccurred())
+
+		expected := configuration.NewDefaultConfiguration().ToMap()
+		Expect(data).To(Equal(expected))
+	})
+
+	It("uses an existing SiteConfig Operator configuration ConfigMap on initialization", func() {
+		data := map[string]string{
+			"allowReinstalls":         "true",
+			"maxConcurrentReconciles": "10",
+		}
+		// create the configuration CM
+		key := types.NamespacedName{
+			Name:      controller.SiteConfigOperatorConfigMap,
+			Namespace: testNamespace,
+		}
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      key.Name,
+				Namespace: key.Namespace,
+			},
+			Data: data,
+		}
+		Expect(c.Create(ctx, cm)).To(Succeed())
+
+		// retrieve the configuration CM and verify that the data is correctly set
+		configStore, err := createConfigurationStore(ctx, c, testNamespace, testLogger)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(configStore.GetAllowReinstalls()).To(BeTrue())
+		Expect(configStore.GetMaxConcurrentReconciles()).To(Equal(10))
+	})
+
+	It("exits when encounters an error with the configuration object", func() {
+		// create the configuration CM
+		key := types.NamespacedName{
+			Name:      controller.SiteConfigOperatorConfigMap,
+			Namespace: testNamespace,
+		}
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      key.Name,
+				Namespace: key.Namespace,
+			},
+			Data: map[string]string{
+				"allowReinstalls":         "foobar",
+				"maxConcurrentReconciles": "1",
+			},
+		}
+		Expect(c.Create(ctx, cm)).To(Succeed())
+
+		// retrieve the configuration CM
+		_, err := createConfigurationStore(ctx, c, testNamespace, testLogger)
+		// Given that a configuration CM has not been created, the initConfig is expected to be the default configuration
+		Expect(err).To(HaveOccurred())
 	})
 })
