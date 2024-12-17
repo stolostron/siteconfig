@@ -22,36 +22,37 @@ import (
 	"fmt"
 	"os"
 
-	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
-	"github.com/openshift/assisted-service/api/v1beta1"
-	hivev1 "github.com/openshift/hive/apis/hive/v1"
+	"go.uber.org/zap"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8sretry "k8s.io/client-go/util/retry"
-	clusterv1 "open-cluster-management.io/api/cluster/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-
-	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
-	"github.com/stolostron/siteconfig/internal/controller/configuration"
-	"github.com/stolostron/siteconfig/internal/controller/retry"
-
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	// to ensure that exec-entrypoint and run can make use of them.
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	k8sretry "k8s.io/client-go/util/retry"
+
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	ctrlruntimezap "sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"go.uber.org/zap"
+	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
+
+	"github.com/openshift/assisted-service/api/v1beta1"
+
+	hivev1 "github.com/openshift/hive/apis/hive/v1"
+
+	clusterv1 "open-cluster-management.io/api/cluster/v1"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	"github.com/stolostron/siteconfig/internal/controller"
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/configuration"
+	"github.com/stolostron/siteconfig/internal/controller/deletion"
+	"github.com/stolostron/siteconfig/internal/controller/retry"
 	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 	//+kubebuilder:scaffold:imports
@@ -164,15 +165,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create DeletionHandler for graceful deletion of rendered objects
+	deletionHandler := &deletion.DeletionHandler{
+		Client: mgr.GetClient(),
+		Logger: siteconfigLogger.Named("DeletionHandler"),
+	}
+
 	// Create ClusterInstance controller for reconciling ClusterInstance CRs
 	clusterInstanceLogger := siteconfigLogger.Named("ClusterInstanceController")
 	if err = (&controller.ClusterInstanceReconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		Recorder:    mgr.GetEventRecorderFor("ClusterInstanceController"),
-		Log:         clusterInstanceLogger,
-		TmplEngine:  ci.NewTemplateEngine(),
-		ConfigStore: sharedConfigStore,
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Recorder:        mgr.GetEventRecorderFor("ClusterInstanceController"),
+		Log:             clusterInstanceLogger,
+		TmplEngine:      ci.NewTemplateEngine(),
+		ConfigStore:     sharedConfigStore,
+		DeletionHandler: deletionHandler,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error("Unable to create controller",
 			zap.String("controller", "ClusterInstance"),

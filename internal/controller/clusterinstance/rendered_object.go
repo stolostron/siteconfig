@@ -18,11 +18,19 @@ package clusterinstance
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 
 	"golang.org/x/exp/maps"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/utils/ptr"
+
+	"github.com/stolostron/siteconfig/api/v1alpha1"
 )
 
 type action string
@@ -38,12 +46,12 @@ type RenderedObject struct {
 	action action
 }
 
-type syncWaveMap struct {
+type SyncWaveMap struct {
 	data map[int][]RenderedObject
 }
 
 type RenderedObjectCollection struct {
-	prune, suppress, render syncWaveMap
+	prune, suppress, render SyncWaveMap
 }
 
 func (r *RenderedObject) SetObject(manifest map[string]interface{}) error {
@@ -65,6 +73,10 @@ func (r *RenderedObject) GetAPIVersion() string {
 
 func (r *RenderedObject) GetKind() string {
 	return r.object.GetKind()
+}
+
+func (r *RenderedObject) GetGroupVersionKind() schema.GroupVersionKind {
+	return r.object.GroupVersionKind()
 }
 
 func (r *RenderedObject) GetNamespace() string {
@@ -96,19 +108,55 @@ func (r *RenderedObject) GetResourceId() string {
 	return GetResourceId(r.GetName(), r.GetNamespace(), r.GetKind())
 }
 
-func (s *syncWaveMap) getAscendingSyncWaves() []int {
+func (r *RenderedObject) ManifestReference() *v1alpha1.ManifestReference {
+	syncWave, err := r.GetSyncWave()
+	if err != nil {
+		return nil
+	}
+	return &v1alpha1.ManifestReference{
+		APIGroup:        ptr.To(r.GetAPIVersion()),
+		Kind:            r.GetKind(),
+		Name:            r.GetName(),
+		Namespace:       r.GetNamespace(),
+		SyncWave:        syncWave,
+		LastAppliedTime: metav1.Now(),
+	}
+}
+
+// MatchesIdentity checks if two RenderedObjects are equal based on identifying fields.
+// These fields are APIGroup, Kind, Name, and Namespace.
+func (r *RenderedObject) MatchesIdentity(other *RenderedObject) bool {
+	return r.GetAPIVersion() == other.GetAPIVersion() &&
+		r.GetKind() == other.GetKind() &&
+		r.GetName() == other.GetName() &&
+		r.GetNamespace() == other.GetNamespace()
+}
+
+// IndexOfObjectByIdentity searches for a RenderedObject in the given RenderedObject slice based on
+// identity fields and returns its index.
+// It returns -1 and a not found error if the target is not found.
+func IndexOfObjectByIdentity(target *RenderedObject, objects []RenderedObject) (int, error) {
+	for i, obj := range objects {
+		if obj.MatchesIdentity(target) {
+			return i, nil
+		}
+	}
+	return -1, fmt.Errorf("RenderedObject (%s) not found", target.GetResourceId())
+}
+
+func (s *SyncWaveMap) GetAscendingSyncWaves() []int {
 	syncWaves := maps.Keys(s.data)
 	sort.Ints(syncWaves)
 	return syncWaves
 }
 
-func (s *syncWaveMap) getDescendingSyncWaves() []int {
+func (s *SyncWaveMap) GetDescendingSyncWaves() []int {
 	syncWaves := maps.Keys(s.data)
 	sort.Sort(sort.Reverse(sort.IntSlice(syncWaves)))
 	return syncWaves
 }
 
-func (s *syncWaveMap) getSlice(syncWave int) []RenderedObject {
+func (s *SyncWaveMap) GetObjectsForSyncWave(syncWave int) []RenderedObject {
 	if res, ok := s.data[syncWave]; ok {
 		// sort manifests alphabetically (by "kind") to yield more deterministic results
 		sort.Slice(res, func(x, y int) bool {
@@ -119,7 +167,7 @@ func (s *syncWaveMap) getSlice(syncWave int) []RenderedObject {
 	return []RenderedObject{}
 }
 
-func (s *syncWaveMap) add(obj RenderedObject) error {
+func (s *SyncWaveMap) Add(obj RenderedObject) error {
 	if obj.GetObject().Object == nil {
 		return nil
 	}
@@ -143,49 +191,62 @@ func (s *syncWaveMap) add(obj RenderedObject) error {
 	return nil
 }
 
+func (s *SyncWaveMap) AddObjects(objects []RenderedObject) error {
+	var errs []error
+	for _, object := range objects {
+		if err := s.Add(object); err != nil {
+			errs = append(errs, fmt.Errorf("error adding object (%s) to SyncWaveMap, err: %v",
+				object.GetResourceId(), err.Error()))
+		}
+	}
+	return utilerrors.NewAggregate(errs)
+}
+
 func (r *RenderedObjectCollection) AddObject(object RenderedObject) error {
 	var err error
 	switch object.action {
 	case actionRender:
-		err = r.render.add(object)
+		err = r.render.Add(object)
 	case actionPrune:
-		err = r.prune.add(object)
+		err = r.prune.Add(object)
 	case actionSuppress:
-		err = r.suppress.add(object)
+		err = r.suppress.Add(object)
 	}
 
 	return err
 }
 
 func (r *RenderedObjectCollection) AddObjects(objects []RenderedObject) error {
+	var errs []error
 	for _, object := range objects {
 		if err := r.AddObject(object); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("error adding object (%s) to RenderedObjectCollection, err: %v",
+				object.GetResourceId(), err.Error()))
 		}
 	}
-	return nil
+	return utilerrors.NewAggregate(errs)
 }
 
 func (r *RenderedObjectCollection) GetRenderObjects() []RenderedObject {
 	renderList := make([]RenderedObject, 0)
-	for _, syncWave := range r.render.getAscendingSyncWaves() {
-		renderList = append(renderList, r.render.getSlice(syncWave)...)
+	for _, syncWave := range r.render.GetAscendingSyncWaves() {
+		renderList = append(renderList, r.render.GetObjectsForSyncWave(syncWave)...)
 	}
 	return renderList
 }
 
 func (r *RenderedObjectCollection) GetPruneObjects() []RenderedObject {
 	pruneList := make([]RenderedObject, 0)
-	for _, syncWave := range r.prune.getDescendingSyncWaves() {
-		pruneList = append(pruneList, r.prune.getSlice(syncWave)...)
+	for _, syncWave := range r.prune.GetDescendingSyncWaves() {
+		pruneList = append(pruneList, r.prune.GetObjectsForSyncWave(syncWave)...)
 	}
 	return pruneList
 }
 
 func (r *RenderedObjectCollection) GetSuppressObjects() []RenderedObject {
 	suppressList := make([]RenderedObject, 0)
-	for _, syncWave := range r.suppress.getAscendingSyncWaves() {
-		suppressList = append(suppressList, r.suppress.getSlice(syncWave)...)
+	for _, syncWave := range r.suppress.GetAscendingSyncWaves() {
+		suppressList = append(suppressList, r.suppress.GetObjectsForSyncWave(syncWave)...)
 	}
 	return suppressList
 }
