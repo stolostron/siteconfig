@@ -16,6 +16,8 @@ limitations under the License.
 
 package v1alpha1
 
+import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 // ExtraAnnotationSearch Looks up a specific manifest Annotation for this cluster
 func (c *ClusterInstanceSpec) ExtraAnnotationSearch(kind string) (map[string]string, bool) {
 	annotations, ok := c.ExtraAnnotations[kind]
@@ -44,4 +46,46 @@ func (node *NodeSpec) ExtraLabelSearch(kind string, cluster *ClusterInstanceSpec
 		return labels, ok
 	}
 	return cluster.ExtraLabelSearch(kind)
+}
+
+// MatchesIdentity checks if two ManifestReference objects are equal based on identifying fields.
+// These fields are APIGroup, Kind, Name, and Namespace.
+func (m *ManifestReference) MatchesIdentity(other *ManifestReference) bool {
+	if m == nil || other == nil {
+		return false
+	}
+
+	// Safely compare APIGroup pointers
+	var mAPIGroup, otherAPIGroup string
+	if m.APIGroup != nil {
+		mAPIGroup = *m.APIGroup
+	}
+	if other.APIGroup != nil {
+		otherAPIGroup = *other.APIGroup
+	}
+
+	// Compare identifying fields
+	return mAPIGroup == otherAPIGroup &&
+		m.Kind == other.Kind &&
+		m.Name == other.Name &&
+		m.Namespace == other.Namespace
+}
+
+func (m *ManifestReference) UpdateStatus(status, message string) {
+	if m.Status != status || m.Message != message {
+		m.Status = status
+		m.Message = message
+		m.LastAppliedTime = metav1.Now()
+	}
+}
+
+// IndexOfManifestByIdentity searches for a ManifestReference in the given list based on identity fields
+// and returns its index. It returns -1 if the target is not found.
+func IndexOfManifestByIdentity(target *ManifestReference, manifestRefs []ManifestReference) int {
+	for i, ref := range manifestRefs {
+		if ref.MatchesIdentity(target) {
+			return i
+		}
+	}
+	return -1
 }
