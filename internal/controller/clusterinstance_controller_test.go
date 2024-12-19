@@ -21,16 +21,8 @@ import (
 	"fmt"
 	"os"
 
-	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	hivev1 "github.com/openshift/hive/apis/hive/v1"
-	"github.com/stolostron/siteconfig/api/v1alpha1"
-	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
-	"github.com/stolostron/siteconfig/internal/controller/configuration"
-	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
-	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 	"go.uber.org/zap"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,12 +30,27 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
-	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	"k8s.io/utils/ptr"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
+	hivev1 "github.com/openshift/hive/apis/hive/v1"
+	clusterv1 "open-cluster-management.io/api/cluster/v1"
+
+	"github.com/stolostron/siteconfig/api/v1alpha1"
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/configuration"
+	cierrors "github.com/stolostron/siteconfig/internal/controller/errors"
+	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
+	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 const (
@@ -78,11 +85,6 @@ const (
 	NMStateConfigKind       = "NMStateConfig"
 )
 
-func stringToStringPtr(s string) *string {
-	sPtr := s
-	return &sPtr
-}
-
 var _ = Describe("Reconcile", func() {
 	var (
 		c          client.Client
@@ -94,7 +96,6 @@ var _ = Describe("Reconcile", func() {
 			ClusterNamespace: TestClusterInstanceNamespace,
 			PullSecret:       TestPullSecret,
 		}
-
 		clusterInstance *v1alpha1.ClusterInstance
 	)
 
@@ -215,6 +216,45 @@ var _ = Describe("handleFinalizer", func() {
 		clusterNamespace = TestClusterInstanceNamespace
 	)
 
+	ensureDeletionInProgressStatus := func(manifests []v1alpha1.ManifestReference) bool {
+		Expect(len(manifests)).To(BeNumerically(">", 0))
+		for _, m := range manifests {
+			Expect(m.Status).To(Equal(v1alpha1.ManifestDeletionInProgress))
+		}
+		return true
+	}
+
+	var triggerAndVerifyFinalizerHandling = func(
+		r *ClusterInstanceReconciler,
+		clusterInstanceKey types.NamespacedName,
+		expectedNumManifestsToBeDeleted int,
+	) {
+		// Trigger deletion of ClusterInstance.
+		clusterInstance := &v1alpha1.ClusterInstance{}
+		Expect(r.Client.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
+		Expect(r.Client.Delete(ctx, clusterInstance)).To(Succeed())
+
+		// Fetch the ClusterInstance to get the DeletionTimestamp.
+		Expect(r.Client.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
+
+		// First call of r.handleFinalizer should trigger deletion of rendered manifests.
+		res, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(Equal(requeueForDeletion()))
+		Expect(r.Client.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
+
+		Expect(len(clusterInstance.Status.ManifestsRendered)).To(Equal(expectedNumManifestsToBeDeleted))
+		Expect(clusterInstance.Status.ManifestsRendered).To(Satisfy(ensureDeletionInProgressStatus))
+
+		// Second call of r.handleFinalizer should result in the deletion of all the rendered objects.
+		res, err = r.handleFinalizer(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(Equal(doNotRequeue()))
+
+		// Check that the ClusterInstance is deleted.
+		Expect(r.Client.Get(ctx, clusterInstanceKey, clusterInstance)).ToNot(Succeed())
+	}
+
 	BeforeEach(func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
@@ -237,16 +277,11 @@ var _ = Describe("handleFinalizer", func() {
 		}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		res, stop, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
+		res, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
 		Expect(res).To(Equal(ctrl.Result{Requeue: true}))
-		Expect(stop).To(BeTrue())
 		Expect(err).ToNot(HaveOccurred())
 
-		key := types.NamespacedName{
-			Name:      clusterName,
-			Namespace: clusterNamespace,
-		}
-		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
 		Expect(clusterInstance.GetFinalizers()).To(ContainElement(clusterInstanceFinalizer))
 	})
 
@@ -260,9 +295,8 @@ var _ = Describe("handleFinalizer", func() {
 		}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		res, stop, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
+		res, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
 		Expect(res).To(Equal(ctrl.Result{}))
-		Expect(stop).To(BeFalse())
 		Expect(err).ToNot(HaveOccurred())
 	})
 
@@ -280,7 +314,7 @@ var _ = Describe("handleFinalizer", func() {
 			Status: v1alpha1.ClusterInstanceStatus{
 				ManifestsRendered: []v1alpha1.ManifestReference{
 					{
-						APIGroup:  stringToStringPtr(ClusterDeploymentApiVersion),
+						APIGroup:  ptr.To(ClusterDeploymentApiVersion),
 						Kind:      ClusterDeploymentKind,
 						Name:      manifestName,
 						Namespace: clusterNamespace,
@@ -288,7 +322,7 @@ var _ = Describe("handleFinalizer", func() {
 						Status:    v1alpha1.ManifestRenderedSuccess,
 					},
 					{
-						APIGroup:  stringToStringPtr(BareMetalHostApiVersion),
+						APIGroup:  ptr.To(BareMetalHostApiVersion),
 						Kind:      BareMetalHostKind,
 						Name:      manifestName,
 						Namespace: clusterNamespace,
@@ -296,14 +330,14 @@ var _ = Describe("handleFinalizer", func() {
 						Status:    v1alpha1.ManifestRenderedSuccess,
 					},
 					{
-						APIGroup: stringToStringPtr(ManagedClusterApiVersion),
+						APIGroup: ptr.To(ManagedClusterApiVersion),
 						Kind:     ManagedClusterKind,
 						Name:     manifestName,
 						SyncWave: 3,
 						Status:   v1alpha1.ManifestRenderedSuccess,
 					},
 					{
-						APIGroup:  stringToStringPtr(V1ApiVersion),
+						APIGroup:  ptr.To(V1ApiVersion),
 						Kind:      ConfigMapKind,
 						Name:      manifest2Name,
 						Namespace: clusterNamespace,
@@ -311,7 +345,7 @@ var _ = Describe("handleFinalizer", func() {
 						Status:    v1alpha1.ManifestRenderedSuccess,
 					},
 					{
-						APIGroup:  stringToStringPtr(V1ApiVersion),
+						APIGroup:  ptr.To(V1ApiVersion),
 						Kind:      ConfigMapKind,
 						Name:      manifestName,
 						Namespace: clusterNamespace,
@@ -396,25 +430,21 @@ var _ = Describe("handleFinalizer", func() {
 		Expect(c.Get(ctx, key2, cm)).To(Succeed())
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
 
-		// Set the deletionTimestamp to force deletion of siteconfig manifests
-		deletionTimeStamp := metav1.Now()
-		clusterInstance.ObjectMeta.DeletionTimestamp = &deletionTimeStamp
+		clusterInstanceKey := client.ObjectKeyFromObject(clusterInstance)
+		expectedNumManifestsToBeDeleted := 3 // ClusterDeployment, BareMetalHost, ManagedCluster
+		triggerAndVerifyFinalizerHandling(r, clusterInstanceKey, expectedNumManifestsToBeDeleted)
 
-		// Expect the manifests previously created to be deleted after the handleFinalizer is called
-		res, stop, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
-		Expect(res).To(Equal(ctrl.Result{}))
-		Expect(stop).To(BeTrue())
-		Expect(err).ToNot(HaveOccurred())
-
+		// Verify ClusterDeployment, BareMetalHost, ManagedCluster manifests are deleted
 		Expect(c.Get(ctx, key, cd)).ToNot(Succeed())
 		Expect(c.Get(ctx, key, bmh)).ToNot(Succeed())
 		Expect(c.Get(ctx, keyMc, mc)).ToNot(Succeed())
+
+		// Verify both ConfigMap manifests are NOT deleted
 		Expect(c.Get(ctx, key2, cm)).To(Succeed())
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
 	})
 
 	It("does not fail to handle the finalizer when attempting to delete a missing manifest", func() {
-
 		manifestName := TestClusterInstanceName
 		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
@@ -425,7 +455,7 @@ var _ = Describe("handleFinalizer", func() {
 			Status: v1alpha1.ClusterInstanceStatus{
 				ManifestsRendered: []v1alpha1.ManifestReference{
 					{
-						APIGroup:  stringToStringPtr(ClusterDeploymentApiVersion),
+						APIGroup:  ptr.To(ClusterDeploymentApiVersion),
 						Kind:      ClusterDeploymentKind,
 						Name:      manifestName,
 						Namespace: TestClusterInstanceNamespace,
@@ -433,15 +463,16 @@ var _ = Describe("handleFinalizer", func() {
 						Status:    v1alpha1.ManifestRenderedSuccess,
 					},
 					{
-						APIGroup:  stringToStringPtr(BareMetalHostApiVersion),
+						// BMH resource will not be created
+						APIGroup:  ptr.To(BareMetalHostApiVersion),
 						Kind:      BareMetalHostKind,
 						Name:      manifestName,
-						Namespace: clusterNamespace,
+						Namespace: TestClusterInstanceNamespace,
 						SyncWave:  2,
 						Status:    v1alpha1.ManifestRenderedSuccess,
 					},
 					{
-						APIGroup: stringToStringPtr(ManagedClusterApiVersion),
+						APIGroup: ptr.To(ManagedClusterApiVersion),
 						Kind:     ManagedClusterKind,
 						Name:     manifestName,
 						SyncWave: 3,
@@ -456,7 +487,7 @@ var _ = Describe("handleFinalizer", func() {
 		cd := &hivev1.ClusterDeployment{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      manifestName,
-				Namespace: clusterNamespace,
+				Namespace: TestClusterInstanceNamespace,
 				Labels: map[string]string{
 					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
 				},
@@ -474,10 +505,10 @@ var _ = Describe("handleFinalizer", func() {
 		}
 		Expect(c.Create(ctx, mc)).To(Succeed())
 
-		// Get the created manfiests to confirm they exist before calling finalizer
+		// Get the created manifests to confirm they exist before calling finalizer
 		key := types.NamespacedName{
 			Name:      manifestName,
-			Namespace: clusterNamespace,
+			Namespace: TestClusterInstanceNamespace,
 		}
 		keyMc := types.NamespacedName{
 			Name: manifestName,
@@ -489,20 +520,96 @@ var _ = Describe("handleFinalizer", func() {
 		bmh := &bmh_v1alpha1.BareMetalHost{}
 		Expect(c.Get(ctx, key, bmh)).ToNot(Succeed())
 
-		// Set the deletionTimestamp to force deletion of siteconfig manifests
-		deletionTimeStamp := metav1.Now()
-		clusterInstance.ObjectMeta.DeletionTimestamp = &deletionTimeStamp
+		clusterInstanceKey := client.ObjectKeyFromObject(clusterInstance)
+		expectedNumManifestsToBeDeleted := 2 // ClusterDeployment, ManagedCluster
+		triggerAndVerifyFinalizerHandling(r, clusterInstanceKey, expectedNumManifestsToBeDeleted)
 
-		// Expect the manifests previously created to be deleted after the handleFinalizer is called
-		res, stop, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
-		Expect(res).To(Equal(ctrl.Result{}))
-		Expect(stop).To(BeTrue())
-		Expect(err).ToNot(HaveOccurred())
-
+		// Ensure that rendered manifests are deleted
 		Expect(c.Get(ctx, key, cd)).ToNot(Succeed())
 		Expect(c.Get(ctx, keyMc, mc)).ToNot(Succeed())
 	})
 
+	When("a timeout occurs", func() {
+		It("does not requeue the reconciler", func() {
+
+			deleteWithoutTimeout := false
+			testClient := fakeclient.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					return c.Get(ctx, key, obj, opts...)
+				},
+				Create: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					return c.Create(ctx, obj, opts...)
+				},
+				Delete: func(ctx context.Context, fclient client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					if deleteWithoutTimeout {
+						return c.Delete(ctx, obj, opts...)
+					}
+					return cierrors.NewDeletionTimeoutError("")
+				},
+				Patch: func(ctx context.Context, client client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					return c.Patch(ctx, obj, patch, opts...)
+				},
+				SubResourcePatch: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					return c.Status().Patch(ctx, obj, patch, opts...)
+				},
+			}).Build()
+
+			r = &ClusterInstanceReconciler{
+				Client: testClient,
+				Scheme: scheme.Scheme,
+				Log:    testLogger,
+			}
+
+			manifestName := TestClusterInstanceName
+			clusterInstance := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       clusterName,
+					Namespace:  clusterNamespace,
+					Finalizers: []string{clusterInstanceFinalizer},
+				},
+				Status: v1alpha1.ClusterInstanceStatus{
+					ManifestsRendered: []v1alpha1.ManifestReference{
+						{
+							APIGroup:  ptr.To(ClusterDeploymentApiVersion),
+							Kind:      ClusterDeploymentKind,
+							Name:      manifestName,
+							Namespace: clusterNamespace,
+							SyncWave:  1,
+							Status:    v1alpha1.ManifestRenderedSuccess,
+						},
+					},
+				},
+			}
+			Expect(testClient.Create(ctx, clusterInstance)).To(Succeed())
+
+			// Create BareMetalHost object
+			bmh := &bmh_v1alpha1.BareMetalHost{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      manifestName,
+					Namespace: clusterNamespace,
+					Labels: map[string]string{
+						ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+					},
+					Finalizers: []string{"block-deletion"},
+				},
+			}
+			Expect(testClient.Create(ctx, bmh)).To(Succeed())
+
+			// Delete ClusterInstance for finalizer
+			deleteWithoutTimeout = true
+			Expect(testClient.Delete(ctx, clusterInstance)).To(Succeed())
+
+			// Enable trigger timeout error on deletion
+			deleteWithoutTimeout = false
+
+			// Fetch the ClusterInstance to get the DeletionTimestamp
+			Expect(testClient.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+
+			res, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(ctrl.Result{Requeue: false}))
+		})
+	})
 })
 
 var _ = Describe("pruneManifests", func() {
@@ -526,7 +633,9 @@ var _ = Describe("pruneManifests", func() {
 		// list of keys
 		objectKeys []types.NamespacedName
 
-		verifyPruningFn = func(pruneList, doNotPruneList []ci.RenderedObject, pruneKeys, doNotPruneKeys []types.NamespacedName) {
+		manifestsRenderedRefs []v1alpha1.ManifestReference
+
+		verifyPruningFn = func(clusterInstanceKey types.NamespacedName, pruneList, doNotPruneList []ci.RenderedObject, pruneKeys, doNotPruneKeys []types.NamespacedName) {
 			Expect(len(pruneList)).To(Equal(len(pruneKeys)))
 			Expect(len(doNotPruneList)).To(Equal(len(doNotPruneKeys)))
 
@@ -543,6 +652,31 @@ var _ = Describe("pruneManifests", func() {
 				obj2.SetGroupVersionKind(obj.GroupVersionKind())
 				Expect(c.Get(ctx, doNotPruneKeys[index], obj2)).To(Succeed())
 			}
+
+			// Verify that clusterInstance.status.RenderedManifests are updated on second run of pruneManifests
+			clusterInstance := &v1alpha1.ClusterInstance{}
+			Expect(c.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
+			Expect(clusterInstance.Status.ManifestsRendered).To(Satisfy(func(manifests []v1alpha1.ManifestReference) bool {
+				for _, obj := range doNotPruneList {
+					if obj.GetName() != clusterInstanceKey.Name {
+						continue
+					}
+					Expect(v1alpha1.IndexOfManifestByIdentity(obj.ManifestReference(), manifests)).
+						Should(BeNumerically(">=", 0),
+							fmt.Sprintf("object (%s) should be in RenderedManifests", obj.GetResourceId()))
+				}
+
+				for _, obj := range pruneList {
+					if obj.GetName() != clusterInstanceKey.Name {
+						continue
+					}
+					Expect(v1alpha1.IndexOfManifestByIdentity(obj.ManifestReference(), manifests)).Should(BeNumerically("<", 0),
+						fmt.Sprintf("object (%s) should not be in RenderedManifests [%v]",
+							obj.GetResourceId(), manifests))
+				}
+
+				return true
+			}))
 		}
 	)
 
@@ -651,12 +785,15 @@ var _ = Describe("pruneManifests", func() {
 		objectKeys = []types.NamespacedName{cdKey, bmh1Key, bmh2Key, mcKey, cm1Key, cm2Key}
 
 		// Create the manifests and confirm they exist
+		manifestsRenderedRefs = []v1alpha1.ManifestReference(nil)
 		for index, object := range objects {
 			obj := object.GetObject()
 			Expect(c.Create(ctx, &obj)).To(Succeed())
 			obj2 := &unstructured.Unstructured{}
 			obj2.SetGroupVersionKind(obj.GroupVersionKind())
 			Expect(c.Get(ctx, objectKeys[index], obj2)).To(Succeed())
+
+			manifestsRenderedRefs = append(manifestsRenderedRefs, *object.ManifestReference())
 		}
 	})
 
@@ -670,10 +807,11 @@ var _ = Describe("pruneManifests", func() {
 		doNotPruneList := []ci.RenderedObject{}
 		doNotPruneKeys := []types.NamespacedName{}
 
+		clusterInstanceKey := types.NamespacedName{Namespace: TestClusterInstanceNamespace, Name: TestClusterInstanceName}
 		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      TestClusterInstanceName,
-				Namespace: TestClusterInstanceNamespace,
+				Name:      clusterInstanceKey.Name,
+				Namespace: clusterInstanceKey.Namespace,
 			},
 			Spec: v1alpha1.ClusterInstanceSpec{
 				PruneManifests: []v1alpha1.ResourceRef{
@@ -703,20 +841,33 @@ var _ = Describe("pruneManifests", func() {
 					},
 				},
 			},
+			Status: v1alpha1.ClusterInstanceStatus{
+				ManifestsRendered: manifestsRenderedRefs,
+			},
 		}
 		// Create the ClusterInstance CR
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		ok, err := r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
+		// key := client.ObjectKeyFromObject(clusterInstance)
+		Expect(c.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
+		pruningCompleted, err := r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(ok).To(BeTrue())
+		Expect(pruningCompleted).To(BeFalse())
+
+		Expect(c.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
+		for _, m := range clusterInstance.Status.ManifestsRendered {
+			Expect(m.Status).Should(Equal(v1alpha1.ManifestDeletionInProgress))
+		}
+
+		pruningCompleted, err = r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(pruningCompleted).To(BeTrue())
 
 		// Expect the objects previously created to be deleted after pruneManifests is called
-		verifyPruningFn(pruneList, doNotPruneList, pruneKeys, doNotPruneKeys)
+		verifyPruningFn(clusterInstanceKey, pruneList, doNotPruneList, pruneKeys, doNotPruneKeys)
 	})
 
 	It("prunes manifests defined at the node-level", func() {
-
 		pruneList := []ci.RenderedObject{bmh1RenderedObject}
 		pruneKeys := []types.NamespacedName{bmh1Key}
 
@@ -725,10 +876,11 @@ var _ = Describe("pruneManifests", func() {
 		}
 		doNotPruneKeys := []types.NamespacedName{cdKey, bmh2Key, mcKey, cm1Key, cm2Key}
 
+		clusterInstanceKey := types.NamespacedName{Namespace: TestClusterInstanceNamespace, Name: TestClusterInstanceName}
 		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      TestClusterInstanceName,
-				Namespace: TestClusterInstanceNamespace,
+				Name:      clusterInstanceKey.Name,
+				Namespace: clusterInstanceKey.Namespace,
 			},
 			Spec: v1alpha1.ClusterInstanceSpec{
 				PruneManifests: []v1alpha1.ResourceRef{},
@@ -747,16 +899,40 @@ var _ = Describe("pruneManifests", func() {
 					},
 				},
 			},
+			Status: v1alpha1.ClusterInstanceStatus{
+				ManifestsRendered: manifestsRenderedRefs,
+			},
 		}
 		// Create the ClusterInstance CR
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		ok, err := r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
+		Expect(c.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
+
+		pruningCompleted, err := r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(ok).To(BeTrue())
+		Expect(pruningCompleted).To(BeFalse())
+
+		Expect(c.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
+		Expect(clusterInstance.Status.ManifestsRendered).To(Satisfy(func(manifests []v1alpha1.ManifestReference) bool {
+			for _, obj := range pruneList {
+				obj.ManifestReference()
+				index := v1alpha1.IndexOfManifestByIdentity(obj.ManifestReference(), manifests)
+				Expect(index >= 0).To(BeTrue(),
+					fmt.Sprintf("object %s missing from RenderedManifests", obj.GetResourceId()))
+				Expect(manifests[index].Status).To(Equal(v1alpha1.ManifestDeletionInProgress),
+					fmt.Sprintf("object's %s status should be %s", obj.GetResourceId(), v1alpha1.ManifestDeletionInProgress))
+			}
+			return true
+		}))
+
+		pruningCompleted, err = r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(pruningCompleted).To(BeTrue())
+
+		Expect(c.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
 
 		// Expect the objects previously created to be deleted after pruneManifests is called
-		verifyPruningFn(pruneList, doNotPruneList, pruneKeys, doNotPruneKeys)
+		verifyPruningFn(clusterInstanceKey, pruneList, doNotPruneList, pruneKeys, doNotPruneKeys)
 	})
 
 	It("does not prune manifests not-owned by the ClusterInstance", func() {
@@ -770,10 +946,11 @@ var _ = Describe("pruneManifests", func() {
 		}
 		doNotPruneKeys := []types.NamespacedName{cdKey, bmh1Key, bmh2Key, mcKey, cm1Key, cm2Key}
 
+		clusterInstanceKey := types.NamespacedName{Namespace: TestClusterInstanceNamespace, Name: "not-the-owner"}
 		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "not-the-owner",
-				Namespace: TestClusterInstanceNamespace,
+				Name:      clusterInstanceKey.Name,
+				Namespace: clusterInstanceKey.Namespace,
 			},
 			Spec: v1alpha1.ClusterInstanceSpec{
 				PruneManifests: []v1alpha1.ResourceRef{
@@ -801,18 +978,24 @@ var _ = Describe("pruneManifests", func() {
 					},
 				},
 			},
+			Status: v1alpha1.ClusterInstanceStatus{
+				ManifestsRendered: manifestsRenderedRefs,
+			},
 		}
 		// Create the ClusterInstance CR
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		ok, err := r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(ok).To(BeTrue())
-
-		// Expect the objects previously created to be deleted after pruneManifests is called
+		// Expect the objects previously created to not be deleted after pruneManifests is called
 		expectedPruneList := []ci.RenderedObject{}
 		expectedPruneKeys := []types.NamespacedName{}
-		verifyPruningFn(expectedPruneList, doNotPruneList, expectedPruneKeys, doNotPruneKeys)
+
+		Expect(c.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
+		pruningCompleted, err := r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(pruningCompleted).To(BeTrue())
+
+		verifyPruningFn(clusterInstanceKey, expectedPruneList, doNotPruneList, expectedPruneKeys, doNotPruneKeys)
+
 	})
 
 })
@@ -1192,7 +1375,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 			Status: v1alpha1.ClusterInstanceStatus{
 				ManifestsRendered: []v1alpha1.ManifestReference{
 					{
-						APIGroup:  stringToStringPtr(ClusterDeploymentApiVersion),
+						APIGroup:  ptr.To(ClusterDeploymentApiVersion),
 						Kind:      ClusterDeploymentKind,
 						Name:      TestClusterInstanceName,
 						Namespace: TestClusterInstanceNamespace,
@@ -1200,7 +1383,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 						SyncWave:  0,
 					},
 					{
-						APIGroup:  stringToStringPtr(AgentClusterInstallApiVersion),
+						APIGroup:  ptr.To(AgentClusterInstallApiVersion),
 						Kind:      AgentClusterInstallKind,
 						Name:      TestClusterInstanceName,
 						Namespace: TestClusterInstanceNamespace,
@@ -1208,7 +1391,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 						SyncWave:  0,
 					},
 					{
-						APIGroup:  stringToStringPtr(BareMetalHostApiVersion),
+						APIGroup:  ptr.To(BareMetalHostApiVersion),
 						Kind:      BareMetalHostKind,
 						Name:      TestNode1Hostname,
 						Namespace: TestClusterInstanceNamespace,
@@ -1216,7 +1399,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 						SyncWave:  0,
 					},
 					{
-						APIGroup:  stringToStringPtr(BareMetalHostApiVersion),
+						APIGroup:  ptr.To(BareMetalHostApiVersion),
 						Kind:      BareMetalHostKind,
 						Name:      TestNode2Hostname,
 						Namespace: TestClusterInstanceNamespace,
@@ -1224,7 +1407,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 						SyncWave:  0,
 					},
 					{
-						APIGroup:  stringToStringPtr(NMStateConfigApiVersion),
+						APIGroup:  ptr.To(NMStateConfigApiVersion),
 						Kind:      NMStateConfigKind,
 						Name:      TestNode1Hostname,
 						Namespace: TestClusterInstanceNamespace,
@@ -1232,7 +1415,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 						SyncWave:  0,
 					},
 					{
-						APIGroup:  stringToStringPtr(NMStateConfigApiVersion),
+						APIGroup:  ptr.To(NMStateConfigApiVersion),
 						Kind:      NMStateConfigKind,
 						Name:      TestNode2Hostname,
 						Namespace: TestClusterInstanceNamespace,
@@ -1308,7 +1491,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 		}
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
 		for _, expManifest := range args.ExpectedManifests {
-			manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
+			manifest, _ := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 			Expect(manifest).ToNot(BeNil())
 			Expect(manifest.Status).To(Equal(expManifest.Status))
 		}
@@ -1321,7 +1504,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 			NodeLevelSuppressedManifests:    [][]string{{}, {}},
 			ExpectedManifests: []v1alpha1.ManifestReference{
 				{
-					APIGroup:  stringToStringPtr(ClusterDeploymentApiVersion),
+					APIGroup:  ptr.To(ClusterDeploymentApiVersion),
 					Kind:      ClusterDeploymentKind,
 					Name:      TestClusterInstanceName,
 					Namespace: TestClusterInstanceNamespace,
@@ -1329,7 +1512,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 					SyncWave:  0,
 				},
 				{
-					APIGroup:  stringToStringPtr(AgentClusterInstallApiVersion),
+					APIGroup:  ptr.To(AgentClusterInstallApiVersion),
 					Kind:      AgentClusterInstallKind,
 					Name:      TestClusterInstanceName,
 					Namespace: TestClusterInstanceNamespace,
@@ -1337,7 +1520,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 					SyncWave:  0,
 				},
 				{
-					APIGroup:  stringToStringPtr(BareMetalHostApiVersion),
+					APIGroup:  ptr.To(BareMetalHostApiVersion),
 					Kind:      BareMetalHostKind,
 					Name:      TestNode1Hostname,
 					Namespace: TestClusterInstanceNamespace,
@@ -1345,7 +1528,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 					SyncWave:  0,
 				},
 				{
-					APIGroup:  stringToStringPtr(BareMetalHostApiVersion),
+					APIGroup:  ptr.To(BareMetalHostApiVersion),
 					Kind:      BareMetalHostKind,
 					Name:      TestNode2Hostname,
 					Namespace: TestClusterInstanceNamespace,
@@ -1353,7 +1536,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 					SyncWave:  0,
 				},
 				{
-					APIGroup:  stringToStringPtr(NMStateConfigApiVersion),
+					APIGroup:  ptr.To(NMStateConfigApiVersion),
 					Kind:      NMStateConfigKind,
 					Name:      TestNode1Hostname,
 					Namespace: TestClusterInstanceNamespace,
@@ -1361,7 +1544,7 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 					SyncWave:  0,
 				},
 				{
-					APIGroup:  stringToStringPtr(NMStateConfigApiVersion),
+					APIGroup:  ptr.To(NMStateConfigApiVersion),
 					Kind:      NMStateConfigKind,
 					Name:      TestNode2Hostname,
 					Namespace: TestClusterInstanceNamespace,
@@ -1378,37 +1561,37 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 			NodeLevelSuppressedManifests:    [][]string{{}, {}},
 			ExpectedManifests: []v1alpha1.ManifestReference{
 				{
-					APIGroup: stringToStringPtr(ClusterDeploymentApiVersion),
+					APIGroup: ptr.To(ClusterDeploymentApiVersion),
 					Kind:     ClusterDeploymentKind,
 					Name:     TestClusterInstanceName,
 					Status:   v1alpha1.ManifestSuppressed,
 				},
 				{
-					APIGroup: stringToStringPtr(AgentClusterInstallApiVersion),
+					APIGroup: ptr.To(AgentClusterInstallApiVersion),
 					Kind:     AgentClusterInstallKind,
 					Name:     TestClusterInstanceName,
 					Status:   v1alpha1.ManifestRenderedSuccess,
 				},
 				{
-					APIGroup: stringToStringPtr(BareMetalHostApiVersion),
+					APIGroup: ptr.To(BareMetalHostApiVersion),
 					Kind:     BareMetalHostKind,
 					Name:     TestNode1Hostname,
 					Status:   v1alpha1.ManifestRenderedSuccess,
 				},
 				{
-					APIGroup: stringToStringPtr(BareMetalHostApiVersion),
+					APIGroup: ptr.To(BareMetalHostApiVersion),
 					Kind:     BareMetalHostKind,
 					Name:     TestNode2Hostname,
 					Status:   v1alpha1.ManifestRenderedSuccess,
 				},
 				{
-					APIGroup: stringToStringPtr(NMStateConfigApiVersion),
+					APIGroup: ptr.To(NMStateConfigApiVersion),
 					Kind:     NMStateConfigKind,
 					Name:     TestNode1Hostname,
 					Status:   v1alpha1.ManifestRenderedSuccess,
 				},
 				{
-					APIGroup: stringToStringPtr(NMStateConfigApiVersion),
+					APIGroup: ptr.To(NMStateConfigApiVersion),
 					Kind:     NMStateConfigKind,
 					Name:     TestNode2Hostname,
 					Status:   v1alpha1.ManifestRenderedSuccess,
@@ -1426,37 +1609,37 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 			},
 			ExpectedManifests: []v1alpha1.ManifestReference{
 				{
-					APIGroup: stringToStringPtr(ClusterDeploymentApiVersion),
+					APIGroup: ptr.To(ClusterDeploymentApiVersion),
 					Kind:     ClusterDeploymentKind,
 					Name:     TestClusterInstanceName,
 					Status:   v1alpha1.ManifestSuppressed,
 				},
 				{
-					APIGroup: stringToStringPtr(AgentClusterInstallApiVersion),
+					APIGroup: ptr.To(AgentClusterInstallApiVersion),
 					Kind:     AgentClusterInstallKind,
 					Name:     TestClusterInstanceName,
 					Status:   v1alpha1.ManifestRenderedSuccess,
 				},
 				{
-					APIGroup: stringToStringPtr(BareMetalHostApiVersion),
+					APIGroup: ptr.To(BareMetalHostApiVersion),
 					Kind:     BareMetalHostKind,
 					Name:     TestNode1Hostname,
 					Status:   v1alpha1.ManifestRenderedSuccess,
 				},
 				{
-					APIGroup: stringToStringPtr(BareMetalHostApiVersion),
+					APIGroup: ptr.To(BareMetalHostApiVersion),
 					Kind:     BareMetalHostKind,
 					Name:     TestNode2Hostname,
 					Status:   v1alpha1.ManifestSuppressed,
 				},
 				{
-					APIGroup: stringToStringPtr(NMStateConfigApiVersion),
+					APIGroup: ptr.To(NMStateConfigApiVersion),
 					Kind:     NMStateConfigKind,
 					Name:     TestNode1Hostname,
 					Status:   v1alpha1.ManifestSuppressed,
 				},
 				{
-					APIGroup: stringToStringPtr(NMStateConfigApiVersion),
+					APIGroup: ptr.To(NMStateConfigApiVersion),
 					Kind:     NMStateConfigKind,
 					Name:     TestNode2Hostname,
 					Status:   v1alpha1.ManifestRenderedSuccess,
@@ -1471,37 +1654,37 @@ var _ = DescribeTable("updateSuppressedManifestsStatus",
 			NodeLevelSuppressedManifests:    [][]string{{""}, {""}},
 			ExpectedManifests: []v1alpha1.ManifestReference{
 				{
-					APIGroup: stringToStringPtr(ClusterDeploymentApiVersion),
+					APIGroup: ptr.To(ClusterDeploymentApiVersion),
 					Kind:     ClusterDeploymentKind,
 					Name:     TestClusterInstanceName,
 					Status:   v1alpha1.ManifestRenderedSuccess,
 				},
 				{
-					APIGroup: stringToStringPtr(AgentClusterInstallApiVersion),
+					APIGroup: ptr.To(AgentClusterInstallApiVersion),
 					Kind:     AgentClusterInstallKind,
 					Name:     TestClusterInstanceName,
 					Status:   v1alpha1.ManifestRenderedSuccess,
 				},
 				{
-					APIGroup: stringToStringPtr(BareMetalHostApiVersion),
+					APIGroup: ptr.To(BareMetalHostApiVersion),
 					Kind:     BareMetalHostKind,
 					Name:     TestNode1Hostname,
 					Status:   v1alpha1.ManifestSuppressed,
 				},
 				{
-					APIGroup: stringToStringPtr(BareMetalHostApiVersion),
+					APIGroup: ptr.To(BareMetalHostApiVersion),
 					Kind:     BareMetalHostKind,
 					Name:     TestNode2Hostname,
 					Status:   v1alpha1.ManifestSuppressed,
 				},
 				{
-					APIGroup: stringToStringPtr(NMStateConfigApiVersion),
+					APIGroup: ptr.To(NMStateConfigApiVersion),
 					Kind:     NMStateConfigKind,
 					Name:     TestNode1Hostname,
 					Status:   v1alpha1.ManifestRenderedSuccess,
 				},
 				{
-					APIGroup: stringToStringPtr(NMStateConfigApiVersion),
+					APIGroup: ptr.To(NMStateConfigApiVersion),
 					Kind:     NMStateConfigKind,
 					Name:     TestNode2Hostname,
 					Status:   v1alpha1.ManifestRenderedSuccess,
@@ -1597,7 +1780,7 @@ var _ = Describe("executeRenderedManifests", func() {
 
 		// Verify ClusterInstance status
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
-		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
+		manifest, _ := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 		Expect(manifest).ToNot(BeNil())
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 	})
@@ -1624,7 +1807,7 @@ var _ = Describe("executeRenderedManifests", func() {
 
 		// Verify ClusterInstance status
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
-		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
+		manifest, _ := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 		Expect(manifest).ToNot(BeNil())
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 		Expect(manifest.Message).To(ContainSubstring(testError))
@@ -1652,7 +1835,7 @@ var _ = Describe("executeRenderedManifests", func() {
 
 		// Verify ClusterInstance status
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
-		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
+		manifest, _ := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 		Expect(manifest).ToNot(BeNil())
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 	})
@@ -1679,7 +1862,7 @@ var _ = Describe("executeRenderedManifests", func() {
 
 		// Verify ClusterInstance status
 		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
-		manifest := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
+		manifest, _ := findManifestRendered(&expManifest, clusterInstance.Status.ManifestsRendered)
 		Expect(manifest).ToNot(BeNil())
 		Expect(manifest.Status).To(Equal(expManifest.Status))
 		Expect(manifest.Message).To(ContainSubstring(testError))
