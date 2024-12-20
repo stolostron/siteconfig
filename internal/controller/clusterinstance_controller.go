@@ -61,7 +61,12 @@ const (
 	acmBackupLabelValue = ""
 )
 
-const DefaultDeletionRequeueDelay = 30 * time.Second
+// Default Requeue delays
+const (
+	DefaultDeletionRequeueDelay        = 1 * time.Minute
+	DefaultValidationErrorDelay        = 30 * time.Second
+	DefaultTemplateRenderingErrorDelay = 30 * time.Second
+)
 
 // ClusterInstanceReconciler reconciles a ClusterInstance object
 type ClusterInstanceReconciler struct {
@@ -74,18 +79,35 @@ type ClusterInstanceReconciler struct {
 	DeletionHandler *deletion.DeletionHandler
 }
 
+// doNotRequeue returns a ctrl.Result indicating that no further reconciliation is required.
+// Use this when the reconciliation loop has completed successfully.
 func doNotRequeue() ctrl.Result {
 	return ctrl.Result{Requeue: false}
 }
 
+// requeueWithDelay returns a ctrl.Result that requeues the request after a specified delay.
+// Use this when reconciliation should be retried after a non-immediate condition is resolved.
+func requeueWithDelay(delay time.Duration) ctrl.Result {
+	return ctrl.Result{Requeue: true, RequeueAfter: delay}
+}
+
+// requeueWithError returns a ctrl.Result and error, indicating that reconciliation cannot proceed due to an
+// unrecoverable error.
+// This result signals the controller-runtime manager to log the error and potentially retry depending on its settings.
 func requeueWithError(err error) (ctrl.Result, error) {
-	// can not be fixed by user during reconcile
 	return ctrl.Result{}, err
 }
 
+// requeueWithErrorAfterDelay returns a ctrl.Result and error, requeueing the request after a specified delay.
+// Use this when reconciliation encounters a recoverable error but requires a delay before retrying.
+func requeueWithErrorAfterDelay(err error, delay time.Duration) (ctrl.Result, error) {
+	return requeueWithDelay(delay), err
+}
+
+// requeueForDeletion returns a ctrl.Result to requeue the request after the default deletion requeue delay.
+// This is used when the reconciliation loop is waiting for resource deletion processes to complete.
 func requeueForDeletion() ctrl.Result {
-	// Requeue after the default delay while waiting for resource deletion to complete
-	return ctrl.Result{Requeue: true, RequeueAfter: DefaultDeletionRequeueDelay}
+	return requeueWithDelay(DefaultDeletionRequeueDelay)
 }
 
 //+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances,verbs=get;list;watch;create;update;patch;delete
@@ -135,7 +157,14 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return requeueWithError(err)
 	}
 
-	log.Info("Loaded ClusterInstance", zap.String("version", clusterInstance.GetResourceVersion()))
+	// Update logger with resource version
+	log = r.Log.With(
+		zap.String("name", req.Name),
+		zap.String("namespace", req.Namespace),
+		zap.String("version", clusterInstance.GetResourceVersion()),
+	)
+
+	log.Info("Loaded ClusterInstance")
 
 	if res, err := r.handleFinalizer(ctx, log, clusterInstance); !res.IsZero() || err != nil {
 		if err != nil {
@@ -158,17 +187,18 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Validate ClusterInstance
 	if err := r.handleValidate(ctx, log, clusterInstance); err != nil {
-		return requeueWithError(err)
+		return requeueWithErrorAfterDelay(err, DefaultValidationErrorDelay)
 	}
 
 	// Render, validate and apply templates
 	if ok, err := r.handleRenderTemplates(ctx, log, clusterInstance); err != nil {
 		// Encountered an error, requeue the request
-		return requeueWithError(err)
+		return requeueWithErrorAfterDelay(err, DefaultTemplateRenderingErrorDelay)
 	} else if !ok {
 		// no error, however requeue required (e.g. wait for manifests to be pruned)
-		log.Info("Could not complete rendering templates, will try again")
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		log.Info("Could not complete rendering templates, will try again",
+			zap.String("after", DefaultDeletionRequeueDelay.String()))
+		return requeueForDeletion(), nil
 	}
 	log.Info("Finished rendering templates")
 

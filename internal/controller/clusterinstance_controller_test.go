@@ -182,7 +182,7 @@ var _ = Describe("Reconcile", func() {
 		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 		// Expect errors to occur in the ClusterInstance validations stage
 		Expect(err).To(HaveOccurred())
-		Expect(res).To(Equal(ctrl.Result{}))
+		Expect(res).To(Equal(requeueWithDelay(DefaultValidationErrorDelay)))
 	})
 
 	It("pre-empts the reconcile-loop when the ObjectMeta.Generation and ObservedGeneration are the same", func() {
