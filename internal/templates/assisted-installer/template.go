@@ -182,7 +182,7 @@ metadata:
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
   namespace: "{{ .Spec.ClusterName }}"
   annotations:
-    siteconfig.open-cluster-management.io/sync-wave: "1"
+    siteconfig.open-cluster-management.io/sync-wave: "3"
     inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
 {{ if .SpecialVars.CurrentNode.NodeLabels }}
 {{ range $key, $value := .SpecialVars.CurrentNode.NodeLabels }}
