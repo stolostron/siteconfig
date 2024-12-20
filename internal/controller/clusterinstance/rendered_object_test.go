@@ -250,7 +250,7 @@ func TestRenderedObjectGetSyncWave(t *testing.T) {
 }
 
 func TestRenderedObjectCollectionGetRenderObjects(t *testing.T) {
-	render := syncWaveMap{
+	render := SyncWaveMap{
 		data: map[int][]RenderedObject{
 			0: {
 				{
@@ -264,7 +264,7 @@ func TestRenderedObjectCollectionGetRenderObjects(t *testing.T) {
 			},
 		},
 	}
-	prune := syncWaveMap{
+	prune := SyncWaveMap{
 		data: map[int][]RenderedObject{
 			0: {
 				{
@@ -278,7 +278,7 @@ func TestRenderedObjectCollectionGetRenderObjects(t *testing.T) {
 			},
 		},
 	}
-	suppress := syncWaveMap{
+	suppress := SyncWaveMap{
 		data: map[int][]RenderedObject{
 			0: {
 				{
@@ -293,9 +293,9 @@ func TestRenderedObjectCollectionGetRenderObjects(t *testing.T) {
 		},
 	}
 	type fields struct {
-		prune    syncWaveMap
-		suppress syncWaveMap
-		render   syncWaveMap
+		prune    SyncWaveMap
+		suppress SyncWaveMap
+		render   SyncWaveMap
 	}
 	tests := []struct {
 		name   string
@@ -305,9 +305,9 @@ func TestRenderedObjectCollectionGetRenderObjects(t *testing.T) {
 		{
 			name: "render objects is empty",
 			fields: fields{
-				prune:    syncWaveMap{},
-				suppress: syncWaveMap{},
-				render:   syncWaveMap{},
+				prune:    SyncWaveMap{},
+				suppress: SyncWaveMap{},
+				render:   SyncWaveMap{},
 			},
 			want: []RenderedObject{},
 		},
@@ -318,7 +318,7 @@ func TestRenderedObjectCollectionGetRenderObjects(t *testing.T) {
 				suppress: suppress,
 				render:   render,
 			},
-			want: render.getSlice(0),
+			want: render.GetObjectsForSyncWave(0),
 		},
 	}
 	for _, tt := range tests {
@@ -336,7 +336,7 @@ func TestRenderedObjectCollectionGetRenderObjects(t *testing.T) {
 }
 
 func TestRenderedObjectCollectionGetPruneObjects(t *testing.T) {
-	render := syncWaveMap{
+	render := SyncWaveMap{
 		data: map[int][]RenderedObject{
 			0: {
 				{
@@ -350,7 +350,7 @@ func TestRenderedObjectCollectionGetPruneObjects(t *testing.T) {
 			},
 		},
 	}
-	prune := syncWaveMap{
+	prune := SyncWaveMap{
 		data: map[int][]RenderedObject{
 			0: {
 				{
@@ -364,7 +364,7 @@ func TestRenderedObjectCollectionGetPruneObjects(t *testing.T) {
 			},
 		},
 	}
-	suppress := syncWaveMap{
+	suppress := SyncWaveMap{
 		data: map[int][]RenderedObject{
 			0: {
 				{
@@ -379,9 +379,9 @@ func TestRenderedObjectCollectionGetPruneObjects(t *testing.T) {
 		},
 	}
 	type fields struct {
-		prune    syncWaveMap
-		suppress syncWaveMap
-		render   syncWaveMap
+		prune    SyncWaveMap
+		suppress SyncWaveMap
+		render   SyncWaveMap
 	}
 	tests := []struct {
 		name   string
@@ -391,9 +391,9 @@ func TestRenderedObjectCollectionGetPruneObjects(t *testing.T) {
 		{
 			name: "prune objects is empty",
 			fields: fields{
-				prune:    syncWaveMap{},
-				suppress: syncWaveMap{},
-				render:   syncWaveMap{},
+				prune:    SyncWaveMap{},
+				suppress: SyncWaveMap{},
+				render:   SyncWaveMap{},
 			},
 			want: []RenderedObject{},
 		},
@@ -404,7 +404,7 @@ func TestRenderedObjectCollectionGetPruneObjects(t *testing.T) {
 				suppress: suppress,
 				render:   render,
 			},
-			want: prune.getSlice(0),
+			want: prune.GetObjectsForSyncWave(0),
 		},
 	}
 	for _, tt := range tests {
@@ -422,7 +422,7 @@ func TestRenderedObjectCollectionGetPruneObjects(t *testing.T) {
 }
 
 func TestRenderedObjectCollectionGetSuppressObjects(t *testing.T) {
-	render := syncWaveMap{
+	render := SyncWaveMap{
 		data: map[int][]RenderedObject{
 			0: {
 				{
@@ -436,7 +436,7 @@ func TestRenderedObjectCollectionGetSuppressObjects(t *testing.T) {
 			},
 		},
 	}
-	prune := syncWaveMap{
+	prune := SyncWaveMap{
 		data: map[int][]RenderedObject{
 			0: {
 				{
@@ -450,7 +450,7 @@ func TestRenderedObjectCollectionGetSuppressObjects(t *testing.T) {
 			},
 		},
 	}
-	suppress := syncWaveMap{
+	suppress := SyncWaveMap{
 		data: map[int][]RenderedObject{
 			0: {
 				{
@@ -465,9 +465,9 @@ func TestRenderedObjectCollectionGetSuppressObjects(t *testing.T) {
 		},
 	}
 	type fields struct {
-		prune    syncWaveMap
-		suppress syncWaveMap
-		render   syncWaveMap
+		prune    SyncWaveMap
+		suppress SyncWaveMap
+		render   SyncWaveMap
 	}
 	tests := []struct {
 		name   string
@@ -477,9 +477,9 @@ func TestRenderedObjectCollectionGetSuppressObjects(t *testing.T) {
 		{
 			name: "suppress objects is empty",
 			fields: fields{
-				prune:    syncWaveMap{},
-				suppress: syncWaveMap{},
-				render:   syncWaveMap{},
+				prune:    SyncWaveMap{},
+				suppress: SyncWaveMap{},
+				render:   SyncWaveMap{},
 			},
 			want: []RenderedObject{},
 		},
@@ -490,7 +490,7 @@ func TestRenderedObjectCollectionGetSuppressObjects(t *testing.T) {
 				suppress: suppress,
 				render:   render,
 			},
-			want: suppress.getSlice(0),
+			want: suppress.GetObjectsForSyncWave(0),
 		},
 	}
 	for _, tt := range tests {

@@ -35,7 +35,6 @@ import (
 const (
 	WaveAnnotation        = v1alpha1.Group + "/sync-wave"
 	DefaultWaveAnnotation = "0"
-	OwnedByLabel          = v1alpha1.Group + "/owned-by"
 )
 
 type TemplateEngine struct{}

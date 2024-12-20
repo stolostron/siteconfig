@@ -20,22 +20,23 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"reflect"
-	"sort"
 	"time"
 
-	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
-	"github.com/stolostron/siteconfig/internal/controller/conditions"
-	"github.com/stolostron/siteconfig/internal/controller/configuration"
 	"go.uber.org/zap"
+
 	"golang.org/x/exp/maps"
+
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -43,6 +44,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/conditions"
+	"github.com/stolostron/siteconfig/internal/controller/configuration"
+	"github.com/stolostron/siteconfig/internal/controller/deletion"
+	cierrors "github.com/stolostron/siteconfig/internal/controller/errors"
 	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 )
@@ -55,23 +61,53 @@ const (
 	acmBackupLabelValue = ""
 )
 
+// Default Requeue delays
+const (
+	DefaultDeletionRequeueDelay        = 1 * time.Minute
+	DefaultValidationErrorDelay        = 30 * time.Second
+	DefaultTemplateRenderingErrorDelay = 30 * time.Second
+)
+
 // ClusterInstanceReconciler reconciles a ClusterInstance object
 type ClusterInstanceReconciler struct {
 	client.Client
-	Scheme      *runtime.Scheme
-	Recorder    record.EventRecorder
-	Log         *zap.Logger
-	TmplEngine  *ci.TemplateEngine
-	ConfigStore *configuration.ConfigurationStore
+	Scheme          *runtime.Scheme
+	Recorder        record.EventRecorder
+	Log             *zap.Logger
+	TmplEngine      *ci.TemplateEngine
+	ConfigStore     *configuration.ConfigurationStore
+	DeletionHandler *deletion.DeletionHandler
 }
 
+// doNotRequeue returns a ctrl.Result indicating that no further reconciliation is required.
+// Use this when the reconciliation loop has completed successfully.
 func doNotRequeue() ctrl.Result {
 	return ctrl.Result{Requeue: false}
 }
 
+// requeueWithDelay returns a ctrl.Result that requeues the request after a specified delay.
+// Use this when reconciliation should be retried after a non-immediate condition is resolved.
+func requeueWithDelay(delay time.Duration) ctrl.Result {
+	return ctrl.Result{Requeue: true, RequeueAfter: delay}
+}
+
+// requeueWithError returns a ctrl.Result and error, indicating that reconciliation cannot proceed due to an
+// unrecoverable error.
+// This result signals the controller-runtime manager to log the error and potentially retry depending on its settings.
 func requeueWithError(err error) (ctrl.Result, error) {
-	// can not be fixed by user during reconcile
 	return ctrl.Result{}, err
+}
+
+// requeueWithErrorAfterDelay returns a ctrl.Result and error, requeueing the request after a specified delay.
+// Use this when reconciliation encounters a recoverable error but requires a delay before retrying.
+func requeueWithErrorAfterDelay(err error, delay time.Duration) (ctrl.Result, error) {
+	return requeueWithDelay(delay), err
+}
+
+// requeueForDeletion returns a ctrl.Result to requeue the request after the default deletion requeue delay.
+// This is used when the reconciliation loop is waiting for resource deletion processes to complete.
+func requeueForDeletion() ctrl.Result {
+	return requeueWithDelay(DefaultDeletionRequeueDelay)
 }
 
 //+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances,verbs=get;list;watch;create;update;patch;delete
@@ -112,7 +148,7 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Get the ClusterInstance CR
 	clusterInstance := &v1alpha1.ClusterInstance{}
 	if err := r.Get(ctx, req.NamespacedName, clusterInstance); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			log.Error("ClusterInstance not found")
 			return doNotRequeue(), nil
 		}
@@ -121,9 +157,16 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return requeueWithError(err)
 	}
 
-	log.Info("Loaded ClusterInstance", zap.String("version", clusterInstance.GetResourceVersion()))
+	// Update logger with resource version
+	log = r.Log.With(
+		zap.String("name", req.Name),
+		zap.String("namespace", req.Namespace),
+		zap.String("version", clusterInstance.GetResourceVersion()),
+	)
 
-	if res, stop, err := r.handleFinalizer(ctx, log, clusterInstance); !res.IsZero() || stop || err != nil {
+	log.Info("Loaded ClusterInstance")
+
+	if res, err := r.handleFinalizer(ctx, log, clusterInstance); !res.IsZero() || err != nil {
 		if err != nil {
 			log.Error("Encountered error while handling finalizer", zap.Error(err))
 		}
@@ -144,19 +187,20 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Validate ClusterInstance
 	if err := r.handleValidate(ctx, log, clusterInstance); err != nil {
-		return requeueWithError(err)
+		return requeueWithErrorAfterDelay(err, DefaultValidationErrorDelay)
 	}
 
 	// Render, validate and apply templates
-	ok, err := r.handleRenderTemplates(ctx, log, clusterInstance)
-	if err != nil {
-		return requeueWithError(err)
+	if ok, err := r.handleRenderTemplates(ctx, log, clusterInstance); err != nil {
+		// Encountered an error, requeue the request
+		return requeueWithErrorAfterDelay(err, DefaultTemplateRenderingErrorDelay)
+	} else if !ok {
+		// no error, however requeue required (e.g. wait for manifests to be pruned)
+		log.Info("Could not complete rendering templates, will try again",
+			zap.String("after", DefaultDeletionRequeueDelay.String()))
+		return requeueForDeletion(), nil
 	}
-	if ok {
-		log.Info("Finished rendering templates")
-	} else {
-		log.Info("Failed to render templates")
-	}
+	log.Info("Finished rendering templates")
 
 	// Only update the ObservedGeneration when all the above processes have been successfully executed
 	if clusterInstance.Status.ObservedGeneration != clusterInstance.ObjectMeta.Generation {
@@ -253,120 +297,84 @@ func (r *ClusterInstanceReconciler) applyACMBackupLabelToInstallTemplates(
 	return nil
 }
 
-func (r *ClusterInstanceReconciler) finalizeClusterInstance(
-	ctx context.Context,
-	log *zap.Logger,
-	clusterInstance *v1alpha1.ClusterInstance,
-) error {
-
-	// Group the manifests by the sync-wave
-	// This is so that the manifests can be deleted in descending order of sync-wave
-	manifestGroups := map[int][]v1alpha1.ManifestReference{}
-	for _, manifest := range clusterInstance.Status.ManifestsRendered {
-		// check if the key exists in the map
-		if _, ok := manifestGroups[manifest.SyncWave]; !ok {
-			// if key doesn't exist, initialize the slice
-			manifestGroups[manifest.SyncWave] = make([]v1alpha1.ManifestReference, 0)
-		}
-		// append the value to the slice associated with the key
-		manifestGroups[manifest.SyncWave] = append(manifestGroups[manifest.SyncWave], manifest)
-	}
-
-	syncWaves := maps.Keys(manifestGroups)
-	// Sort the syncWaves in descending order
-	sort.Sort(sort.Reverse(sort.IntSlice(syncWaves)))
-
-	for _, syncWave := range syncWaves {
-		for _, manifest := range manifestGroups[syncWave] {
-			obj := &unstructured.Unstructured{}
-			obj.SetName(manifest.Name)
-			obj.SetNamespace(manifest.Namespace)
-			obj.SetAPIVersion(*manifest.APIGroup)
-			obj.SetKind(manifest.Kind)
-
-			if err := r.deleteResource(
-				ctx,
-				log,
-				ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
-				obj,
-			); err != nil {
-				return err
-			}
-		}
-	}
-	log.Info("Successfully finalized ClusterInstance")
-	return nil
-}
-
-func (r *ClusterInstanceReconciler) deleteResource(
-	ctx context.Context,
-	log *zap.Logger,
-	owner string,
-	obj client.Object,
-) error {
-
-	resourceId := ci.GetResourceId(
-		obj.GetObjectKind().GroupVersionKind().Kind, obj.GetNamespace(), obj.GetName(),
-	)
-	// Check that the manifest is logically owned-by the ClusterInstance
-	if err := r.Client.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
-		if errors.IsNotFound(err) {
-			log.Sugar().Infof("Skipping deletion of resource %s not found", resourceId)
-			return nil
-		}
-		log.Sugar().Infof("Unable to retrieve resource %s for deletion", resourceId)
-		return err
-	}
-	labels := obj.GetLabels()
-	ownedBy, ok := labels[ci.OwnedByLabel]
-	if !ok || ownedBy != owner {
-		log.Sugar().Infof("Skipping deletion of resource %s not owned-by ClusterInstance %s", resourceId, owner)
-		return nil
-	}
-
-	// Delete resource
-	if err := r.Client.Delete(ctx, obj); err == nil {
-		log.Sugar().Infof("Successfully deleted resource %s", resourceId)
-	} else if !errors.IsNotFound(err) {
-		log.Sugar().Infof("Failed to delete resource %s", resourceId)
-		return err
-	}
-
-	return nil
-}
-
+// handleFinalizer ensures proper finalizer management for the ClusterInstance resource.
+// - Adds the finalizer if the object is not marked for deletion.
+// - Executes cleanup logic and removes the finalizer when the object is marked for deletion.
+// Returns a ctrl.Result to indicate whether the reconciler should requeue and an error if any operation fails.
 func (r *ClusterInstanceReconciler) handleFinalizer(
 	ctx context.Context,
 	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
-) (ctrl.Result, bool, error) {
-	// Check if the ClusterInstance is marked to be deleted, which is
-	// indicated by the deletion timestamp being set.
-	if clusterInstance.DeletionTimestamp.IsZero() {
-		// Check and add finalizer for this CR.
-		if !controllerutil.ContainsFinalizer(clusterInstance, clusterInstanceFinalizer) {
-			controllerutil.AddFinalizer(clusterInstance, clusterInstanceFinalizer)
-			// update and requeue since the finalizer is added
-			return ctrl.Result{Requeue: true}, true, r.Update(ctx, clusterInstance)
-		}
-		return ctrl.Result{}, false, nil
-	} else if controllerutil.ContainsFinalizer(clusterInstance, clusterInstanceFinalizer) {
-		// Run finalization logic for clusterInstanceFinalizer. If the
-		// finalization logic fails, don't remove the finalizer so
-		// that we can retry during the next reconciliation.
-		if err := r.finalizeClusterInstance(ctx, log, clusterInstance); err != nil {
-			return ctrl.Result{}, true, err
-		}
+) (ctrl.Result, error) {
+	log = log.Named("handleFinalizer")
 
-		// Remove clusterInstanceFinalizer. Once all finalizers have been
-		// removed, the object will be deleted.
-		log.Info("Removing ClusterInstance finalizer")
-		patch := client.MergeFrom(clusterInstance.DeepCopy())
-		if controllerutil.RemoveFinalizer(clusterInstance, clusterInstanceFinalizer) {
-			return ctrl.Result{}, true, r.Patch(ctx, clusterInstance, patch)
-		}
+	// Check if ClusterInstance is not being deleted
+	if clusterInstance.DeletionTimestamp.IsZero() {
+		return r.ensureFinalizer(ctx, log, clusterInstance)
 	}
-	return ctrl.Result{}, false, nil
+
+	// ClusterInstance is being deleted
+	if !controllerutil.ContainsFinalizer(clusterInstance, clusterInstanceFinalizer) {
+		// Finalizer already removed; no action needed
+		return ctrl.Result{}, nil
+	}
+
+	log.Info("Running finalization logic for ClusterInstance")
+
+	// Perform cleanup logic
+	deletionCompleted, err := r.DeletionHandler.DeleteRenderedObjects(
+		ctx, clusterInstance, nil, ptr.To(deletion.DefaultDeletionTimeout))
+
+	if err != nil {
+		if cierrors.IsDeletionTimeoutError(err) {
+			log.Warn("Finalization timed out; deferring further attempts")
+			// Add hold annotation for manual intervention (CNF-15719)
+			return ctrl.Result{Requeue: false}, nil
+		}
+		log.Error("Finalization encountered an error", zap.Error(err))
+		return ctrl.Result{Requeue: true}, err
+	}
+
+	if !deletionCompleted {
+		log.Info("Waiting for rendered manifests to be deleted")
+		return requeueForDeletion(), nil
+	}
+
+	// Finalization complete; remove the finalizer
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
+	controllerutil.RemoveFinalizer(clusterInstance, clusterInstanceFinalizer)
+
+	if err := r.Patch(ctx, clusterInstance, patch); err != nil {
+		log.Error("Failed to remove finalizer", zap.Error(err))
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Finalizer removed successfully")
+	return ctrl.Result{}, nil
+}
+
+// ensureFinalizer ensures the ClusterInstance has the required finalizer and requeues if it was added.
+func (r *ClusterInstanceReconciler) ensureFinalizer(
+	ctx context.Context,
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) (ctrl.Result, error) {
+	if controllerutil.ContainsFinalizer(clusterInstance, clusterInstanceFinalizer) {
+		// Finalizer already present; no action needed
+		return ctrl.Result{}, nil
+	}
+
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
+	controllerutil.AddFinalizer(clusterInstance, clusterInstanceFinalizer)
+
+	// Persist the finalizer addition
+	if err := r.Patch(ctx, clusterInstance, patch); err != nil {
+		log.Error("Failed to add finalizer", zap.Error(err))
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Finalizer added successfully; requeuing reconciliation")
+	return ctrl.Result{Requeue: true}, nil
 }
 
 func (r *ClusterInstanceReconciler) handleValidate(
@@ -467,10 +475,12 @@ func createOrPatch(
 	log *zap.Logger,
 	renderedObj unstructured.Unstructured,
 ) (controllerutil.OperationResult, error) {
+	log = log.Named("createOrPatch")
+
 	liveObj := &unstructured.Unstructured{}
 	liveObj.SetGroupVersionKind(renderedObj.GroupVersionKind())
 	if err := c.Get(ctx, client.ObjectKeyFromObject(&renderedObj), liveObj); err != nil {
-		if !errors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			return controllerutil.OperationResultNone, err
 		}
 
@@ -524,8 +534,8 @@ func createOrPatch(
 	)
 	// Compute difference between the liveObject and updatedLiveObject without "status" fields
 	unstructured.RemoveNestedField(liveObj.Object, "status")
-	if !reflect.DeepEqual(liveObj, updatedLiveObj) {
-		log.Debug(fmt.Sprintf("Change detected in resource %s, updating it", resourceId))
+	if !equality.Semantic.DeepEqual(liveObj, updatedLiveObj) {
+		log.Sugar().Debugf("Change detected in resource %s, updating it", resourceId)
 
 		// Only issue a Patch if the before and after resources (minus status) differ
 		if err := c.Patch(ctx, updatedLiveObj, patch); err != nil {
@@ -534,26 +544,9 @@ func createOrPatch(
 		}
 		return controllerutil.OperationResultUpdated, nil
 	}
-	log.Debug(fmt.Sprintf("No change detected in resource %s, skipping update request", resourceId))
+	log.Sugar().Debugf("No change detected in resource %s, skipping update request", resourceId)
 
 	return controllerutil.OperationResultNone, nil
-}
-
-// createManifestReference creates a ManifestReference object from a manifest item
-func createManifestReference(object ci.RenderedObject) (*v1alpha1.ManifestReference, error) {
-	apiVersion := object.GetAPIVersion()
-	syncWave, err := object.GetSyncWave()
-	if err != nil {
-		return nil, err
-	}
-
-	return &v1alpha1.ManifestReference{
-		Name:            object.GetName(),
-		Namespace:       object.GetNamespace(),
-		Kind:            object.GetKind(),
-		APIGroup:        &apiVersion,
-		SyncWave:        syncWave,
-		LastAppliedTime: metav1.NewTime(time.Now())}, nil
 }
 
 func (r *ClusterInstanceReconciler) executeRenderedManifests(
@@ -565,71 +558,43 @@ func (r *ClusterInstanceReconciler) executeRenderedManifests(
 	manifestStatus string) (bool, error) {
 
 	ok := true
+
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
+	manifestsRendered := append([]v1alpha1.ManifestReference{}, clusterInstance.Status.ManifestsRendered...)
 
+	var errs []error
 	for _, object := range objects {
+		manifestRef := object.ManifestReference()
 
-		manifestRef, err := createManifestReference(object)
-		if err != nil {
-			return false, err
-		}
-
+		status := v1alpha1.ManifestRenderedFailure
+		message := ""
 		if result, err := createOrPatch(ctx, c, log, object.GetObject()); err != nil {
+			errs = append(errs, err)
 			ok = false
-			setManifestFailure(manifestRef, err)
+			message = err.Error()
 		} else if result != controllerutil.OperationResultNone {
-			setManifestSuccess(manifestRef, manifestStatus)
+			status = manifestStatus
 		}
+		manifestRef.UpdateStatus(status, message)
 
-		updateClusterInstanceStatus(clusterInstance, manifestRef)
-	}
-
-	return ok, conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
-}
-
-func setManifestFailure(manifestRef *v1alpha1.ManifestReference, err error) {
-	manifestRef.Status = v1alpha1.ManifestRenderedFailure
-	manifestRef.Message = err.Error()
-}
-
-func setManifestSuccess(manifestRef *v1alpha1.ManifestReference, manifestStatus string) {
-	manifestRef.Status = manifestStatus
-	manifestRef.Message = ""
-}
-
-func removeClusterInstanceStatus(clusterInstance *v1alpha1.ClusterInstance, manifestRef v1alpha1.ManifestReference) {
-	for index, m := range clusterInstance.Status.ManifestsRendered {
-		if *manifestRef.APIGroup == *m.APIGroup && manifestRef.Kind == m.Kind && manifestRef.Name == m.Name {
-			clusterInstance.Status.ManifestsRendered = append(
-				clusterInstance.Status.ManifestsRendered[:index],
-				clusterInstance.Status.ManifestsRendered[index+1:]...,
-			)
+		// Check if the manifestRef needs to be added to manifestsRendered
+		if index, err := v1alpha1.IndexOfManifestByIdentity(manifestRef, manifestsRendered); err != nil {
+			manifestsRendered = append(manifestsRendered, *manifestRef)
+		} else {
+			manifestsRendered[index].UpdateStatus(manifestRef.Status, manifestRef.Message)
 		}
 	}
-}
 
-func updateClusterInstanceStatus(clusterInstance *v1alpha1.ClusterInstance, manifestRef *v1alpha1.ManifestReference) {
-	if found := findManifestRendered(manifestRef, clusterInstance.Status.ManifestsRendered); found != nil {
-		if found.Status != manifestRef.Status || found.Message != manifestRef.Message {
-			found.LastAppliedTime = manifestRef.LastAppliedTime
-			found.Status = manifestRef.Status
-			found.Message = manifestRef.Message
-		}
-	} else {
-		clusterInstance.Status.ManifestsRendered = append(clusterInstance.Status.ManifestsRendered, *manifestRef)
-	}
-}
-
-func findManifestRendered(
-	manifest *v1alpha1.ManifestReference,
-	manifestList []v1alpha1.ManifestReference,
-) *v1alpha1.ManifestReference {
-	for index, m := range manifestList {
-		if *manifest.APIGroup == *m.APIGroup && manifest.Kind == m.Kind && manifest.Name == m.Name {
-			return &manifestList[index]
+	// Update ClusterInstance.Status.ManifestsRendered only if there are changes
+	if !equality.Semantic.DeepEqual(clusterInstance.Status.ManifestsRendered, manifestsRendered) {
+		clusterInstance.Status.ManifestsRendered = manifestsRendered
+		if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
+			log.Error("Failed to update ClusterInstance.Status.ManifestsRendered", zap.Error(updateErr))
+			errs = append(errs, updateErr)
 		}
 	}
-	return nil
+	return ok, utilerrors.NewAggregate(errs)
+
 }
 
 func (r *ClusterInstanceReconciler) validateRenderedManifests(
@@ -732,36 +697,34 @@ func (r *ClusterInstanceReconciler) pruneManifests(
 	clusterInstance *v1alpha1.ClusterInstance,
 	objects []ci.RenderedObject,
 ) (bool, error) {
-	ok := true
-	patch := client.MergeFrom(clusterInstance.DeepCopy())
+	log = log.Named("pruneManifests")
 
-	for _, object := range objects {
-
-		apiGroup := object.GetAPIVersion()
-		manifestRef := v1alpha1.ManifestReference{
-			APIGroup:  &apiGroup,
-			Kind:      object.GetKind(),
-			Name:      object.GetName(),
-			Namespace: object.GetNamespace(),
-		}
-		obj := object.GetObject()
-		if err := r.deleteResource(
-			ctx,
-			log,
-			ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
-			&obj,
-		); err == nil {
-			// Remove rendered manifest information from status.RenderedManifests
-			removeClusterInstanceStatus(clusterInstance, manifestRef)
-		} else {
-			ok = false
-			manifestRef.Status = v1alpha1.ManifestPruneFailure
-			manifestRef.Message = err.Error()
-			updateClusterInstanceStatus(clusterInstance, &manifestRef)
-		}
+	if len(objects) == 0 {
+		log.Info("No objects to prune; skipping pruning operation")
+		return true, nil
 	}
 
-	return ok, conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
+	// Perform the deletion of objects
+	deletionCompleted, err := r.DeletionHandler.DeleteObjects(ctx, clusterInstance, objects, nil,
+		ptr.To(deletion.DefaultDeletionTimeout))
+
+	if err != nil {
+		if cierrors.IsDeletionTimeoutError(err) {
+			log.Warn("Pruning operation timed out; manual intervention may be required", zap.Error(err))
+			// Add hold annotation for manual intervention (CNF-15719)
+			return false, nil
+		}
+		log.Error("Pruning operation encountered an error", zap.Error(err))
+		return false, err
+	}
+
+	if deletionCompleted {
+		log.Info("Pruning operation completed successfully.")
+		return true, nil
+	}
+
+	log.Info("Pruning operation in progress; waiting for objects to be pruned")
+	return false, nil
 }
 
 func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(
@@ -772,20 +735,32 @@ func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(
 ) error {
 
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
+	manifestsRendered := append([]v1alpha1.ManifestReference{}, clusterInstance.Status.ManifestsRendered...)
 
 	for _, object := range objects {
-		resourceId := ci.GetResourceId(object.GetKind(), object.GetNamespace(), object.GetName())
-		manifestRef, err := createManifestReference(object)
-		if err != nil {
-			return err
-		}
+		resourceId := object.GetResourceId()
+		manifestRef := object.ManifestReference()
 		manifestRef.Status = v1alpha1.ManifestSuppressed
 		manifestRef.Message = ""
-		updateClusterInstanceStatus(clusterInstance, manifestRef)
+
+		// Check if the manifestRef needs to be added to manifestsRendered
+		if index, err := v1alpha1.IndexOfManifestByIdentity(manifestRef, manifestsRendered); err != nil {
+			manifestsRendered = append(manifestsRendered, *manifestRef)
+		} else {
+			manifestsRendered[index].UpdateStatus(manifestRef.Status, manifestRef.Message)
+		}
 		log.Sugar().Infof("Suppressed manifest %s", resourceId)
 	}
 
-	return conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
+	// Update ClusterInstance.Status.ManifestsRendered only if there are changes
+	if !equality.Semantic.DeepEqual(clusterInstance.Status.ManifestsRendered, manifestsRendered) {
+		clusterInstance.Status.ManifestsRendered = manifestsRendered
+		if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
+			log.Error("Failed to update ClusterInstance.Status.ManifestsRendered", zap.Error(updateErr))
+			return updateErr
+		}
+	}
+	return nil
 }
 
 func (r *ClusterInstanceReconciler) handleRenderTemplates(
