@@ -27,6 +27,7 @@ For example:
 ```console
 # Build and push the image
 make IMAGE_TAG_BASE=quay.io/${MY_REPO_ID}/siteconfig-manager VERSION=latest CONTAINER_TOOL=podman \
+    docker-build \
     docker-push
 
 # Deploy the controller to your SNO (with KUBECONFIG set appropriately)
@@ -38,7 +39,7 @@ make IMAGE_TAG_BASE=quay.io/${MY_REPO_ID}/siteconfig-manager VERSION=latest CONT
 To watch the siteconfig-controller logs:
 
 ```console
-oc logs -n siteconfig-operator --selector app.kubernetes.io/name=siteconfig-controller -c manager --follow
+oc logs -n siteconfig-operator --selector app.kubernetes.io/name=siteconfig-controller --follow
 ```
 
 

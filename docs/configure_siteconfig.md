@@ -92,7 +92,7 @@ After updating the ConfigMap or restarting the pod:
 2. **Ensure the Operator is using the new configuration:**
    Review the Operator logs to confirm the updated configuration:
    ```sh
-   oc logs -n $NAMESPACE --selector app.kubernetes.io/name=siteconfig-controller -c manager --follow
+   oc logs -n $NAMESPACE --selector app.kubernetes.io/name=siteconfig-controller --follow
    ```
 
 ---
