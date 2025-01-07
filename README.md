@@ -27,6 +27,7 @@ For example:
 ```console
 # Build and push the image
 make IMAGE_TAG_BASE=quay.io/${MY_REPO_ID}/siteconfig-manager VERSION=latest CONTAINER_TOOL=podman \
+    docker-build \
     docker-push
 
 # Deploy the controller to your SNO (with KUBECONFIG set appropriately)
