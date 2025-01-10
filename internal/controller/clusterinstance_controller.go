@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 
@@ -454,11 +455,12 @@ func (r *ClusterInstanceReconciler) renderManifests(
 	return renderedObjects, err
 }
 
+// mergeMaps is a generic function to merge two maps.
 // Copy copies all key/value pairs in src adding them to dst.
 // When a key in src is already present in dst,
 // the value in dst will be overwritten by the value associated
 // with the key in src.
-func mergeMaps(src, dst map[string]string) map[string]string {
+func mergeMaps[k comparable, v any](src, dst map[k]v) map[k]v {
 	if len(src) == 0 {
 		return dst
 	}
@@ -469,13 +471,54 @@ func mergeMaps(src, dst map[string]string) map[string]string {
 	return dst
 }
 
+func updateLiveObject(renderedObj, updatedLiveObj *unstructured.Unstructured,
+	log *zap.Logger) (controllerutil.OperationResult, error) {
+	fieldSets := map[string][]string{
+		"ConfigMap": {"data", "binaryData"},
+		"Secret":    {"data", "stringData"},
+	}
+
+	// Handle non-spec fields
+	for _, field := range fieldSets[renderedObj.GetKind()] {
+		if updatedData, hasField := renderedObj.Object[field].(map[string]interface{}); hasField {
+			if liveData, ok := updatedLiveObj.Object[field].(map[string]interface{}); ok {
+				updatedData = mergeMaps(updatedData, liveData)
+			}
+			updatedLiveObj.Object[field] = updatedData
+		}
+	}
+
+	if spec, hasSpec := renderedObj.Object["spec"].(map[string]interface{}); hasSpec {
+		// Replace updatedLiveObj.spec fields with those in renderedObj.spec
+		for _, key := range sets.NewString(maps.Keys(spec)...).List() {
+			nestedField := []string{"spec", key}
+			nestedValue, ok, err := unstructured.NestedFieldCopy(renderedObj.Object, nestedField...)
+			if err != nil {
+				return controllerutil.OperationResultNone, err
+			}
+			if !ok {
+				// This situation should never occur, as it implies that a field present in the rendered object spec
+				// keys is somehow missing from the actual rendered object spec.
+				log.Sugar().Warnf("missing field %s in rendered installation object %s",
+					key, renderedObj.GroupVersionKind())
+				continue
+			}
+			if err := unstructured.SetNestedField(updatedLiveObj.Object, nestedValue, nestedField...); err != nil {
+				return controllerutil.OperationResultNone, err
+			}
+		}
+	}
+
+	return controllerutil.OperationResultUpdated, nil
+}
+
+// createOrPatch ensures that the object is created or updated as needed.
 func createOrPatch(
 	ctx context.Context,
 	c client.Client,
 	log *zap.Logger,
 	renderedObj unstructured.Unstructured,
 ) (controllerutil.OperationResult, error) {
-	log = log.Named("createOrPatch")
 
 	liveObj := &unstructured.Unstructured{}
 	liveObj.SetGroupVersionKind(renderedObj.GroupVersionKind())
@@ -490,6 +533,13 @@ func createOrPatch(
 		return controllerutil.OperationResultCreated, nil
 	}
 
+	// Update logger with object context.
+	log = log.Named("createOrPatch").With(
+		zap.String("name", liveObj.GetName()),
+		zap.String("namespace", liveObj.GetNamespace()),
+		zap.String("kind", liveObj.GetKind()),
+	)
+
 	// Object exists, update it
 	patch := client.MergeFrom(liveObj.DeepCopy())
 	updatedLiveObj := liveObj.DeepCopy()
@@ -499,53 +549,27 @@ func createOrPatch(
 	unstructured.RemoveNestedField(updatedLiveObj.Object, "status")
 
 	// Merge metadata.annotations and metadata.labels
-	updatedLiveObj.SetAnnotations(mergeMaps(renderedObj.GetAnnotations(), liveObj.GetAnnotations()))
-	updatedLiveObj.SetLabels(mergeMaps(renderedObj.GetLabels(), liveObj.GetLabels()))
+	updatedLiveObj.SetAnnotations(mergeMaps(renderedObj.GetAnnotations(), updatedLiveObj.GetAnnotations()))
+	updatedLiveObj.SetLabels(mergeMaps(renderedObj.GetLabels(), updatedLiveObj.GetLabels()))
 
-	// Replace updatedLiveObj.spec fields with those in renderedObj.spec
-	spec, ok := renderedObj.Object["spec"].(map[string]interface{})
-	if !ok {
-		log.Sugar().Errorf("missing spec field in rendered install template %s",
-			renderedObj.GroupVersionKind().String())
-		return controllerutil.OperationResultNone, fmt.Errorf("missing spec in rendered install template")
-	}
-	for _, key := range maps.Keys(spec) {
-		nestedField := []string{"spec", key}
-		nestedValue, ok, err := unstructured.NestedFieldCopy(renderedObj.Object, nestedField...)
-		if err != nil {
-			return controllerutil.OperationResultNone, err
-		}
-		if !ok {
-			// This situation should never occur, as it implies that a field present in the rendered object spec keys
-			// is somehow missing from the actual rendered object spec.
-			log.Sugar().Warnf("missing field %s in rendered install template %s",
-				key, renderedObj.GroupVersionKind().String())
-			continue
-		}
-		if err := unstructured.SetNestedField(updatedLiveObj.Object, nestedValue, nestedField...); err != nil {
-			return controllerutil.OperationResultNone, err
-		}
+	if result, err := updateLiveObject(&renderedObj, updatedLiveObj, log); err != nil {
+		return result, err
 	}
 
-	resourceId := ci.GetResourceId(
-		updatedLiveObj.GetName(),
-		updatedLiveObj.GetNamespace(),
-		updatedLiveObj.GetKind(),
-	)
 	// Compute difference between the liveObject and updatedLiveObject without "status" fields
 	unstructured.RemoveNestedField(liveObj.Object, "status")
 	if !equality.Semantic.DeepEqual(liveObj, updatedLiveObj) {
-		log.Sugar().Debugf("Change detected in resource %s, updating it", resourceId)
+		log.Debug("Change detected in rendered object, updating it")
 
 		// Only issue a Patch if the before and after resources (minus status) differ
 		if err := c.Patch(ctx, updatedLiveObj, patch); err != nil {
-			log.Info(fmt.Sprintf("Failed to update resource %s", resourceId))
+			log.Warn("Failed to update resource", zap.Error(err))
 			return controllerutil.OperationResultNone, err
 		}
 		return controllerutil.OperationResultUpdated, nil
 	}
-	log.Sugar().Debugf("No change detected in resource %s, skipping update request", resourceId)
 
+	log.Debug("No change detected in rendered object, skipping update")
 	return controllerutil.OperationResultNone, nil
 }
 

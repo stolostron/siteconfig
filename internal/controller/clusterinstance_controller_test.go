@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 
@@ -84,6 +85,7 @@ const (
 	ConfigMapKind           = "ConfigMap"
 	ManagedClusterKind      = "ManagedCluster"
 	NMStateConfigKind       = "NMStateConfig"
+	SecretKind              = "Secret"
 )
 
 var _ = Describe("Reconcile", func() {
@@ -2063,6 +2065,274 @@ var _ = Describe("createOrPatch", func() {
 		result, err := createOrPatch(ctx, c, testLogger, updatedObject)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultNone))
+	})
+
+	It("successfully patches an existing ConfigMap that has changed", func() {
+
+		object = unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       ConfigMapKind,
+				"metadata": map[string]interface{}{
+					"name":      TestClusterInstanceName,
+					"namespace": TestClusterInstanceNamespace,
+				},
+				"data": map[string]string{
+					"installed": "foobar",
+				},
+				"binaryData": map[string]interface{}{
+					"test": []byte("old"),
+					"this": []byte("should-not-change"),
+				},
+			},
+		}
+
+		Expect(c.Create(ctx, &object)).To(Succeed())
+
+		// Update manifest by:
+		// - update data and binaryData
+		// - change status by adding apiURL
+		updatedObject := unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": object.GetAPIVersion(),
+				"kind":       object.GetKind(),
+				"metadata": map[string]interface{}{
+					"name":      object.GetName(),
+					"namespace": object.GetNamespace(),
+				},
+				"data": map[string]interface{}{
+					// update existing key
+					"installed": "new-domain",
+					// add new key
+					"foo": "bar",
+				},
+				"binaryData": map[string]interface{}{
+					// update existing key
+					"test": []byte("new"),
+					// add new key
+					"foo": []byte("bar"),
+				},
+				// change status by adding apiUrl
+				"status": map[string]interface{}{
+					"apiURL": "https://api.foo.bar.redhat.com:6443",
+				},
+			},
+		}
+		// - add new label
+		updatedObject.SetLabels(map[string]string{
+			"ownedBy": "foo",
+		})
+
+		result, err := createOrPatch(ctx, c, testLogger, updatedObject)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result).To(Equal(controllerutil.OperationResultUpdated))
+
+		// Check that the existing object has been successfully patched
+		actual := &corev1.ConfigMap{}
+		err = c.Get(ctx, client.ObjectKeyFromObject(&object), actual)
+		Expect(err).ToNot(HaveOccurred())
+
+		expected := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      object.GetName(),
+				Namespace: object.GetNamespace(),
+				Labels: map[string]string{
+					"ownedBy": "foo",
+				},
+			},
+			Data: map[string]string{
+				"installed": "new-domain",
+				"foo":       "bar",
+			},
+			BinaryData: map[string][]byte{
+				"test": []byte("new"),
+				"foo":  []byte("bar"),
+				"this": []byte("should-not-change"),
+			},
+		}
+
+		Expect(actual.Annotations).To(Equal(expected.Annotations))
+		Expect(actual.Labels).To(Equal(expected.Labels))
+		Expect(actual.Data).To(Equal(expected.Data))
+		Expect(actual.BinaryData).To(Equal(expected.BinaryData))
+
+	})
+
+	It("successfully patches an existing Secret that has changed", func() {
+
+		object = unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       SecretKind,
+				"metadata": map[string]interface{}{
+					"name":      TestClusterInstanceName,
+					"namespace": TestClusterInstanceNamespace,
+				},
+				"data": map[string]interface{}{
+					"password": base64.StdEncoding.EncodeToString([]byte("old-password")),
+				},
+				"stringData": map[string]interface{}{
+					"username": "old-user",
+				},
+			},
+		}
+
+		Expect(c.Create(ctx, &object)).To(Succeed())
+
+		// Update manifest by:
+		// - update data and stringData
+		updatedObject := unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": object.GetAPIVersion(),
+				"kind":       object.GetKind(),
+				"metadata": map[string]interface{}{
+					"name":      object.GetName(),
+					"namespace": object.GetNamespace(),
+				},
+				"data": map[string]interface{}{
+					"password": base64.StdEncoding.EncodeToString([]byte("new-password")),
+					"token":    base64.StdEncoding.EncodeToString([]byte("new-token")),
+				},
+				"stringData": map[string]interface{}{
+					"username": "new-user",
+					"foo":      "bar",
+				},
+				"status": map[string]interface{}{
+					"secretStatus": "updated",
+				},
+			},
+		}
+		// - add new annotation
+		updatedObject.SetAnnotations(map[string]string{
+			"updatedBy": "admin",
+		})
+
+		result, err := createOrPatch(ctx, c, testLogger, updatedObject)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result).To(Equal(controllerutil.OperationResultUpdated))
+
+		// Check that the existing object has been successfully patched
+		actual := &corev1.Secret{}
+		err = c.Get(ctx, client.ObjectKeyFromObject(&object), actual)
+		Expect(err).ToNot(HaveOccurred())
+
+		expected := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      object.GetName(),
+				Namespace: object.GetNamespace(),
+				Annotations: map[string]string{
+					"updatedBy": "admin",
+				},
+			},
+			Data: map[string][]byte{
+				"password": []byte("new-password"),
+				"token":    []byte("new-token"),
+			},
+			StringData: map[string]string{
+				"username": "new-user",
+				"foo":      "bar",
+			},
+		}
+
+		Expect(actual.Annotations).To(Equal(expected.Annotations))
+		Expect(actual.Data).To(Equal(expected.Data))
+		Expect(actual.StringData).To(Equal(expected.StringData))
+
+	})
+
+	It("successfully patches an existing manifest (with a spec field) that has changed", func() {
+
+		object = unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]interface{}{
+					"name":      TestClusterInstanceName,
+					"namespace": TestClusterInstanceNamespace,
+				},
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "test",
+							"image": "test:1.0",
+						},
+					},
+				},
+			},
+		}
+
+		Expect(c.Create(ctx, &object)).To(Succeed())
+
+		// Update manifest by:
+		// - changing the container image
+		// - adding a new environment variable
+		updatedObject := unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": object.GetAPIVersion(),
+				"kind":       object.GetKind(),
+				"metadata": map[string]interface{}{
+					"name":      object.GetName(),
+					"namespace": object.GetNamespace(),
+				},
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "test",
+							"image": "test:2.0", // updated image
+							"env": []interface{}{
+								map[string]interface{}{
+									"name":  "foo",
+									"value": "bar",
+								},
+							},
+						},
+					},
+				},
+				"status": map[string]interface{}{
+					"phase": "Running",
+				},
+			},
+		}
+		// - add a new label
+		updatedObject.SetLabels(map[string]string{
+			"env": "test",
+		})
+
+		result, err := createOrPatch(ctx, c, testLogger, updatedObject)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result).To(Equal(controllerutil.OperationResultUpdated))
+
+		// Check that the existing object has been successfully patched
+		actual := &corev1.Pod{}
+		err = c.Get(ctx, client.ObjectKeyFromObject(&object), actual)
+		Expect(err).ToNot(HaveOccurred())
+
+		expected := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      object.GetName(),
+				Namespace: object.GetNamespace(),
+				Labels: map[string]string{
+					"env": "test",
+				},
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:  "test",
+						Image: "test:2.0",
+						Env: []corev1.EnvVar{
+							{
+								Name:  "foo",
+								Value: "bar",
+							},
+						},
+					},
+				},
+			},
+		}
+
+		Expect(actual.Labels).To(Equal(expected.Labels))
+		Expect(actual.Spec.Containers).To(Equal(expected.Spec.Containers))
 	})
 
 })
