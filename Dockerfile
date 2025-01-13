@@ -25,7 +25,7 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} GO111MODULE=on \
 
 #####################################################################################################
 # Build the controller image
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5-1736404155
 
 COPY --from=builder \
     /opt/app-root/src/build/siteconfig-manager \
