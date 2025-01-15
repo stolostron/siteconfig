@@ -27,6 +27,18 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} GO111MODULE=on \
 # Build the controller image
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
 
+ENV SUMMARY="SiteConfig Operator is a template-driven cluster provisioning solution" \
+    DESCRIPTION="SiteConfig operator as a template-driven cluster provisioning solution, which allows you to \
+provision clusters with all available installation methods."
+
+LABEL name="siteconfig" \
+      summary="${SUMMARY}" \
+      description="${DESCRIPTION}" \
+      com.redhat.component="siteconfig-operator" \
+      io.k8s.display-name="SiteConfig Operator" \
+      io.k8s.description="${DESCRIPTION}" \
+      io.openshift.tags="siteconfig,template-driven,cluster,provisioning,lifecycle"
+
 COPY --from=builder \
     /opt/app-root/src/build/siteconfig-manager \
     /usr/local/bin/
