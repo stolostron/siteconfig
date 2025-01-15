@@ -95,7 +95,7 @@ var _ = Describe("Reconcile", func() {
 		cm.Data["maxConcurrentReconciles"] = "10"
 		Expect(c.Update(ctx, cm)).To(Succeed())
 
-		// Trigger a reconcile and verify that the configuration is udpated
+		// Trigger a reconcile and verify that the configuration is updated
 		res, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(Equal(ctrl.Result{}))
