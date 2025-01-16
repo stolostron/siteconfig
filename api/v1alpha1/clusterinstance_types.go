@@ -94,9 +94,9 @@ type CPUArchitecture string
 
 const (
 	// Supported architectures are x86, arm, or multi
-	CPUArchitectureX86_64 CPUArchitecture = "x86_64"
+	CPUArchitectureX86_64  CPUArchitecture = "x86_64"
 	CPUArchitectureAarch64 CPUArchitecture = "aarch64"
-	CPUArchitectureMulti CPUArchitecture = "multi"
+	CPUArchitectureMulti   CPUArchitecture = "multi"
 )
 
 // TemplateRef is used to specify the installation CR templates
