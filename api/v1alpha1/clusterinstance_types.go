@@ -93,9 +93,10 @@ const (
 type CPUArchitecture string
 
 const (
-	// Supported architectures are x86 and arm
+	// Supported architectures are x86, arm, or multi
 	CPUArchitectureX86_64 CPUArchitecture = "x86_64"
 	CPUArchitectureAarch64 CPUArchitecture = "aarch64"
+	CPUArchitectureMulti CPUArchitecture = "multi"
 )
 
 // TemplateRef is used to specify the installation CR templates
@@ -168,8 +169,8 @@ type NodeSpec struct {
 
 	// CPUArchitecture is the software architecture of the node.
 	// If it is not defined here then it is inheirited from the ClusterInstanceSpec.
-	// If both are not defined then it is omitted.
 	// +kubebuilder:validation:Enum=x86_64;aarch64
+	// +kubebuilder:default:=x86_64
 	// +optional
 	CPUArchitecture CPUArchitecture `json:"cpuArchitecture,omitempty"`
 
@@ -395,8 +396,8 @@ type ClusterInstanceSpec struct {
 	CPUPartitioning CPUPartitioningMode `json:"cpuPartitioningMode,omitempty"`
 
 	// CPUArchitecture is the default software architecture used for nodes that do not have an architecture defined.
-	// If CPUArchitecture is not defined then it is omitted.
-	// +kubebuilder:validation:Enum=x86_64;aarch64
+	// +kubebuilder:validation:Enum=x86_64;aarch64;multi
+	// +kubebuilder:default:=x86_64
 	// +optional
 	CPUArchitecture CPUArchitecture `json:"cpuArchitecture,omitempty"`
 
