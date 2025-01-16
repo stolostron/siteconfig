@@ -416,7 +416,7 @@ var _ = Describe("handleFinalizer", func() {
 		}
 		Expect(c.Create(ctx, cm)).To(Succeed())
 
-		// Get the created manfiests to confirm they exist before calling finalizer
+		// Get the created manifests to confirm they exist before calling finalizer
 		key := types.NamespacedName{
 			Name:      manifestName,
 			Namespace: clusterNamespace,
@@ -809,8 +809,8 @@ var _ = Describe("pruneManifests", func() {
 		}
 		pruneKeys := []types.NamespacedName{cdKey, bmh1Key, bmh2Key, mcKey, cm1Key, cm2Key}
 
-		doNotPruneList := []ci.RenderedObject{}
-		doNotPruneKeys := []types.NamespacedName{}
+		var doNotPruneList []ci.RenderedObject
+		var doNotPruneKeys []types.NamespacedName
 
 		clusterInstanceKey := types.NamespacedName{Namespace: TestClusterInstanceNamespace, Name: TestClusterInstanceName}
 		clusterInstance := &v1alpha1.ClusterInstance{
@@ -991,8 +991,8 @@ var _ = Describe("pruneManifests", func() {
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		// Expect the objects previously created to not be deleted after pruneManifests is called
-		expectedPruneList := []ci.RenderedObject{}
-		expectedPruneKeys := []types.NamespacedName{}
+		var expectedPruneList []ci.RenderedObject
+		var expectedPruneKeys []types.NamespacedName
 
 		Expect(c.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
 		pruningCompleted, err := r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
@@ -1770,7 +1770,7 @@ var _ = Describe("executeRenderedManifests", func() {
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		manifests := []map[string]interface{}{
-			map[string]interface{}{
+			{
 				"apiVersion": *expManifest.APIGroup,
 				"kind":       expManifest.Kind,
 				"metadata":   map[string]interface{}{"name": clusterName, "namespace": clusterNamespace},
