@@ -1,8 +1,6 @@
 module github.com/stolostron/siteconfig
 
-go 1.22.0
-
-toolchain go1.22.9
+go 1.22.9
 
 require (
 	github.com/go-logr/logr v1.4.2 // indirect
@@ -10,10 +8,10 @@ require (
 	github.com/onsi/gomega v1.36.0
 	github.com/openshift/hive/apis v0.0.0-20240306163002-9c5806a63531
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.31.3
+	k8s.io/api v0.31.4
 	k8s.io/apiextensions-apiserver v0.31.3 // indirect
-	k8s.io/apimachinery v0.31.3
-	k8s.io/client-go v0.31.3
+	k8s.io/apimachinery v0.31.4
+	k8s.io/client-go v0.31.4
 	sigs.k8s.io/controller-runtime v0.19.3
 )
 
@@ -24,7 +22,7 @@ require (
 
 require (
 	github.com/go-task/slim-sprig v2.20.0+incompatible
-	github.com/metal3-io/baremetal-operator/apis v0.8.0
+	github.com/metal3-io/baremetal-operator/apis v0.9.0
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
