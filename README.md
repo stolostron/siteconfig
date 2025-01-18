@@ -1,4 +1,9 @@
 # siteconfig-controller
+
+[![Go Report Card](https://goreportcard.com/badge/github.com/stolostron/siteconfig)](https://goreportcard.com/report/github.com/stolostron/siteconfig)
+[![Go Reference](https://pkg.go.dev/badge/github.com/stolostron/siteconfig.svg)](https://pkg.go.dev/github.com/stolostron/siteconfig)
+[![License Apache](https://img.shields.io/github/license/stolostron/siteconfig)](https://opensource.org/licenses/Apache-2.0)
+
 Provide site deployment to Single and Multi Node OpenShift clusters to complete installation
 
 ## Description
