@@ -55,9 +55,8 @@ func getWorkloadPinningInstallConfigOverrides(clusterInstance *v1alpha1.ClusterI
 	if clusterInstance.Spec.CPUPartitioning == v1alpha1.CPUPartitioningAllNodes {
 		installOverrideValues := map[string]interface{}{}
 		if scInstallConfigOverrides != "" {
-			err := json.Unmarshal([]byte(scInstallConfigOverrides), &installOverrideValues)
-			if err != nil {
-				return scInstallConfigOverrides, err
+			if err = json.Unmarshal([]byte(scInstallConfigOverrides), &installOverrideValues); err != nil {
+				return scInstallConfigOverrides, fmt.Errorf("failed to unmarshal install config overrides JSON: %w", err)
 			}
 		}
 
@@ -67,7 +66,7 @@ func getWorkloadPinningInstallConfigOverrides(clusterInstance *v1alpha1.ClusterI
 
 		byteData, err := json.Marshal(installOverrideValues)
 		if err != nil {
-			return scInstallConfigOverrides, err
+			return scInstallConfigOverrides, fmt.Errorf("failed to marshal install override values to JSON: %w", err)
 		}
 		return string(byteData), nil
 	}
@@ -108,7 +107,7 @@ func getInstallConfigOverrides(clusterInstance *v1alpha1.ClusterInstance) (strin
 		if _, found := installConfigOverridesMap[commonKey]; found {
 			networkMergedJson, err := mergeJSONCommonKey(networkAnnotation, installConfigOverrides, commonKey)
 			if err != nil {
-				return "", fmt.Errorf("failed to merge installConfigOverrides objects, error: %v", err)
+				return "", fmt.Errorf("failed to merge installConfigOverrides objects, error: %w", err)
 			}
 			return networkMergedJson, nil
 		}
@@ -117,7 +116,7 @@ func getInstallConfigOverrides(clusterInstance *v1alpha1.ClusterInstance) (strin
 		trimmedNetworkType := strings.TrimSuffix(networkAnnotation, "}")
 		finalJson := trimmedNetworkType + "," + trimmedConfigOverrides
 		if !json.Valid([]byte(finalJson)) {
-			return "", fmt.Errorf("failed to marshal annotation for installConfigOverrides, error: %v", err)
+			return "", fmt.Errorf("failed to marshal annotation for installConfigOverrides, error: %w", err)
 		}
 		return finalJson, nil
 
@@ -125,7 +124,8 @@ func getInstallConfigOverrides(clusterInstance *v1alpha1.ClusterInstance) (strin
 }
 
 // buildClusterData returns a Cluster object that is consumed for rendering templates
-func buildClusterData(clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.NodeSpec) (data *ClusterData, err error) {
+func buildClusterData(clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.NodeSpec,
+) (data *ClusterData, err error) {
 
 	// Prepare specialVars
 	var currentNode v1alpha1.NodeSpec
@@ -200,11 +200,11 @@ func mergeJSONCommonKey(mergeWith, mergeTo, key string) (string, error) {
 
 	// Unmarshal JSON strings into maps
 	if err := json.Unmarshal([]byte(mergeWith), &mapMergeWith); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to unmarshal JSON mergeWith string into map: %w", err)
 	}
 
 	if err := json.Unmarshal([]byte(mergeTo), &mapMergeTo); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to unmarshal JSON mergeTo string into map: %w", err)
 	}
 
 	// Check if the key exists in both maps
@@ -216,12 +216,12 @@ func mergeJSONCommonKey(mergeWith, mergeTo, key string) (string, error) {
 	// Convert values to map if not already
 	mergeWithValueMap, ok := mergeWithValue.(map[string]interface{})
 	if !ok {
-		return "", fmt.Errorf("value associated with the key is not a map")
+		return "", fmt.Errorf("value associated with mergeWithValue is not a map")
 	}
 
 	mergeToValueMap, ok := mergeToValue.(map[string]interface{})
 	if !ok {
-		return "", fmt.Errorf("value associated with the key is not a map")
+		return "", fmt.Errorf("value associated with mergeToValue is not a map")
 	}
 
 	// Merge maps
@@ -235,7 +235,7 @@ func mergeJSONCommonKey(mergeWith, mergeTo, key string) (string, error) {
 	// Marshal merged map to JSON string
 	mergedJSON, err := json.Marshal(mapMergeTo)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal merged map to JSON: %w", err)
 	}
 
 	return string(mergedJSON), nil
@@ -268,7 +268,8 @@ func appendToManifestMetadata(
 	return manifest
 }
 
-func appendManifestAnnotations(extraAnnotations map[string]string, manifest map[string]interface{}) map[string]interface{} {
+func appendManifestAnnotations(extraAnnotations map[string]string, manifest map[string]interface{},
+) map[string]interface{} {
 	return appendToManifestMetadata(extraAnnotations, AnnotationsKey, manifest)
 }
 

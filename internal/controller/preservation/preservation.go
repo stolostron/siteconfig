@@ -18,12 +18,12 @@ package preservation
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/errors"
-
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
@@ -222,13 +222,13 @@ func Cleanup(
 		object := ci.RenderedObject{}
 		err := object.SetObject(rawObject)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to set object from raw data: %w", err)
 		}
 
 		deleted, err := deletionHandler.DeleteObject(ctx, clusterInstance, object, nil)
 		if client.IgnoreNotFound(err) != nil {
 			log.Warn("Failed to delete", zap.String("object", object.GetResourceId()), zap.Error(err))
-			return err
+			return fmt.Errorf("failed to delete object %s: %w", object.GetResourceId(), err)
 		}
 		if !deleted {
 			completedCleanup = false

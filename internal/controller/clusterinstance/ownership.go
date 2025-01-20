@@ -40,7 +40,9 @@ func GetOwner(obj client.Object) string {
 func VerifyOwnership(obj client.Object, ownerRefLabel string) error {
 	if GetOwner(obj) != ownerRefLabel {
 		resourceId := GetResourceId(obj.GetName(), obj.GetNamespace(), obj.GetObjectKind().GroupVersionKind().Kind)
-		return cierrors.NewNotOwnedObjectError(ownerRefLabel, resourceId)
+		return fmt.Errorf(
+			"ownership verification failed for object %s: %w",
+			resourceId, cierrors.NewNotOwnedObjectError(ownerRefLabel, resourceId))
 	}
 	return nil
 }

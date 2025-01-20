@@ -75,6 +75,8 @@ spec:
   pullSecretRef:
     name: "{{ .Spec.PullSecretRef.Name }}"`
 
+// nolint:gosec
+// This is for dynamic templating purposes, not hardcoded credentials (gosec G101).
 const NetworkSecret = `{{ if .SpecialVars.CurrentNode.NodeNetwork }}
 apiVersion: v1
 kind: Secret

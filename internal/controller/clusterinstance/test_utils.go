@@ -32,6 +32,14 @@ import (
 	"github.com/onsi/gomega"
 )
 
+const (
+	secretResource    = "Secret"
+	configMapResource = "ConfigMap"
+
+	// nolint:gosec
+	testPullSecretVal = `{"auths":{"cloud.openshift.com":{"auth":"dXNlcjpwYXNzd29yZAo=","email":"r@r.com"}}}`
+)
+
 type TestParams struct {
 	ClusterName         string
 	ClusterNamespace    string
@@ -75,11 +83,11 @@ func (tp *TestParams) GetResources() map[string]string {
 	resources := map[string]string{}
 
 	if tp.PullSecret != "" {
-		resources[tp.PullSecret] = "Secret"
+		resources[tp.PullSecret] = secretResource
 	}
 
 	if tp.BmcCredentialsName != "" {
-		resources[tp.BmcCredentialsName] = "Secret"
+		resources[tp.BmcCredentialsName] = secretResource
 	}
 
 	if tp.ClusterImageSetName != "" {
@@ -87,15 +95,15 @@ func (tp *TestParams) GetResources() map[string]string {
 	}
 
 	if tp.ClusterTemplateRef != "" {
-		resources[tp.ClusterTemplateRef] = "ConfigMap"
+		resources[tp.ClusterTemplateRef] = configMapResource
 	}
 
 	if tp.NodeTemplateRef != "" {
-		resources[tp.NodeTemplateRef] = "ConfigMap"
+		resources[tp.NodeTemplateRef] = configMapResource
 	}
 
 	if tp.ExtraManifestName != "" {
-		resources[tp.ExtraManifestName] = "ConfigMap"
+		resources[tp.ExtraManifestName] = configMapResource
 	}
 
 	return resources
@@ -119,7 +127,6 @@ func GetMockClusterImageSet(name string) *hivev1.ClusterImageSet {
 }
 
 func GetMockPullSecret(name, namespace string) *corev1.Secret {
-	testPullSecretVal := `{"auths":{"cloud.openshift.com":{"auth":"dXNlcjpwYXNzd29yZAo=","email":"r@r.com"}}}`
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -409,7 +416,7 @@ func TeardownTestResources(ctx context.Context, c client.Client, testParams *Tes
 			switch v {
 			case "ConfigMap":
 				obj = &corev1.ConfigMap{}
-			case "Secret":
+			case secretResource:
 				obj = &corev1.Secret{}
 			case "ClusterImageSet":
 				obj = &hivev1.ClusterImageSet{}
