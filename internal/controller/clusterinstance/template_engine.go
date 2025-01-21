@@ -71,9 +71,10 @@ func (te *TemplateEngine) ProcessTemplates(
 	numNodes := len(clusterInstance.Spec.Nodes)
 	for nodeId, node := range clusterInstance.Spec.Nodes {
 		log.Sugar().Infof("Started processing node-level install templates [node: %d of %d]", nodeId+1, numNodes)
+		nodeCopy := node
 
 		// Render node-level templates
-		nodeObjects, err := te.renderTemplates(ctx, c, log, &clusterInstance, &node)
+		nodeObjects, err := te.renderTemplates(ctx, c, log, &clusterInstance, &nodeCopy)
 		if err != nil {
 			log.Sugar().Errorf(
 				"Encountered error while processing node-level install templates [node: %d of %d], err: %v",
@@ -124,7 +125,7 @@ func (te *TemplateEngine) renderTemplates(
 			Namespace: templateRef.Namespace,
 		}, templatesConfigMap); err != nil {
 			log.Error("Failed to get ConfigMap", zap.Error(err))
-			return renderedObjects, err
+			return renderedObjects, fmt.Errorf("failed to get ConfigMap %s/%s: %w", templateRef.Namespace, templateRef.Name, err)
 		}
 
 		// process Template ConfigMap
@@ -278,20 +279,20 @@ func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterD
 	fMap := funcMap()
 	t, err := template.New(templateKey).Funcs(fMap).Parse(templateStr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse template %s: %w", templateKey, err)
 	}
 
 	var buffer bytes.Buffer
 	err = t.Execute(&buffer, data)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to execute template: %w", err)
 	}
 
 	// Ensure there's non-whitespace content
 	for _, r := range buffer.String() {
 		if !unicode.IsSpace(r) {
 			if err := yaml.Unmarshal(buffer.Bytes(), &renderedTemplate); err != nil {
-				return renderedTemplate, err
+				return renderedTemplate, fmt.Errorf("failed to unmarshal YAML: %w", err)
 			}
 			return renderedTemplate, validateRenderedTemplate(renderedTemplate, templateKey)
 		}

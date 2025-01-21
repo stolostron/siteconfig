@@ -100,14 +100,14 @@ func (r *ConfigurationMonitor) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Update the runtime configuration store
 	if err := r.ConfigStore.UpdateConfiguration(data); err != nil {
 		log.Error("Failed to update configuration store", zap.Error(err))
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to update runtime configuration store: %w", err)
 	}
 	log.Sugar().Infof("Successfully updated runtime configuration: %v", data)
 
 	return ctrl.Result{}, nil
 }
 
-// CreateDefaultConfigMap creates a ConfigMap with default configuration values in the given namespace.
+// CreateDefaultConfigurationConfigMap creates a ConfigMap with default configuration values in the given namespace.
 func CreateDefaultConfigurationConfigMap(ctx context.Context, c client.Client, namespace string) error {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -128,9 +128,8 @@ func CreateDefaultConfigurationConfigMap(ctx context.Context, c client.Client, n
 func GetConfigurationData(ctx context.Context, c client.Client, namespace string) (map[string]string, error) {
 	// Fetch the ConfigMap
 	cm := &corev1.ConfigMap{}
-	err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: SiteConfigOperatorConfigMap}, cm)
-	if err != nil {
-		return nil, err
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: SiteConfigOperatorConfigMap}, cm); err != nil {
+		return nil, fmt.Errorf("failed to fetch ConfigMap %s/%s: %w", namespace, SiteConfigOperatorConfigMap, err)
 	}
 
 	return cm.Data, nil
@@ -167,6 +166,7 @@ func (r *ConfigurationMonitor) SetupWithManager(mgr ctrl.Manager) error {
 		},
 	}
 
+	//nolint:wrapcheck
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("ConfigurationMonitor").
 		For(&corev1.ConfigMap{}).

@@ -7,6 +7,7 @@ run:
 linters:
   disable-all: true
   enable:
+    - lll
     - depguard
     - goconst
     - gocritic
@@ -27,6 +28,8 @@ linters:
     - gosec
     - wrapcheck
 linters-settings:
+  lll:
+    line-length: 120
   revive:
     rules:
       - name: if-return

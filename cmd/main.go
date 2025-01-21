@@ -120,7 +120,7 @@ func main() {
 	})
 	if err != nil {
 		setupLog.Error("Unable to start manager", zap.Error(err))
-		os.Exit(1)
+		os.Exit(1) // nolint:gocritic
 	}
 
 	// Check that the SiteConfig namespace value is defined
@@ -152,7 +152,7 @@ func main() {
 	}
 
 	// Create configuration monitor controller to track SiteConfig Operator configuration change(s)
-	if err = (&controller.ConfigurationMonitor{
+	if err := (&controller.ConfigurationMonitor{
 		Client:      mgr.GetClient(),
 		Log:         siteconfigLogger.Named("ConfigurationMonitor"),
 		Scheme:      mgr.GetScheme(),
@@ -173,7 +173,7 @@ func main() {
 
 	// Create ClusterInstance controller for reconciling ClusterInstance CRs
 	clusterInstanceLogger := siteconfigLogger.Named("ClusterInstanceController")
-	if err = (&controller.ClusterInstanceReconciler{
+	if err := (&controller.ClusterInstanceReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
 		Recorder:        mgr.GetEventRecorderFor("ClusterInstanceController"),
@@ -190,7 +190,7 @@ func main() {
 	}
 
 	// Create ClusterDeployment controller for monitoring cluster provisioning progress
-	if err = (&controller.ClusterDeploymentReconciler{
+	if err := (&controller.ClusterDeploymentReconciler{
 		Client: mgr.GetClient(),
 		Log:    siteconfigLogger.Named("ClusterDeploymentReconciler"),
 		Scheme: mgr.GetScheme(),
@@ -250,7 +250,10 @@ func initConfigMapTemplates(ctx context.Context, c client.Client, namespace stri
 		}
 
 		if err := retry.RetryOnConflictOrRetriable(k8sretry.DefaultBackoff, func() error {
-			return client.IgnoreAlreadyExists(c.Create(ctx, configMap))
+			if err := client.IgnoreAlreadyExists(c.Create(ctx, configMap)); err != nil {
+				return fmt.Errorf("failed to create ConfigMap: %w", err)
+			}
+			return nil
 		}); err != nil {
 			return fmt.Errorf(
 				"failed to create default reference installation template ConfigMap %s/%s, error: %w",
@@ -276,7 +279,7 @@ func createConfigurationStore(
 	data, err := initializeConfiguration(ctx, client, namespace, log)
 	if err != nil {
 		log.Error("Failed to initialize the SiteConfig Operator configuration", zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("failed to initialize configuration: %w", err)
 	}
 
 	if len(data) == 0 {
@@ -288,10 +291,16 @@ func createConfigurationStore(
 	config := &configuration.Configuration{}
 	if err := config.FromMap(data); err != nil {
 		log.Error("Failed to parse SiteConfig Operator configuration", zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("failed to parse SiteConfig Operator configuration: %w", err)
 	}
 
-	return configuration.NewConfigurationStore(config)
+	// Return the new configuration store, wrap the error if it occurs
+	store, err := configuration.NewConfigurationStore(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create configuration store: %w", err)
+	}
+
+	return store, nil
 }
 
 // initializeConfiguration ensures that the SiteConfig Operator configuration ConfigMap exists.
@@ -316,7 +325,7 @@ func initializeConfiguration(
 			log.Info("SiteConfig configuration ConfigMap not found; creating one with default values")
 			if createErr := controller.CreateDefaultConfigurationConfigMap(ctx, client, namespace); createErr != nil {
 				log.Error("Failed to create default configuration ConfigMap", zap.Error(createErr))
-				return createErr // Retry if creation fails
+				return fmt.Errorf("failed to create default configuration ConfigMap: %w", createErr) // Retry if creation fails
 			}
 			// Use default configuration if creation succeeds
 			data = configuration.NewDefaultConfiguration().ToMap()
@@ -325,7 +334,7 @@ func initializeConfiguration(
 
 		// Log and return other errors for retry
 		log.Error("Failed to retrieve configuration ConfigMap", zap.Error(err))
-		return err
+		return fmt.Errorf("failed to retrieve configuration ConfigMap: %w", err)
 	}); err != nil {
 		log.Error("Error during configuration initialization", zap.Error(err))
 	}

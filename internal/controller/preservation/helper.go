@@ -307,7 +307,7 @@ func fetchAndValidateObjectToRestore(
 				zap.String("expected", config.ownerRef),
 				zap.String("found", object.GetLabels()[ci.OwnedByLabel]),
 			)
-			return true, err
+			return true, fmt.Errorf("ownership verification failed for object with label %s: %w", ci.OwnedByLabel, err)
 		}
 	}
 
@@ -389,7 +389,7 @@ func restoreResource(ctx context.Context, c client.Client, log *zap.Logger, conf
 
 	// Unmarshal the preserved data into the target object
 	if err := yaml.Unmarshal(data, restoredResource); err != nil {
-		return fmt.Errorf("failed to unmarshal preserved resource (%s/%s): %v",
+		return fmt.Errorf("failed to unmarshal preserved resource (%s/%s): %w",
 			conf.resourceKey.Namespace, conf.resourceKey.Name, err)
 	}
 

@@ -228,11 +228,11 @@ func (r *ClusterDeploymentReconciler) getClusterInstance(
 
 	clusterInstanceRef, err := ci.GetNamespacedNameFromOwnedByLabel(ownedBy)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get namespaced name from OwnedBy label (%s): %w", ownedBy, err)
 	}
 
 	if clusterInstanceRef.Namespace != cd.Namespace {
-		return nil, fmt.Errorf("ClusterDeployment namespace [%s] does not match ClusterInstance namespace [%s]",
+		return nil, fmt.Errorf("clusterDeployment namespace [%s] does not match ClusterInstance namespace [%s]",
 			cd.Namespace, clusterInstanceRef.Namespace)
 	}
 
@@ -244,7 +244,7 @@ func (r *ClusterDeploymentReconciler) getClusterInstance(
 			return nil, nil
 		}
 		log.Info("Failed to get ClusterInstance", zap.String("name", clusterInstanceRef.String()))
-		return nil, err
+		return nil, fmt.Errorf("failed to get ClusterInstance %s: %w", clusterInstanceRef.String(), err)
 	}
 	return clusterInstance, nil
 }
@@ -274,6 +274,8 @@ func (r *ClusterDeploymentReconciler) mapClusterInstanceToCD(
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClusterDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+
+	//nolint:wrapcheck
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("clusterDeploymentReconciler").
 		For(&hivev1.ClusterDeployment{},

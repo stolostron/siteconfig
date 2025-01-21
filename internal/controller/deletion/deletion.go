@@ -115,8 +115,9 @@ func (d *DeletionHandler) DeleteObjects(
 
 		for _, object := range objectSyncWaveMap.GetObjectsForSyncWave(syncWave) {
 			resourceId := object.GetResourceId()
+			objectCopy := object
 
-			if _, err = ci.IndexOfObjectByIdentity(&object, excludeObjects); err == nil {
+			if _, err = ci.IndexOfObjectByIdentity(&objectCopy, excludeObjects); err == nil {
 				log.Sugar().Debugf("Excluding object (%s) from deletion", resourceId)
 				continue
 			}
@@ -191,16 +192,17 @@ func (d *DeletionHandler) DeleteObject(
 	ownerRefLabel := ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name)
 	if err := ci.VerifyOwnership(obj, ownerRefLabel); err != nil {
 		log.Sugar().Warnf("Ownership verification failed for object (%s): %v", resourceId, err.Error())
-		return false, err
+		return false, fmt.Errorf("ownership verification failed for object %s: %w", resourceId, err)
 	}
 
 	if obj.GetDeletionTimestamp().IsZero() {
 		log.Sugar().Debugf("Initiating object (%s) deletion", resourceId)
 		if err := initiateObjectDeletion(ctx, d.Client, obj); err != nil {
-			return false, err
+			return false, fmt.Errorf("failed to initiate deletion for object (%s): %w", resourceId, err)
 		}
 	} else if timeoutExceeded(obj.GetDeletionTimestamp().Time, deletionTimeout) {
-		return false, cierrors.NewDeletionTimeoutError(resourceId)
+		err := cierrors.NewDeletionTimeoutError(resourceId)
+		return false, fmt.Errorf("deletion timeout exceeded for object (%s): %w", resourceId, err)
 	}
 
 	log.Sugar().Debugf("Waiting for object (%s) to be deleted", resourceId)
@@ -238,8 +240,13 @@ func isObjectDeleted(ctx context.Context, c client.Client, obj client.Object) (b
 }
 
 func initiateObjectDeletion(ctx context.Context, c client.Client, obj client.Object) error {
-	return client.IgnoreNotFound(c.Delete(ctx, obj,
-		&client.DeleteOptions{PropagationPolicy: ptr.To(metav1.DeletePropagationForeground)}))
+	if err := c.Delete(ctx, obj, &client.DeleteOptions{
+		PropagationPolicy: ptr.To(metav1.DeletePropagationForeground),
+	}); err != nil {
+		return fmt.Errorf(
+			"failed to delete object (%s/%s): %w", obj.GetNamespace(), obj.GetName(), client.IgnoreNotFound(err))
+	}
+	return nil
 }
 
 // timeoutExceeded checks whether the deletion has exceeded the timeout.
@@ -255,7 +262,8 @@ func filterOutDeletedManifests(manifestsRendered, manifestsDeleted []v1alpha1.Ma
 
 	filteredManifests := make([]v1alpha1.ManifestReference, 0, len(manifestsRendered))
 	for _, manifest := range manifestsRendered {
-		if _, err := v1alpha1.IndexOfManifestByIdentity(&manifest, manifestsDeleted); err != nil {
+		manifestCopy := manifest
+		if _, err := v1alpha1.IndexOfManifestByIdentity(&manifestCopy, manifestsDeleted); err != nil {
 			filteredManifests = append(filteredManifests, manifest)
 		}
 	}

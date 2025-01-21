@@ -111,6 +111,7 @@ func requeueForDeletion() ctrl.Result {
 	return requeueWithDelay(DefaultDeletionRequeueDelay)
 }
 
+//nolint:lll
 //+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances/finalizers,verbs=update
@@ -208,12 +209,14 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		log.Sugar().Infof("Updating ObservedGeneration to %d", clusterInstance.ObjectMeta.Generation)
 		patch := client.MergeFrom(clusterInstance.DeepCopy())
 		clusterInstance.Status.ObservedGeneration = clusterInstance.ObjectMeta.Generation
-		return ctrl.Result{}, conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
-	}
 
-	// Apply the ACM disaster recovery backup labels to the install template ConfigMaps
-	if err := r.applyACMBackupLabelToInstallTemplates(ctx, log, clusterInstance); err != nil {
-		return requeueWithError(err)
+		if err := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); err != nil {
+			return ctrl.Result{}, fmt.Errorf(
+				"failed to patch ClusterInstance status for ObservedGeneration update to %d: %w",
+				clusterInstance.ObjectMeta.Generation, err)
+		}
+
+		return ctrl.Result{}, nil
 	}
 
 	return doNotRequeue(), nil
@@ -253,7 +256,7 @@ func (r *ClusterInstanceReconciler) applyACMBackupLabelToInstallTemplates(
 
 		cm := &corev1.ConfigMap{}
 		if err := r.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, cm); err != nil {
-			return err
+			return fmt.Errorf("failed to get ConfigMap %s/%s: %w", ref.Namespace, ref.Name, err)
 		}
 
 		labels := cm.GetLabels()
@@ -267,7 +270,12 @@ func (r *ClusterInstanceReconciler) applyACMBackupLabelToInstallTemplates(
 		patch := client.MergeFrom(cm.DeepCopy())
 		labels[acmBackupLabel] = acmBackupLabelValue
 		cm.SetLabels(labels)
-		return r.Patch(ctx, cm, patch)
+
+		if err := r.Patch(ctx, cm, patch); err != nil {
+			return fmt.Errorf("failed to patch ConfigMap %s/%s: %w", cm.GetNamespace(), cm.GetName(), err)
+		}
+
+		return nil
 	}
 
 	applyDRLabelToTemplatesFn := func(refs []v1alpha1.TemplateRef) error {
@@ -333,7 +341,7 @@ func (r *ClusterInstanceReconciler) handleFinalizer(
 			return ctrl.Result{Requeue: false}, nil
 		}
 		log.Error("Finalization encountered an error", zap.Error(err))
-		return ctrl.Result{Requeue: true}, err
+		return ctrl.Result{Requeue: true}, fmt.Errorf("finalization encountered an error: %w", err)
 	}
 
 	if !deletionCompleted {
@@ -347,7 +355,8 @@ func (r *ClusterInstanceReconciler) handleFinalizer(
 
 	if err := r.Patch(ctx, clusterInstance, patch); err != nil {
 		log.Error("Failed to remove finalizer", zap.Error(err))
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to remove finalizer for ClusterInstance %s/%s: %w",
+			clusterInstance.Namespace, clusterInstance.Name, err)
 	}
 
 	log.Info("Finalizer removed successfully")
@@ -371,7 +380,8 @@ func (r *ClusterInstanceReconciler) ensureFinalizer(
 	// Persist the finalizer addition
 	if err := r.Patch(ctx, clusterInstance, patch); err != nil {
 		log.Error("Failed to add finalizer", zap.Error(err))
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to add finalizer to ClusterInstance %s/%s: %w",
+			clusterInstance.Namespace, clusterInstance.Name, err)
 	}
 
 	log.Info("Finalizer added successfully; requeuing reconciliation")
@@ -494,7 +504,8 @@ func updateLiveObject(renderedObj, updatedLiveObj *unstructured.Unstructured,
 			nestedField := []string{"spec", key}
 			nestedValue, ok, err := unstructured.NestedFieldCopy(renderedObj.Object, nestedField...)
 			if err != nil {
-				return controllerutil.OperationResultNone, err
+				return controllerutil.OperationResultNone, fmt.Errorf(
+					"failed to copy nested field %v from renderedObj: %w", nestedField, err)
 			}
 			if !ok {
 				// This situation should never occur, as it implies that a field present in the rendered object spec
@@ -504,7 +515,8 @@ func updateLiveObject(renderedObj, updatedLiveObj *unstructured.Unstructured,
 				continue
 			}
 			if err := unstructured.SetNestedField(updatedLiveObj.Object, nestedValue, nestedField...); err != nil {
-				return controllerutil.OperationResultNone, err
+				return controllerutil.OperationResultNone, fmt.Errorf(
+					"failed to set nested field %v in updatedLiveObj: %w", nestedField, err)
 			}
 		}
 	}
@@ -524,11 +536,11 @@ func createOrPatch(
 	liveObj.SetGroupVersionKind(renderedObj.GroupVersionKind())
 	if err := c.Get(ctx, client.ObjectKeyFromObject(&renderedObj), liveObj); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return controllerutil.OperationResultNone, err
+			return controllerutil.OperationResultNone, fmt.Errorf("failed to get object: %w", err)
 		}
 
 		if err := c.Create(ctx, &renderedObj); err != nil {
-			return controllerutil.OperationResultNone, err
+			return controllerutil.OperationResultNone, fmt.Errorf("failed to create rendered object: %w", err)
 		}
 		return controllerutil.OperationResultCreated, nil
 	}
@@ -564,7 +576,7 @@ func createOrPatch(
 		// Only issue a Patch if the before and after resources (minus status) differ
 		if err := c.Patch(ctx, updatedLiveObj, patch); err != nil {
 			log.Warn("Failed to update resource", zap.Error(err))
-			return controllerutil.OperationResultNone, err
+			return controllerutil.OperationResultNone, fmt.Errorf("failed to update resource during patch operation: %w", err)
 		}
 		return controllerutil.OperationResultUpdated, nil
 	}
@@ -739,7 +751,7 @@ func (r *ClusterInstanceReconciler) pruneManifests(
 			return false, nil
 		}
 		log.Error("Pruning operation encountered an error", zap.Error(err))
-		return false, err
+		return false, fmt.Errorf("pruning operation encountered an error: %w", err)
 	}
 
 	if deletionCompleted {
@@ -781,7 +793,8 @@ func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(
 		clusterInstance.Status.ManifestsRendered = manifestsRendered
 		if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 			log.Error("Failed to update ClusterInstance.Status.ManifestsRendered", zap.Error(updateErr))
-			return updateErr
+			return fmt.Errorf("failed to update ClusterInstance.Status.ManifestsRendered for ClusterInstance %s/%s: %w",
+				clusterInstance.Namespace, clusterInstance.Name, updateErr)
 		}
 	}
 	return nil
@@ -832,6 +845,7 @@ func (r *ClusterInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Log.Sugar().Infof("ClusterInstanceReconciler is configured to reconcile %d requests concurrently",
 		r.ConfigStore.GetMaxConcurrentReconciles())
 
+	//nolint:wrapcheck
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.ClusterInstance{}).
 		WithEventFilter(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{})).

@@ -58,9 +58,13 @@ func (r *RenderedObject) SetObject(manifest map[string]interface{}) error {
 	// Marshal the input manifest to JSON
 	content, err := json.Marshal(manifest)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal manifest to JSON: %w", err)
 	}
-	return json.Unmarshal(content, &r.object)
+
+	if err := json.Unmarshal(content, &r.object); err != nil {
+		return fmt.Errorf("failed to unmarshal JSON content into object: %w", err)
+	}
+	return nil
 }
 
 func (r *RenderedObject) GetObject() unstructured.Unstructured {
@@ -101,7 +105,12 @@ func (r *RenderedObject) GetSyncWave() (int, error) {
 		syncWaveStr = DefaultWaveAnnotation
 	}
 
-	return strconv.Atoi(syncWaveStr)
+	// Try to convert the string to an integer
+	result, err := strconv.Atoi(syncWaveStr)
+	if err != nil {
+		return 0, fmt.Errorf("failed to convert sync wave annotation %s to int: %w", syncWaveStr, err)
+	}
+	return result, nil
 }
 
 func (r *RenderedObject) GetResourceId() string {
@@ -141,7 +150,7 @@ func IndexOfObjectByIdentity(target *RenderedObject, objects []RenderedObject) (
 			return i, nil
 		}
 	}
-	return -1, fmt.Errorf("RenderedObject (%s) not found", target.GetResourceId())
+	return -1, fmt.Errorf("renderedObject (%s) not found", target.GetResourceId())
 }
 
 func (s *SyncWaveMap) GetAscendingSyncWaves() []int {

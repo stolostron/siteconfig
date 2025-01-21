@@ -17,6 +17,7 @@ limitations under the License.
 package errors
 
 import (
+	"errors"
 	"fmt"
 
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -70,10 +71,12 @@ func isErrorOfType(err error, errType string) bool {
 	}
 
 	// Check if the error is an aggregate
-	if agg, ok := err.(utilerrors.Aggregate); ok {
+	var agg utilerrors.Aggregate
+	if errors.As(err, &agg) {
 		for _, err1 := range agg.Errors() {
 			// Unwrap and check if it matches the error type errType
-			if ciErr, ok := err1.(*ClusterInstanceError); ok &&
+			var ciErr *ClusterInstanceError
+			if errors.As(err1, &ciErr) &&
 				ciErr.Type == errType {
 				return true
 			}
@@ -81,7 +84,8 @@ func isErrorOfType(err error, errType string) bool {
 	}
 
 	// If not an aggregate, check the single error directly
-	if ciErr, ok := err.(*ClusterInstanceError); ok &&
+	var ciErr *ClusterInstanceError
+	if errors.As(err, &ciErr) &&
 		ciErr.Type == errType {
 		return true
 	}
