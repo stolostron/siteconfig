@@ -19,6 +19,7 @@ package preservation
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -32,7 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/errors"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/utils/ptr"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
@@ -40,18 +41,40 @@ import (
 )
 
 const (
+	// InternalPreservationLabelKey is used to mark resources that are required internally
+	// for ClusterInstance operations and should not be deleted during preservation or restoration.
+	InternalPreservationLabelKey = v1alpha1.PreservationLabelKey + ".internal"
+
+	// InternalPreservationLabelValue represents the label value used for identifying
+	// internally required ClusterInstance resources.
+	InternalPreservationLabelValue = "cluster-instance-required-resource"
+
+	// PreservationModeInternal is a special preservation mode (for internal use only)
+	// that indicates resources essential for ClusterInstance operations will be preserved.
+	PreservationModeInternal v1alpha1.PreservationMode = "Internal"
+)
+
+const (
 	// preservedDataLabelKey marks resources (ConfigMaps and Secrets) backed up by SiteConfig for restoration.
 	// It enables identification of preserved resources during a restore operation.
 	preservedDataLabelKey = v1alpha1.Group + "/preserved-data"
 
-	// restoredAtAnnotationKey indicates when a resource was restored.
-	restoredAtAnnotationKey = v1alpha1.PreservationLabelKey + ".restoredAt"
+	// preservedInternalDataLabelKey marks internal resources (ConfigMaps and Secrets) backed up by SiteConfig for
+	// restoration.
+	// It enables identification of internally preserved ClusterInstance resources during a restore operation.
+	preservedInternalDataLabelKey = v1alpha1.Group + "/preserved-internal-data"
+
+	// ClusterIdentityDataAnnotationKey stores cluster identity data for preserved resources.
+	ClusterIdentityDataAnnotationKey = preservedDataLabelKey + ".cluster-identity"
+
+	// RestoredAtAnnotationKey indicates when a resource was restored.
+	RestoredAtAnnotationKey = v1alpha1.PreservationLabelKey + ".restored-at"
 
 	// reinstallGenerationAnnotationKey indicates the generation of resources requiring reinstallation.
-	reinstallGenerationAnnotationKey = v1alpha1.Group + "/reinstall.generation"
+	reinstallGenerationAnnotationKey = v1alpha1.Group + "/reinstall-generation"
 
 	// resourceTypeAnnotationKey specifies the resource type (ConfigMap/Secret) being backed up.
-	resourceTypeAnnotationKey = v1alpha1.Group + "/preservedResourceType"
+	resourceTypeAnnotationKey = v1alpha1.PreservationLabelKey + ".resource-type"
 
 	// preservedDataKey is the key used to store the original ConfigMap/Secret data in the Data field of the
 	// corresponding preserved ConfigMap / Secret during backup.
@@ -92,12 +115,11 @@ func buildLabelSelector(labelKey string, operator selection.Operator, values []s
 
 // buildBackupLabelSelector constructs a label selector for backup operations based on the PreservationMode.
 func buildBackupLabelSelector(mode v1alpha1.PreservationMode) (labels.Selector, error) {
-	if mode == v1alpha1.PreservationModeNone {
-		// No preservation required.
-		return nil, nil
-	}
 
 	switch mode {
+	case v1alpha1.PreservationModeNone:
+		// No preservation required.
+		return nil, nil
 	case v1alpha1.PreservationModeAll:
 		// Select all resources with the PreservationLabelKey.
 		return buildLabelSelector(v1alpha1.PreservationLabelKey, selection.Exists, nil)
@@ -105,6 +127,10 @@ func buildBackupLabelSelector(mode v1alpha1.PreservationMode) (labels.Selector, 
 		// Select resources with PreservationLabelKey set to ClusterIdentityLabelValue.
 		return buildLabelSelector(v1alpha1.PreservationLabelKey, selection.Equals,
 			[]string{v1alpha1.ClusterIdentityLabelValue})
+		// Select resources labeled with InternalPreservationLabelKey set to InternalPreservationLabelValue
+	case PreservationModeInternal:
+		return buildLabelSelector(InternalPreservationLabelKey, selection.Equals,
+			[]string{InternalPreservationLabelValue})
 	}
 	// Handle unknown or unsupported PreservationMode.
 	return nil, fmt.Errorf("unknown PreservationMode for backup: %v", mode)
@@ -112,14 +138,16 @@ func buildBackupLabelSelector(mode v1alpha1.PreservationMode) (labels.Selector, 
 
 // buildRestoreLabelSelector constructs a label selector for restore operations based on the PreservationMode.
 func buildRestoreLabelSelector(mode v1alpha1.PreservationMode) (labels.Selector, error) {
-	if mode == v1alpha1.PreservationModeNone {
+	switch mode {
+	case v1alpha1.PreservationModeNone:
 		// No restoration required.
 		return nil, nil
-	}
-
-	// Use the preservedLabel for restoration (applies to both PreservationModeAll and PreservationModeClusterIdentity).
-	if mode == v1alpha1.PreservationModeAll || mode == v1alpha1.PreservationModeClusterIdentity {
+	case v1alpha1.PreservationModeAll, v1alpha1.PreservationModeClusterIdentity:
+		// Use the preservedLabel for restoration (applies to both PreservationModeAll and
+		// PreservationModeClusterIdentity).
 		return buildLabelSelector(preservedDataLabelKey, selection.Exists, nil)
+	case PreservationModeInternal:
+		return buildLabelSelector(preservedInternalDataLabelKey, selection.Exists, nil)
 	}
 
 	// Handle unknown or unsupported PreservationMode.
@@ -128,7 +156,7 @@ func buildRestoreLabelSelector(mode v1alpha1.PreservationMode) (labels.Selector,
 
 // generateBackupName returns a backup name by appending the resource type and reinstall generation to the base name.
 func generateBackupName(rType resourceType, name, generation string) string {
-	return fmt.Sprintf("%s-%s-%s", rType, name, generation)
+	return fmt.Sprintf("%s-%s-%s", strings.ToLower(string(rType)), name, generation)
 }
 
 // sanitizeResourceMetadata removes specific metadata fields from the given Kubernetes object.
@@ -137,6 +165,66 @@ func sanitizeResourceMetadata(obj client.Object) {
 	obj.SetOwnerReferences(nil)
 	obj.SetResourceVersion("")
 	obj.SetUID("")
+}
+
+func backupResources(
+	ctx context.Context, c client.Client, log *zap.Logger,
+	labelSelector labels.Selector,
+	namespace string,
+	baseConfig config,
+) error {
+
+	if baseConfig.preservationMode == v1alpha1.PreservationModeNone {
+		return nil
+	}
+
+	listOptions := &client.ListOptions{
+		Namespace:     namespace,
+		LabelSelector: labelSelector,
+	}
+
+	// Retrieve data for backup
+	data, err := resourcesForPreservation(ctx, c, log, listOptions)
+	if err != nil {
+		return err
+	}
+
+	var errs []error
+
+	backupFn := func(rType resourceType, resourceNames []string) {
+		for _, name := range resourceNames {
+			preservedName := generateBackupName(rType, name, baseConfig.reinstallGeneration)
+			config := config{
+				resourceKey:         types.NamespacedName{Namespace: namespace, Name: name},
+				resourceType:        rType,
+				ownerRef:            baseConfig.ownerRef,
+				reinstallGeneration: baseConfig.reinstallGeneration,
+				preservationMode:    baseConfig.preservationMode,
+			}
+
+			if err := backupResource(ctx, c, log, preservedName, config); err != nil {
+				log.Error("Failed to backup resource",
+					zap.String("kind", string(rType)),
+					zap.String("namespace", namespace),
+					zap.String("name", name),
+					zap.Error(err))
+				errs = append(errs, err)
+			} else {
+				log.Debug("Successfully backed-up resource",
+					zap.String("kind", string(rType)),
+					zap.String("namespace", namespace),
+					zap.String("name", name))
+			}
+		}
+	}
+
+	// Backup each ConfigMap.
+	backupFn(configMapResourceType, data.configMaps)
+
+	// Backup each Secret.
+	backupFn(secretResourceType, data.secrets)
+
+	return utilerrors.NewAggregate(errs)
 }
 
 // backupResource backs up a Kubernetes resource (ConfigMap or Secret) by preserving its metadata and data.
@@ -195,6 +283,11 @@ func backupResource(
 		Namespace: config.resourceKey.Namespace,
 	}
 
+	// Annotate the preserved resource if it is cluster-identity data
+	if resource.GetLabels()[v1alpha1.PreservationLabelKey] == v1alpha1.ClusterIdentityLabelValue {
+		metav1.SetMetaDataAnnotation(&objectMeta, ClusterIdentityDataAnnotationKey, "")
+	}
+
 	preservedResource := &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Secret",
@@ -223,7 +316,6 @@ func createResource(ctx context.Context, c client.Client, object client.Object, 
 	if labels == nil {
 		labels = make(map[string]string)
 	}
-	labels[preservedDataLabelKey] = metav1.Now().Format(time.RFC3339)
 
 	if config.ownerRef != "" {
 		labels[ci.OwnedByLabel] = config.ownerRef
@@ -234,12 +326,22 @@ func createResource(ctx context.Context, c client.Client, object client.Object, 
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
-	annotations[v1alpha1.PreservationLabelKey] = string(config.preservationMode)
+
 	annotations[resourceTypeAnnotationKey] = string(config.resourceType)
 
 	if config.reinstallGeneration != "" {
 		annotations[reinstallGenerationAnnotationKey] = config.reinstallGeneration
 	}
+
+	// Set additional label and annotation for retrieving and identifying backed-up resources.
+	preservedDataLabel := preservedDataLabelKey
+	additionalAnnotation := v1alpha1.PreservationLabelKey
+	if config.preservationMode == PreservationModeInternal {
+		preservedDataLabel = preservedInternalDataLabelKey
+		additionalAnnotation = InternalPreservationLabelKey
+	}
+	labels[preservedDataLabel] = fmt.Sprint(metav1.Now().Unix())
+	annotations[additionalAnnotation] = string(config.preservationMode)
 
 	object.SetLabels(labels)
 	object.SetAnnotations(annotations)
@@ -274,29 +376,31 @@ func fetchAndValidateObjectToRestore(
 	)
 
 	// Check preservation mode.
-	preservationMode, hasAnnotation := object.GetAnnotations()[v1alpha1.PreservationLabelKey]
-	if !hasAnnotation && config.preservationMode != v1alpha1.PreservationModeNone {
-		log.Warn("Missing preservation mode annotation", zap.String("annotation", v1alpha1.PreservationLabelKey))
-		return true, fmt.Errorf("preserved resource (%s/%s) is missing the '%s' annotation",
-			config.resourceKey.Namespace, config.resourceKey.Name, v1alpha1.PreservationLabelKey)
-	}
+	if !isInternalResource(object) {
+		preservationMode, hasAnnotation := object.GetAnnotations()[v1alpha1.PreservationLabelKey]
+		if !hasAnnotation && config.preservationMode != v1alpha1.PreservationModeNone {
+			log.Warn("Missing preservation mode annotation", zap.String("annotation", v1alpha1.PreservationLabelKey))
+			return true, fmt.Errorf("preserved resource (%s/%s) is missing the '%s' annotation",
+				config.resourceKey.Namespace, config.resourceKey.Name, v1alpha1.PreservationLabelKey)
+		}
 
-	if hasAnnotation && config.preservationMode == v1alpha1.PreservationModeNone {
-		log.Warn("Preservation mode mismatch",
-			zap.String("annotation", v1alpha1.PreservationLabelKey),
-			zap.String("expected", string(v1alpha1.PreservationModeNone)),
-		)
-		return true, nil // Skip restore as preservation mode is None.
-	}
+		if hasAnnotation && config.preservationMode == v1alpha1.PreservationModeNone {
+			log.Warn("Preservation mode mismatch",
+				zap.String("annotation", v1alpha1.PreservationLabelKey),
+				zap.String("expected", string(v1alpha1.PreservationModeNone)),
+			)
+			return true, nil // Skip restore as preservation mode is None.
+		}
 
-	// Strict check for ClusterIdentity preservation mode.
-	if config.preservationMode == v1alpha1.PreservationModeClusterIdentity &&
-		preservationMode != string(config.preservationMode) {
-		log.Warn("Cluster identity preservation mode mismatch",
-			zap.String("expected", string(config.preservationMode)),
-			zap.String("found", preservationMode),
-		)
-		return true, nil // Skip restore due to mismatched preservation mode.
+		// Strict check for ClusterIdentity preservation mode.
+		if config.preservationMode == v1alpha1.PreservationModeClusterIdentity &&
+			preservationMode != string(config.preservationMode) {
+			log.Warn("Cluster identity preservation mode mismatch",
+				zap.String("expected", string(config.preservationMode)),
+				zap.String("found", preservationMode),
+			)
+			return true, nil // Skip restore due to mismatched preservation mode.
+		}
 	}
 
 	// Verify ownership if specified.
@@ -315,7 +419,8 @@ func fetchAndValidateObjectToRestore(
 	if config.reinstallGeneration != "" {
 		value, ok := object.GetAnnotations()[reinstallGenerationAnnotationKey]
 		if !ok {
-			log.Warn("Missing reinstall generation annotation", zap.String("annotation", reinstallGenerationAnnotationKey))
+			log.Warn("Missing reinstall generation annotation",
+				zap.String("annotation", reinstallGenerationAnnotationKey))
 			return true, fmt.Errorf("preserved resource (%s/%s) is missing the '%s' annotation",
 				config.resourceKey.Namespace, config.resourceKey.Name, reinstallGenerationAnnotationKey)
 		}
@@ -419,7 +524,7 @@ func restoreResource(ctx context.Context, c client.Client, log *zap.Logger, conf
 		if originalAnnotations == nil {
 			originalAnnotations = make(map[string]string)
 		}
-		originalAnnotations[restoredAtAnnotationKey] = metav1.Now().Format(time.RFC3339)
+		originalAnnotations[RestoredAtAnnotationKey] = metav1.Now().Format(time.RFC3339)
 
 		// Set the restored annotations and labels
 		restoredResource.SetAnnotations(originalAnnotations)
@@ -449,6 +554,56 @@ func restoreResource(ctx context.Context, c client.Client, log *zap.Logger, conf
 	return nil
 }
 
+func restoreResources(
+	ctx context.Context, c client.Client, log *zap.Logger,
+	labelSelector labels.Selector,
+	namespace string,
+	baseConfig config,
+) error {
+	listOptions := &client.ListOptions{
+		Namespace:     namespace,
+		LabelSelector: labelSelector,
+	}
+
+	// Retrieve data for restoration
+	data, err := resourcesForPreservation(ctx, c, log, listOptions)
+	if err != nil {
+		return err
+	}
+
+	var errs []error
+
+	restoreFn := func(resourceNames []string) {
+		for _, name := range resourceNames {
+			config := config{
+				resourceKey:         types.NamespacedName{Namespace: namespace, Name: name},
+				ownerRef:            baseConfig.ownerRef,
+				reinstallGeneration: baseConfig.reinstallGeneration,
+				preservationMode:    baseConfig.preservationMode,
+			}
+			if err := restoreResource(ctx, c, log, config); err != nil {
+				log.Error("Failed to restore resource",
+					zap.String("namespace", namespace),
+					zap.String("name", name),
+					zap.Error(err))
+				errs = append(errs, err)
+			} else {
+				log.Debug("Successfully restored resource",
+					zap.String("namespace", namespace),
+					zap.String("name", name))
+			}
+		}
+	}
+
+	// Restore ConfigMaps.
+	restoreFn(data.configMaps)
+
+	// Restore Secrets.
+	restoreFn(data.secrets)
+
+	return utilerrors.NewAggregate(errs)
+}
+
 // resourcesForPreservation fetches the names of ConfigMaps and Secrets based on the provided ListOptions.
 // Logs the count of retrieved resources and aggregates errors if any occur during the listing process.
 func resourcesForPreservation(
@@ -475,7 +630,7 @@ func resourcesForPreservation(
 
 	// Aggregate and return any errors encountered during the listing process.
 	if len(errs) > 0 {
-		return nil, errors.NewAggregate(errs)
+		return nil, utilerrors.NewAggregate(errs)
 	}
 
 	// Collect the names of the retrieved ConfigMaps and Secrets.
@@ -493,4 +648,18 @@ func resourcesForPreservation(
 		configMaps: configMaps,
 		secrets:    secrets,
 	}, nil
+}
+
+func isInternalResource(obj client.Object) bool {
+	labels := obj.GetLabels()
+
+	if label := labels[InternalPreservationLabelKey]; label == InternalPreservationLabelValue {
+		return true
+	}
+
+	if label := labels[preservedInternalDataLabelKey]; label != "" {
+		return true
+	}
+
+	return false
 }
