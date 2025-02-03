@@ -650,6 +650,104 @@ func resourcesForPreservation(
 	}, nil
 }
 
+// resourceCategory represents the classification of preserved or restored resources.
+type resourceCategory string
+
+const (
+	resourceCategoryUnknown         resourceCategory = "unknown"
+	resourceCategoryClusterIdentity resourceCategory = "cluster-identity"
+	resourceCategoryOther           resourceCategory = "other"
+)
+
+func countMatchingResources(
+	ctx context.Context,
+	c client.Client,
+	namespace string,
+	labelSelector labels.Selector,
+	checkRestored bool,
+) (clusterIDCount, otherCount int, err error) {
+
+	listOptions := &client.ListOptions{
+		Namespace:     namespace,
+		LabelSelector: labelSelector,
+	}
+
+	var (
+		secretList    corev1.SecretList
+		configMapList corev1.ConfigMapList
+		errs          []error
+	)
+
+	classifyResourceFn := classifyPreservedResource
+	if checkRestored {
+		classifyResourceFn = classifyRestoredResource
+	}
+
+	// Fetch and count Secrets
+	if err := c.List(ctx, &secretList, listOptions); err != nil {
+		errs = append(errs, fmt.Errorf("failed to list Secrets: %w", err))
+	} else {
+		for i := range secretList.Items {
+			switch classifyResourceFn(&secretList.Items[i]) {
+			case resourceCategoryClusterIdentity:
+				clusterIDCount++
+			case resourceCategoryOther:
+				otherCount++
+			}
+		}
+	}
+
+	// Fetch and count ConfigMaps
+	if err := c.List(ctx, &configMapList, listOptions); err != nil {
+		errs = append(errs, fmt.Errorf("failed to list ConfigMaps: %w", err))
+	} else {
+		for i := range configMapList.Items {
+			switch classifyResourceFn(&configMapList.Items[i]) {
+			case resourceCategoryClusterIdentity:
+				clusterIDCount++
+			case resourceCategoryOther:
+				otherCount++
+			}
+		}
+	}
+
+	return clusterIDCount, otherCount, utilerrors.NewAggregate(errs)
+}
+
+// classifyPreservedResource determines if a resource is a cluster-identity or other preserved resource.
+func classifyPreservedResource(obj client.Object) resourceCategory {
+	annotations := obj.GetAnnotations()
+
+	if isInternalResource(obj) {
+		return resourceCategoryUnknown
+	}
+
+	switch annotations[v1alpha1.PreservationLabelKey] {
+	case string(v1alpha1.PreservationModeClusterIdentity):
+		return resourceCategoryClusterIdentity
+	case string(v1alpha1.PreservationModeAll):
+		return resourceCategoryOther
+	}
+
+	return resourceCategoryUnknown
+}
+
+// classifyRestoredResource determines if a resource is a cluster-identity or other restored resource.
+func classifyRestoredResource(obj client.Object) resourceCategory {
+	labels := obj.GetLabels()
+	annotations := obj.GetAnnotations()
+
+	if isInternalResource(obj) || annotations[RestoredAtAnnotationKey] == "" {
+		return resourceCategoryUnknown
+	}
+
+	if labels[v1alpha1.PreservationLabelKey] == string(v1alpha1.ClusterIdentityLabelValue) {
+		return resourceCategoryClusterIdentity
+	}
+
+	return resourceCategoryOther
+}
+
 func isInternalResource(obj client.Object) bool {
 	labels := obj.GetLabels()
 

@@ -776,3 +776,205 @@ var _ = Describe("Backup Restore Functionality", func() {
 	})
 
 })
+
+var _ = Describe("classifyPreservedResource", func() {
+	namespace := testNamespace1
+
+	It("should classify a preserved cluster-identity resource correctly", func() {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "preserved-cluster-identity",
+				Namespace: namespace,
+				Annotations: map[string]string{
+					v1alpha1.PreservationLabelKey: string(v1alpha1.PreservationModeClusterIdentity),
+				},
+			},
+		}
+		Expect(classifyPreservedResource(secret)).To(Equal(resourceCategoryClusterIdentity))
+	})
+
+	It("should classify a preserved non-cluster-identity resource correctly", func() {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "preserved-other",
+				Namespace: namespace,
+				Annotations: map[string]string{
+					v1alpha1.PreservationLabelKey: string(v1alpha1.PreservationModeAll),
+				},
+			},
+		}
+		Expect(classifyPreservedResource(secret)).To(Equal(resourceCategoryOther))
+	})
+
+	It("should classify an internal resource as unknown", func() {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "internal-resource",
+				Namespace: namespace,
+			},
+		}
+		Expect(classifyPreservedResource(secret)).To(Equal(resourceCategoryUnknown))
+	})
+})
+
+var _ = Describe("classifyRestoredResource", func() {
+	namespace := testNamespace1
+
+	It("should classify a restored cluster-identity resource correctly", func() {
+		configMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "restored-cluster-identity",
+				Namespace: namespace,
+				Labels: map[string]string{
+					v1alpha1.PreservationLabelKey: string(v1alpha1.ClusterIdentityLabelValue),
+				},
+				Annotations: map[string]string{
+					RestoredAtAnnotationKey: "some-timestamp",
+				},
+			},
+		}
+		Expect(classifyRestoredResource(configMap)).To(Equal(resourceCategoryClusterIdentity))
+	})
+
+	It("should classify a restored non-cluster-identity resource correctly", func() {
+		configMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "restored-other",
+				Namespace: namespace,
+				Labels: map[string]string{
+					v1alpha1.PreservationLabelKey: string(v1alpha1.PreservationModeAll),
+				},
+				Annotations: map[string]string{
+					RestoredAtAnnotationKey: "some-timestamp",
+				},
+			},
+		}
+		Expect(classifyRestoredResource(configMap)).To(Equal(resourceCategoryOther))
+	})
+
+	It("should classify an internal resource or non-restored resource as unknown", func() {
+		configMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "non-restored-resource",
+				Namespace: namespace,
+			},
+		}
+		Expect(classifyRestoredResource(configMap)).To(Equal(resourceCategoryUnknown))
+	})
+})
+
+var _ = Describe("countMatchingResources", func() {
+
+	var (
+		ctx           context.Context
+		c             client.Client
+		namespace     = testNamespace1
+		labelSelector labels.Selector
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		c = fakeclient.
+			NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			Build()
+		labelSelector = labels.Everything() // Matches all resources
+	})
+
+	It("should count preserved resources correctly", func() {
+		secret1 := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "preserved-cluster-id",
+				Namespace: namespace,
+				Annotations: map[string]string{
+					v1alpha1.PreservationLabelKey: string(v1alpha1.PreservationModeClusterIdentity),
+				},
+			},
+		}
+
+		secret2 := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "preserved-other",
+				Namespace: namespace,
+				Annotations: map[string]string{
+					v1alpha1.PreservationLabelKey: string(v1alpha1.PreservationModeAll),
+				},
+			},
+		}
+
+		c = fakeclient.
+			NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithObjects(secret1, secret2).
+			Build()
+
+		clusterIDCount, otherCount, err := countMatchingResources(ctx, c, namespace, labelSelector, false)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(clusterIDCount).To(Equal(1))
+		Expect(otherCount).To(Equal(1))
+	})
+
+	It("should count restored resources correctly", func() {
+		secret1 := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "restored-cluster-id",
+				Namespace: namespace,
+				Labels: map[string]string{
+					v1alpha1.PreservationLabelKey: string(v1alpha1.ClusterIdentityLabelValue),
+				},
+				Annotations: map[string]string{
+					RestoredAtAnnotationKey: "some-timestamp",
+				},
+			},
+		}
+
+		configMap1 := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "restored-cluster-id",
+				Namespace: namespace,
+				Labels: map[string]string{
+					v1alpha1.PreservationLabelKey: string(v1alpha1.ClusterIdentityLabelValue),
+				},
+				Annotations: map[string]string{
+					RestoredAtAnnotationKey: "some-timestamp",
+				},
+			},
+		}
+
+		configMap2 := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "restored-other",
+				Namespace: namespace,
+				Labels: map[string]string{
+					v1alpha1.PreservationLabelKey: string(v1alpha1.PreservationModeAll),
+				},
+				Annotations: map[string]string{
+					RestoredAtAnnotationKey: "some-timestamp",
+				},
+			},
+		}
+
+		c = fakeclient.
+			NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithObjects(secret1, configMap1, configMap2).
+			Build()
+
+		clusterIDCount, otherCount, err := countMatchingResources(ctx, c, namespace, labelSelector, true)
+		Expect(err).To(BeNil())
+		Expect(clusterIDCount).To(Equal(2))
+		Expect(otherCount).To(Equal(1))
+	})
+
+	It("should return zero counts if no matching resources exist", func() {
+		c = fakeclient.
+			NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			Build()
+
+		clusterIDCount, otherCount, err := countMatchingResources(ctx, c, namespace, labelSelector, false)
+		Expect(err).To(BeNil())
+		Expect(clusterIDCount).To(Equal(0))
+		Expect(otherCount).To(Equal(0))
+	})
+})
