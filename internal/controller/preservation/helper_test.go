@@ -49,71 +49,93 @@ func ensureEquality(actual, expected client.Object) {
 }
 
 var _ = Describe("Test LabelSelector builders", func() {
-	commonTests := func(labelSelectorBuilderFn func(v1alpha1.PreservationMode) (labels.Selector, error),
-		validPreservationLabelKey string,
-		expectedLabelValues []string) {
 
-		Context("preservationMode is valid", func() {
-
-			verifyLabelSelectorFn := func(mode v1alpha1.PreservationMode, expectedOutcome OmegaMatcher) {
-				lSelector, err := labelSelectorBuilderFn(mode)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(lSelector).To(expectedOutcome)
-			}
-
-			It("does not error and returns a nil label.selector when preservationMode is None", func() {
-				verifyLabelSelectorFn(v1alpha1.PreservationModeNone, BeNil())
-			})
-
-			It("returns a label.selector for retrieving all preservation resources when preservationMode is All", func() {
-				expected, err := labels.NewRequirement(validPreservationLabelKey, selection.Exists, nil)
-				Expect(err).NotTo(HaveOccurred())
-
-				verifyLabelSelectorFn(v1alpha1.PreservationModeAll, Equal(labels.NewSelector().Add(*expected)))
-			})
-
-			It("returns a label.selector for retrieving cluster identity preservation resources when preservationMode is ClusterIdentity", func() {
-				var (
-					expected *labels.Requirement
-					err      error
-				)
-				if expectedLabelValues == nil {
-					expected, err = labels.NewRequirement(validPreservationLabelKey, selection.Exists, nil)
-				} else {
-					expected, err = labels.NewRequirement(validPreservationLabelKey, selection.Equals, expectedLabelValues)
-				}
-
-				Expect(err).NotTo(HaveOccurred())
-				verifyLabelSelectorFn(v1alpha1.PreservationModeClusterIdentity, Equal(labels.NewSelector().Add(*expected)))
-			})
-
-		})
-
-		Context("preservationMode is invalid", func() {
-			It("errors and returns a nil label.selector", func() {
-				var mode v1alpha1.PreservationMode = "foobar"
-				lSelector, err := labelSelectorBuilderFn(mode)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("unknown PreservationMode"))
-				Expect(lSelector).To(BeNil())
-			})
-		})
+	verifyLabelSelectorFn := func(mode v1alpha1.PreservationMode,
+		labelSelectorBuilderFn func(v1alpha1.PreservationMode) (labels.Selector, error),
+		expectedOutcome OmegaMatcher) {
+		lSelector, err := labelSelectorBuilderFn(mode)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(lSelector).To(expectedOutcome)
 	}
 
 	Describe("buildBackupLabelSelector", func() {
-		commonTests(buildBackupLabelSelector, v1alpha1.PreservationLabelKey, []string{v1alpha1.ClusterIdentityLabelValue})
+
+		labelSelectorBuilderFn := buildBackupLabelSelector
+
+		It("errors and returns a nil label.selector for unknown preservationMode", func() {
+			var mode v1alpha1.PreservationMode = "foobar"
+			lSelector, err := buildBackupLabelSelector(mode)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("unknown PreservationMode"))
+			Expect(lSelector).To(BeNil())
+		})
+
+		It("returns a nil label.selector when preservationMode is None", func() {
+			verifyLabelSelectorFn(v1alpha1.PreservationModeNone, labelSelectorBuilderFn, BeNil())
+		})
+
+		It("returns a label.selector for retrieving all preservation resources when preservationMode is All", func() {
+			expected, err := labels.NewRequirement(v1alpha1.PreservationLabelKey, selection.Exists, nil)
+			Expect(err).NotTo(HaveOccurred())
+			verifyLabelSelectorFn(v1alpha1.PreservationModeAll, labelSelectorBuilderFn, Equal(labels.NewSelector().Add(*expected)))
+		})
+
+		It("returns a label.selector for retrieving all preservation resources when preservationMode is ClusterIdentity", func() {
+			expected, err := labels.NewRequirement(v1alpha1.PreservationLabelKey, selection.Equals, []string{v1alpha1.ClusterIdentityLabelValue})
+			Expect(err).NotTo(HaveOccurred())
+			verifyLabelSelectorFn(v1alpha1.PreservationModeClusterIdentity, labelSelectorBuilderFn, Equal(labels.NewSelector().Add(*expected)))
+		})
+
+		It("returns a label.selector for retrieving all preservation resources when preservationMode is Internal", func() {
+			expected, err := labels.NewRequirement(InternalPreservationLabelKey, selection.Equals, []string{InternalPreservationLabelValue})
+			Expect(err).NotTo(HaveOccurred())
+			verifyLabelSelectorFn(PreservationModeInternal, labelSelectorBuilderFn, Equal(labels.NewSelector().Add(*expected)))
+		})
+
 	})
 
 	Describe("buildRestoreLabelSelector", func() {
-		commonTests(buildRestoreLabelSelector, preservedDataLabelKey, nil)
+
+		labelSelectorBuilderFn := buildRestoreLabelSelector
+
+		It("errors and returns a nil label.selector for unknown preservationMode", func() {
+			var mode v1alpha1.PreservationMode = "foobar"
+			lSelector, err := buildBackupLabelSelector(mode)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("unknown PreservationMode"))
+			Expect(lSelector).To(BeNil())
+		})
+
+		It("returns a nil label.selector when preservationMode is None", func() {
+			verifyLabelSelectorFn(v1alpha1.PreservationModeNone, labelSelectorBuilderFn, BeNil())
+		})
+
+		It("returns a label.selector for retrieving all preservation resources when preservationMode is All", func() {
+			expected, err := labels.NewRequirement(preservedDataLabelKey, selection.Exists, nil)
+			Expect(err).NotTo(HaveOccurred())
+			verifyLabelSelectorFn(v1alpha1.PreservationModeAll, labelSelectorBuilderFn, Equal(labels.NewSelector().Add(*expected)))
+		})
+
+		It("returns a label.selector for retrieving all preservation resources when preservationMode is ClusterIdentity", func() {
+			expected, err := labels.NewRequirement(preservedDataLabelKey, selection.Exists, nil)
+			Expect(err).NotTo(HaveOccurred())
+			verifyLabelSelectorFn(v1alpha1.PreservationModeClusterIdentity, labelSelectorBuilderFn, Equal(labels.NewSelector().Add(*expected)))
+		})
+
+		It("returns a label.selector for retrieving all preservation resources when preservationMode is Internal", func() {
+			expected, err := labels.NewRequirement(preservedInternalDataLabelKey, selection.Exists, nil)
+			Expect(err).NotTo(HaveOccurred())
+			verifyLabelSelectorFn(PreservationModeInternal, labelSelectorBuilderFn, Equal(labels.NewSelector().Add(*expected)))
+		})
+
 	})
 
 })
 
 var _ = Describe("generateName", func() {
 	It("should generate a name by appending the resourceType and generation to the base name", func() {
-		Expect(generateBackupName(configMapResourceType, "foobar", "12345")).To(Equal("ConfigMap-foobar-12345"))
-		Expect(generateBackupName(secretResourceType, "foobar", "12345")).To(Equal("Secret-foobar-12345"))
+		Expect(generateBackupName(configMapResourceType, "foobar", "12345")).To(Equal("configmap-foobar-12345"))
+		Expect(generateBackupName(secretResourceType, "foobar", "12345")).To(Equal("secret-foobar-12345"))
 	})
 })
 
@@ -476,7 +498,7 @@ var _ = Describe("Backup Restore Functionality", func() {
 		originalName        = "original-resource"
 		ownerRef            = "foobar"
 		reinstallGeneration = testReinstallGeneration
-		mode                = v1alpha1.PreservationModeAll
+		mode                = v1alpha1.PreservationModeClusterIdentity
 
 		nonExistentKey = types.NamespacedName{Namespace: namespace, Name: "non-existent"}
 
@@ -611,8 +633,8 @@ var _ = Describe("Backup Restore Functionality", func() {
 				restoredConfigMap := &corev1.ConfigMap{}
 				err = c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: originalName}, restoredConfigMap)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(restoredConfigMap.Annotations).To(HaveKey(restoredAtAnnotationKey))
-				delete(restoredConfigMap.Annotations, restoredAtAnnotationKey)
+				Expect(restoredConfigMap.Annotations).To(HaveKey(RestoredAtAnnotationKey))
+				delete(restoredConfigMap.Annotations, RestoredAtAnnotationKey)
 				ensureEquality(restoredConfigMap, originalConfigMap)
 			})
 
@@ -646,8 +668,8 @@ var _ = Describe("Backup Restore Functionality", func() {
 				actual := &corev1.ConfigMap{}
 				err = c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: originalName}, actual)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(actual.Annotations).To(HaveKey(restoredAtAnnotationKey))
-				delete(actual.Annotations, restoredAtAnnotationKey)
+				Expect(actual.Annotations).To(HaveKey(RestoredAtAnnotationKey))
+				delete(actual.Annotations, RestoredAtAnnotationKey)
 				ensureEquality(actual, originalConfigMap)
 			})
 
@@ -690,8 +712,8 @@ var _ = Describe("Backup Restore Functionality", func() {
 				restoredSecret := &corev1.Secret{}
 				err = c.Get(ctx, client.ObjectKeyFromObject(originalSecret), restoredSecret)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(restoredSecret.Annotations).To(HaveKey(restoredAtAnnotationKey))
-				delete(restoredSecret.Annotations, restoredAtAnnotationKey)
+				Expect(restoredSecret.Annotations).To(HaveKey(RestoredAtAnnotationKey))
+				delete(restoredSecret.Annotations, RestoredAtAnnotationKey)
 				ensureEquality(restoredSecret, originalSecret)
 			})
 
@@ -725,8 +747,8 @@ var _ = Describe("Backup Restore Functionality", func() {
 				actual := &corev1.Secret{}
 				err = c.Get(ctx, client.ObjectKeyFromObject(originalSecret), actual)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(actual.Annotations).To(HaveKey(restoredAtAnnotationKey))
-				delete(actual.Annotations, restoredAtAnnotationKey)
+				Expect(actual.Annotations).To(HaveKey(RestoredAtAnnotationKey))
+				delete(actual.Annotations, RestoredAtAnnotationKey)
 				ensureEquality(actual, originalSecret)
 			})
 

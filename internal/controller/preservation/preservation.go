@@ -22,8 +22,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/errors"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
@@ -39,71 +38,42 @@ func Backup(
 	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 ) (err error) {
-
 	log = log.Named("Backup")
 
-	namespace := clusterInstance.Namespace
-	ownerRef := ci.GenerateOwnedByLabelValue(namespace, clusterInstance.Name)
-	reinstallGeneration := clusterInstance.Spec.Reinstall.Generation
-	mode := clusterInstance.Spec.Reinstall.PreservationMode
-
-	// Define the label selector for filtering ConfigMaps and Secrets.
-	labelSelector, err := buildBackupLabelSelector(mode)
-	if err != nil {
-		return err
-	}
-	if labelSelector == nil {
-		log.Info("Nothing to backup")
+	if clusterInstance.Spec.Reinstall.PreservationMode == v1alpha1.PreservationModeNone {
+		log.Info("Skipping backup since PreservationMode is None")
 		return nil
 	}
 
-	listOptions := &client.ListOptions{
-		Namespace:     namespace,
-		LabelSelector: labelSelector,
+	namespace := clusterInstance.Namespace
+	modes := []v1alpha1.PreservationMode{
+		clusterInstance.Spec.Reinstall.PreservationMode,
+		PreservationModeInternal,
 	}
 
-	// Retrieve data for backup
-	data, err := resourcesForPreservation(ctx, c, log, listOptions)
-	if err != nil {
-		return err
-	}
+	for _, mode := range modes {
 
-	var errs []error
+		// Define the label selector for filtering ConfigMaps and Secrets.
+		labelSelector, err := buildBackupLabelSelector(mode)
+		if err != nil {
+			return err
+		}
+		if labelSelector == nil {
+			continue
+		}
 
-	backupFn := func(rType resourceType, resourceNames []string) {
-		for _, name := range resourceNames {
-			preservedName := generateBackupName(rType, name, reinstallGeneration)
-			config := config{
-				resourceKey:         types.NamespacedName{Namespace: namespace, Name: name},
-				resourceType:        rType,
-				ownerRef:            ownerRef,
-				reinstallGeneration: reinstallGeneration,
-				preservationMode:    mode,
-			}
+		baseConfig := config{
+			ownerRef:            ci.GenerateOwnedByLabelValue(namespace, clusterInstance.Name),
+			reinstallGeneration: clusterInstance.Spec.Reinstall.Generation,
+			preservationMode:    mode,
+		}
 
-			if err := backupResource(ctx, c, log, preservedName, config); err != nil {
-				log.Error("Failed to backup resource",
-					zap.String("kind", string(rType)),
-					zap.String("namespace", namespace),
-					zap.String("name", name),
-					zap.Error(err))
-				errs = append(errs, err)
-			} else {
-				log.Debug("Successfully backed-up resource",
-					zap.String("kind", string(rType)),
-					zap.String("namespace", namespace),
-					zap.String("name", name))
-			}
+		if err := backupResources(ctx, c, log, labelSelector, namespace, baseConfig); err != nil {
+			return err
 		}
 	}
 
-	// Backup each ConfigMap.
-	backupFn(configMapResourceType, data.configMaps)
-
-	// Backup each Secret.
-	backupFn(secretResourceType, data.secrets)
-
-	return errors.NewAggregate(errs)
+	return nil
 }
 
 // Restore restores ConfigMaps and Secrets from preserved data.
@@ -117,63 +87,39 @@ func Restore(
 
 	log = log.Named("Restore")
 
-	namespace := clusterInstance.Namespace
-	ownerRef := ci.GenerateOwnedByLabelValue(namespace, clusterInstance.Name)
-	reinstallGeneration := clusterInstance.Spec.Reinstall.Generation
-	mode := clusterInstance.Spec.Reinstall.PreservationMode
-
-	// Define the label selector for filtering ConfigMaps and Secrets.
-	labelSelector, err := buildRestoreLabelSelector(mode)
-	if err != nil {
-		return err
-	}
-	if labelSelector == nil {
-		log.Info("Nothing to restore")
+	if clusterInstance.Spec.Reinstall.PreservationMode == v1alpha1.PreservationModeNone {
+		log.Info("Skipping restore since PreservationMode is None")
 		return nil
 	}
 
-	listOptions := &client.ListOptions{
-		Namespace:     namespace,
-		LabelSelector: labelSelector,
+	namespace := clusterInstance.Namespace
+	modes := []v1alpha1.PreservationMode{
+		clusterInstance.Spec.Reinstall.PreservationMode,
+		PreservationModeInternal,
 	}
 
-	// Retrieve data for restoration
-	data, err := resourcesForPreservation(ctx, c, log, listOptions)
-	if err != nil {
-		return err
-	}
+	for _, mode := range modes {
 
-	var errs []error
+		// Define the label selector for filtering ConfigMaps and Secrets.
+		labelSelector, err := buildRestoreLabelSelector(mode)
+		if err != nil {
+			return err
+		}
+		if labelSelector == nil {
+			continue
+		}
 
-	restoreFn := func(resourceNames []string) {
-		for _, name := range resourceNames {
-			config := config{
-				resourceKey:         types.NamespacedName{Namespace: namespace, Name: name},
-				ownerRef:            ownerRef,
-				reinstallGeneration: reinstallGeneration,
-				preservationMode:    mode,
-			}
-			if err := restoreResource(ctx, c, log, config); err != nil {
-				log.Error("Failed to restore resource",
-					zap.String("namespace", namespace),
-					zap.String("name", name),
-					zap.Error(err))
-				errs = append(errs, err)
-			} else {
-				log.Debug("Successfully restored resource",
-					zap.String("namespace", namespace),
-					zap.String("name", name))
-			}
+		baseConfig := config{
+			ownerRef:            ci.GenerateOwnedByLabelValue(namespace, clusterInstance.Name),
+			reinstallGeneration: clusterInstance.Spec.Reinstall.Generation,
+			preservationMode:    mode,
+		}
+
+		if err := restoreResources(ctx, c, log, labelSelector, namespace, baseConfig); err != nil {
+			return err
 		}
 	}
-
-	// Restore ConfigMaps.
-	restoreFn(data.configMaps)
-
-	// Restore Secrets.
-	restoreFn(data.secrets)
-
-	return errors.NewAggregate(errs)
+	return nil
 }
 
 // Cleanup deletes preserved ConfigMaps and Secrets.
@@ -187,25 +133,36 @@ func Cleanup(
 ) (completedCleanup bool, err error) {
 	completedCleanup = true
 
-	// Define the label selector for filtering ConfigMaps and Secrets.
-	labelSelector, err := buildRestoreLabelSelector(clusterInstance.Spec.Reinstall.PreservationMode)
-	if err != nil {
-		return false, err
+	namespace := clusterInstance.Namespace
+	modes := []v1alpha1.PreservationMode{
+		clusterInstance.Spec.Reinstall.PreservationMode,
+		PreservationModeInternal,
 	}
 
-	if labelSelector == nil {
-		return true, nil
-	}
+	var data resources
+	for _, mode := range modes {
 
-	listOptions := &client.ListOptions{
-		Namespace:     clusterInstance.Namespace,
-		LabelSelector: labelSelector,
-	}
+		// Define the label selector for filtering ConfigMaps and Secrets.
+		labelSelector, err := buildRestoreLabelSelector(mode)
+		if err != nil {
+			return false, err
+		}
+		if labelSelector == nil {
+			continue
+		}
 
-	// Retrieve data for restoration
-	data, err := resourcesForPreservation(ctx, c, log, listOptions)
-	if err != nil {
-		return false, err
+		listOptions := &client.ListOptions{
+			Namespace:     namespace,
+			LabelSelector: labelSelector,
+		}
+
+		// Retrieve data for restoration
+		dataForMode, err := resourcesForPreservation(ctx, c, log, listOptions)
+		if err != nil {
+			return false, err
+		}
+		data.configMaps = append(data.configMaps, dataForMode.configMaps...)
+		data.secrets = append(data.secrets, dataForMode.secrets...)
 	}
 
 	deleteFn := func(rType resourceType, name string) error {
@@ -254,5 +211,5 @@ func Cleanup(
 		}
 	}
 
-	return completedCleanup, errors.NewAggregate(errs)
+	return completedCleanup, utilerrors.NewAggregate(errs)
 }

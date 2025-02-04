@@ -119,6 +119,8 @@ func generateConfigMap(name, namespace, ownerRef string, mode v1alpha1.Preservat
 		labels[v1alpha1.PreservationLabelKey] = ""
 	case v1alpha1.PreservationModeClusterIdentity:
 		labels[v1alpha1.PreservationLabelKey] = v1alpha1.ClusterIdentityLabelValue
+	case PreservationModeInternal:
+		labels[InternalPreservationLabelKey] = InternalPreservationLabelValue
 	}
 
 	// ConfigMaps for testing.
@@ -149,6 +151,19 @@ func generateConfigMap(name, namespace, ownerRef string, mode v1alpha1.Preservat
 		annotations[v1alpha1.PreservationLabelKey] = string(mode)
 	}
 
+	if mode == v1alpha1.PreservationModeClusterIdentity {
+		annotations[ClusterIdentityDataAnnotationKey] = ""
+	}
+
+	labels = map[string]string{
+		ci.OwnedByLabel: ownerRef,
+	}
+	if mode == PreservationModeInternal {
+		labels[preservedInternalDataLabelKey] = testTimestamp
+	} else {
+		labels[preservedDataLabelKey] = testTimestamp
+	}
+
 	preservedConfigMap := &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Secret",
@@ -158,10 +173,7 @@ func generateConfigMap(name, namespace, ownerRef string, mode v1alpha1.Preservat
 			Name:        generateBackupName(configMapResourceType, name, testReinstallGeneration),
 			Namespace:   namespace,
 			Annotations: annotations,
-			Labels: map[string]string{
-				ci.OwnedByLabel:       ownerRef,
-				preservedDataLabelKey: testTimestamp,
-			},
+			Labels:      labels,
 		},
 		Type:      corev1.SecretTypeOpaque,
 		Immutable: ptr.To(true),
@@ -181,6 +193,8 @@ func generateSecret(name, namespace, ownerRef string, mode v1alpha1.Preservation
 		labels[v1alpha1.PreservationLabelKey] = ""
 	case v1alpha1.PreservationModeClusterIdentity:
 		labels[v1alpha1.PreservationLabelKey] = v1alpha1.ClusterIdentityLabelValue
+	case PreservationModeInternal:
+		labels[InternalPreservationLabelKey] = InternalPreservationLabelValue
 	}
 
 	// ConfigMaps for testing.
@@ -212,6 +226,18 @@ func generateSecret(name, namespace, ownerRef string, mode v1alpha1.Preservation
 		annotations[v1alpha1.PreservationLabelKey] = string(mode)
 	}
 
+	if mode == v1alpha1.PreservationModeClusterIdentity {
+		annotations[ClusterIdentityDataAnnotationKey] = ""
+	}
+
+	labels = map[string]string{
+		ci.OwnedByLabel: ownerRef,
+	}
+	if mode == PreservationModeInternal {
+		labels[preservedInternalDataLabelKey] = testTimestamp
+	} else {
+		labels[preservedDataLabelKey] = testTimestamp
+	}
 	preservedSecret := &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Secret",
@@ -221,10 +247,7 @@ func generateSecret(name, namespace, ownerRef string, mode v1alpha1.Preservation
 			Name:        generateBackupName(secretResourceType, name, testReinstallGeneration),
 			Namespace:   namespace,
 			Annotations: annotations,
-			Labels: map[string]string{
-				ci.OwnedByLabel:       ownerRef,
-				preservedDataLabelKey: testTimestamp,
-			},
+			Labels:      labels,
 		},
 		Type:      corev1.SecretTypeOpaque,
 		Immutable: ptr.To(true),
@@ -252,6 +275,9 @@ var _ = Describe("Test Backup and Restore functionality", func() {
 		// Secret test data
 		originalSecret1, originalSecret2, originalSecret3, originalSecret4     *corev1.Secret
 		preservedSecret1, preservedSecret2, preservedSecret3, preservedSecret4 *corev1.Secret
+
+		originalPullSecret1, preservedPullSecret1 *corev1.Secret
+		originalPullSecret2, preservedPullSecret2 *corev1.Secret
 
 		// Collection of original ConfigMaps and Secrets
 		originalConfigMaps []*corev1.ConfigMap
@@ -282,11 +308,15 @@ var _ = Describe("Test Backup and Restore functionality", func() {
 		originalSecret3, preservedSecret3 = generateSecret("secret3", testNamespace2, ownerRef2, v1alpha1.PreservationModeClusterIdentity)
 		originalSecret4, preservedSecret4 = generateSecret("secret4", testNamespace1, ownerRef1, v1alpha1.PreservationModeClusterIdentity)
 
+		// ClusterInstance internal preservation data
+		originalPullSecret1, preservedPullSecret1 = generateSecret("pull-secret1", testNamespace1, ownerRef1, PreservationModeInternal)
+		originalPullSecret2, preservedPullSecret2 = generateSecret("pull-secret2", testNamespace2, ownerRef2, PreservationModeInternal)
+
 		// Collect ConfigMaps and Secrets
 		originalConfigMaps = append([]*corev1.ConfigMap(nil), originalCM1, originalCM2, originalCM3, originalCM4)
 		preservedConfigMaps = append([]*corev1.Secret(nil), preservedCM1, preservedCM2, preservedCM3, preservedCM4)
-		originalSecrets = append([]*corev1.Secret(nil), originalSecret1, originalSecret2, originalSecret3, originalSecret4)
-		preservedSecrets = append([]*corev1.Secret(nil), preservedSecret1, preservedSecret2, preservedSecret3, preservedSecret4)
+		originalSecrets = append([]*corev1.Secret(nil), originalSecret1, originalSecret2, originalSecret3, originalSecret4, originalPullSecret1, originalPullSecret2)
+		preservedSecrets = append([]*corev1.Secret(nil), preservedSecret1, preservedSecret2, preservedSecret3, preservedSecret4, preservedPullSecret1, preservedPullSecret2)
 	})
 
 	Describe("Backup", func() {
@@ -319,7 +349,7 @@ var _ = Describe("Test Backup and Restore functionality", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			expectedBackupCMs := []client.Object{preservedCM2, preservedCM4}
-			expectedBackupSecrets := []client.Object{preservedSecret2, preservedSecret4}
+			expectedBackupSecrets := []client.Object{preservedSecret2, preservedSecret4, preservedPullSecret1}
 			verifyBackupFunctionality(ctx, c, preservedConfigMaps, preservedSecrets, expectedBackupCMs, expectedBackupSecrets)
 		})
 
@@ -341,7 +371,7 @@ var _ = Describe("Test Backup and Restore functionality", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			expectedBackupCMs := []client.Object{preservedCM4}
-			expectedBackupSecrets := []client.Object{preservedSecret4}
+			expectedBackupSecrets := []client.Object{preservedSecret4, preservedPullSecret1}
 			verifyBackupFunctionality(ctx, c, preservedConfigMaps, preservedSecrets, expectedBackupCMs, expectedBackupSecrets)
 		})
 
@@ -399,7 +429,7 @@ var _ = Describe("Test Backup and Restore functionality", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			expectedRestoredCMs := []client.Object{originalCM1, originalCM3}
-			expectedRestoredSecrets := []client.Object{originalSecret1, originalSecret3}
+			expectedRestoredSecrets := []client.Object{originalSecret1, originalSecret3, originalPullSecret2}
 			verifyRestoreFunctionality(ctx, c, originalConfigMaps, originalSecrets, expectedRestoredCMs, expectedRestoredSecrets)
 		})
 
@@ -421,7 +451,7 @@ var _ = Describe("Test Backup and Restore functionality", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			expectedRestoredCMs := []client.Object{originalCM4}
-			expectedRestoredSecrets := []client.Object{originalSecret4}
+			expectedRestoredSecrets := []client.Object{originalSecret4, originalPullSecret1}
 			verifyRestoreFunctionality(ctx, c, originalConfigMaps, originalSecrets, expectedRestoredCMs, expectedRestoredSecrets)
 		})
 
