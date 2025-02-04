@@ -213,3 +213,41 @@ func Cleanup(
 
 	return completedCleanup, utilerrors.NewAggregate(errs)
 }
+
+func GetPreservedResourceCounts(
+	ctx context.Context,
+	c client.Client,
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) (clusterIDCount, otherCount int, err error) {
+
+	if clusterInstance.Spec.Reinstall.PreservationMode == v1alpha1.PreservationModeNone {
+		return 0, 0, nil
+	}
+
+	labelSelector, err := buildRestoreLabelSelector(clusterInstance.Spec.Reinstall.PreservationMode)
+	if err != nil || labelSelector == nil {
+		return 0, 0, err
+	}
+
+	return countMatchingResources(ctx, c, clusterInstance.Namespace, labelSelector, false)
+}
+
+func GetRestoredResourceCounts(
+	ctx context.Context,
+	c client.Client,
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) (clusterIDCount, otherCount int, err error) {
+
+	if clusterInstance.Spec.Reinstall.PreservationMode == v1alpha1.PreservationModeNone {
+		return 0, 0, nil
+	}
+
+	labelSelector, err := buildBackupLabelSelector(clusterInstance.Spec.Reinstall.PreservationMode)
+	if err != nil || labelSelector == nil {
+		return 0, 0, err
+	}
+
+	return countMatchingResources(ctx, c, clusterInstance.Namespace, labelSelector, true)
+}

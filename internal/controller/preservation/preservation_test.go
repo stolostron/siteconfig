@@ -598,3 +598,206 @@ var _ = Describe("Cleanup", func() {
 	})
 
 })
+
+var _ = Describe("Preservation Resource Counting", func() {
+	var (
+		ctx             context.Context
+		c               client.Client
+		testLogger      *zap.Logger
+		clusterInstance *v1alpha1.ClusterInstance
+
+		testNamespace = testNamespace1
+
+		secret1, secret2, secret3, secret4 *corev1.Secret
+
+		configMap1, configMap2 *corev1.ConfigMap
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		testLogger = zap.NewNop().Named("Test")
+	})
+
+	createPreservedObjectMeta := func(name string, preservationMode v1alpha1.PreservationMode) metav1.ObjectMeta {
+		labels := map[string]string{}
+		annotations := map[string]string{}
+
+		// Set additional label and annotation for retrieving and identifying backed-up resources.
+		preservedDataLabel := preservedDataLabelKey
+		additionalAnnotation := v1alpha1.PreservationLabelKey
+		if preservationMode == PreservationModeInternal {
+			preservedDataLabel = preservedInternalDataLabelKey
+			additionalAnnotation = InternalPreservationLabelKey
+		}
+		labels[preservedDataLabel] = fmt.Sprint(metav1.Now().Unix())
+		annotations[additionalAnnotation] = string(preservationMode)
+
+		return metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   testNamespace,
+			Labels:      labels,
+			Annotations: annotations,
+		}
+	}
+
+	createRestoredObjectMeta := func(name string, preservationMode v1alpha1.PreservationMode) metav1.ObjectMeta {
+		labels := map[string]string{}
+		annotations := map[string]string{}
+
+		preservationKey := v1alpha1.PreservationLabelKey
+		preservationValue := ""
+		if preservationMode == PreservationModeInternal {
+			preservationKey = InternalPreservationLabelKey
+			preservationValue = InternalPreservationLabelValue
+
+		} else if preservationMode == v1alpha1.PreservationModeClusterIdentity {
+			preservationValue = v1alpha1.ClusterIdentityLabelValue
+		}
+		labels[preservationKey] = preservationValue
+
+		annotations[RestoredAtAnnotationKey] = "timestamp"
+
+		return metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   testNamespace,
+			Labels:      labels,
+			Annotations: annotations,
+		}
+	}
+
+	createObjectMeta := func(name string, mode v1alpha1.PreservationMode, isRestored bool) metav1.ObjectMeta {
+		if isRestored {
+			return createRestoredObjectMeta(name, mode)
+		}
+		return createPreservedObjectMeta(name, mode)
+	}
+
+	// Helper function to create a test Secrets & ConfigMaps
+	createTestSecret := func(name string, mode v1alpha1.PreservationMode, isRestored bool) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: createObjectMeta(name, mode, isRestored),
+		}
+	}
+	createTestConfigMap := func(name string, mode v1alpha1.PreservationMode, isRestored bool) *corev1.ConfigMap {
+		return &corev1.ConfigMap{
+			ObjectMeta: createObjectMeta(name, mode, isRestored),
+		}
+	}
+
+	Context("GetPreservedResourceCounts", func() {
+
+		BeforeEach(func() {
+			// Create a new cluster instance
+			clusterInstance = &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testNamespace,
+					Namespace: testNamespace,
+				},
+				Spec: v1alpha1.ClusterInstanceSpec{
+					Reinstall: &v1alpha1.ReinstallSpec{
+						PreservationMode: v1alpha1.PreservationModeNone,
+					},
+				},
+			}
+
+			// Create preserved secrets
+			secret1 = createTestSecret("pull-secret", PreservationModeInternal, false)
+			secret2 = createTestSecret("secret2", v1alpha1.PreservationModeClusterIdentity, false)
+			secret3 = createTestSecret("secret3", v1alpha1.PreservationModeAll, false)
+			secret4 = createTestSecret("secret4", v1alpha1.PreservationModeAll, false)
+
+			c = fakeclient.NewClientBuilder().
+				WithScheme(scheme.Scheme).
+				WithObjects(secret1, secret2, secret3, secret4).
+				Build()
+		})
+
+		It("should return (0, 0, nil) when PreservationMode is None", func() {
+			clusterInstance.Spec.Reinstall.PreservationMode = v1alpha1.PreservationModeNone
+			clusterIDCount, otherCount, err := GetPreservedResourceCounts(ctx, c, testLogger, clusterInstance)
+			Expect(err).To(BeNil())
+			Expect(clusterIDCount).To(Equal(0))
+			Expect(otherCount).To(Equal(0))
+		})
+
+		It("should return correct counts when preserved resources exist", func() {
+			clusterInstance.Spec.Reinstall.PreservationMode = v1alpha1.PreservationModeAll
+			clusterIDCount, otherCount, err := GetPreservedResourceCounts(ctx, c, testLogger, clusterInstance)
+			Expect(err).To(BeNil())
+			Expect(clusterIDCount).To(Equal(1))
+			Expect(otherCount).To(Equal(2))
+		})
+
+		It("should return (0, 0) when no matching resources exist", func() {
+			clusterInstance.ObjectMeta = metav1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "foobar",
+			}
+			clusterInstance.Spec.Reinstall.PreservationMode = v1alpha1.PreservationModeAll
+			clusterIDCount, otherCount, err := GetPreservedResourceCounts(ctx, c, testLogger, clusterInstance)
+			Expect(err).To(BeNil())
+			Expect(clusterIDCount).To(Equal(0))
+			Expect(otherCount).To(Equal(0))
+		})
+	})
+
+	Context("GetRestoredResourceCounts", func() {
+
+		BeforeEach(func() {
+			// Create a new cluster instance
+			clusterInstance = &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testNamespace,
+					Namespace: testNamespace,
+				},
+				Spec: v1alpha1.ClusterInstanceSpec{
+					Reinstall: &v1alpha1.ReinstallSpec{
+						PreservationMode: v1alpha1.PreservationModeNone,
+					},
+				},
+			}
+
+			// Create restored secrets and configmaps
+			secret1 = createTestSecret("pull-secret", PreservationModeInternal, true)
+			secret2 = createTestSecret("secret2", v1alpha1.PreservationModeClusterIdentity, true)
+			secret3 = createTestSecret("secret3", v1alpha1.PreservationModeAll, true)
+			secret4 = createTestSecret("secret4", v1alpha1.PreservationModeAll, true)
+
+			configMap1 = createTestConfigMap("configmap1", v1alpha1.PreservationModeAll, true)
+			configMap2 = createTestConfigMap("configmap2", v1alpha1.PreservationModeClusterIdentity, true)
+
+			c = fakeclient.NewClientBuilder().
+				WithScheme(scheme.Scheme).
+				WithObjects(secret1, secret2, secret3, secret4, configMap1, configMap2).
+				Build()
+		})
+
+		It("should return (0, 0, nil) when PreservationMode is None", func() {
+			clusterInstance.Spec.Reinstall.PreservationMode = v1alpha1.PreservationModeNone
+			clusterIDCount, otherCount, err := GetRestoredResourceCounts(ctx, c, testLogger, clusterInstance)
+			Expect(err).To(BeNil())
+			Expect(clusterIDCount).To(Equal(0))
+			Expect(otherCount).To(Equal(0))
+		})
+
+		It("should return correct counts when restored resources exist", func() {
+			clusterInstance.Spec.Reinstall.PreservationMode = v1alpha1.PreservationModeAll
+			clusterIDCount, otherCount, err := GetRestoredResourceCounts(ctx, c, testLogger, clusterInstance)
+			Expect(err).To(BeNil())
+			Expect(clusterIDCount).To(Equal(2))
+			Expect(otherCount).To(Equal(3))
+		})
+
+		It("should return (0, 0) when no matching restored resources exist", func() {
+			clusterInstance.ObjectMeta = metav1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "foobar",
+			}
+			clusterInstance.Spec.Reinstall.PreservationMode = v1alpha1.PreservationModeAll
+			clusterIDCount, otherCount, err := GetRestoredResourceCounts(ctx, c, testLogger, clusterInstance)
+			Expect(err).To(BeNil())
+			Expect(clusterIDCount).To(Equal(0))
+			Expect(otherCount).To(Equal(0))
+		})
+	})
+})
