@@ -48,6 +48,7 @@ import (
 	"github.com/stolostron/siteconfig/internal/controller/configuration"
 	"github.com/stolostron/siteconfig/internal/controller/deletion"
 	cierrors "github.com/stolostron/siteconfig/internal/controller/errors"
+	"github.com/stolostron/siteconfig/internal/controller/reinstall"
 	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 
@@ -111,13 +112,16 @@ var _ = Describe("Reconcile", func() {
 		configStore, err := configuration.NewConfigurationStore(configuration.NewDefaultConfiguration())
 		Expect(err).ToNot(HaveOccurred())
 
+		deletionHandler := &deletion.DeletionHandler{Client: c, Logger: testLogger}
 		r = &ClusterInstanceReconciler{
 			Client:          c,
 			Scheme:          scheme.Scheme,
 			Log:             testLogger,
 			TmplEngine:      ci.NewTemplateEngine(),
 			ConfigStore:     configStore,
-			DeletionHandler: &deletion.DeletionHandler{Client: c, Logger: testLogger},
+			DeletionHandler: deletionHandler,
+			ReinstallHandler: &reinstall.ReinstallHandler{Client: c, Logger: testLogger,
+				DeletionHandler: deletionHandler, ConfigStore: configStore},
 		}
 
 		Expect(c.Create(ctx, testParams.GeneratePullSecret())).To(Succeed())

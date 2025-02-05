@@ -54,6 +54,12 @@ type RenderedObjectCollection struct {
 	prune, suppress, render SyncWaveMap
 }
 
+func NewRenderedObject(manifest map[string]interface{}) (*RenderedObject, error) {
+	obj := &RenderedObject{}
+	err := obj.SetObject(manifest)
+	return obj, err
+}
+
 func (r *RenderedObject) SetObject(manifest map[string]interface{}) error {
 	// Marshal the input manifest to JSON
 	content, err := json.Marshal(manifest)

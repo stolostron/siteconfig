@@ -52,6 +52,7 @@ import (
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/configuration"
 	"github.com/stolostron/siteconfig/internal/controller/deletion"
+	"github.com/stolostron/siteconfig/internal/controller/reinstall"
 	"github.com/stolostron/siteconfig/internal/controller/retry"
 	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
@@ -171,16 +172,25 @@ func main() {
 		Logger: siteconfigLogger.Named("DeletionHandler"),
 	}
 
+	// Create ReinstallHandler
+	reinstallHandler := &reinstall.ReinstallHandler{
+		Client:          mgr.GetClient(),
+		Logger:          siteconfigLogger.Named("ReinstallHandler"),
+		ConfigStore:     sharedConfigStore,
+		DeletionHandler: deletionHandler,
+	}
+
 	// Create ClusterInstance controller for reconciling ClusterInstance CRs
 	clusterInstanceLogger := siteconfigLogger.Named("ClusterInstanceController")
 	if err := (&controller.ClusterInstanceReconciler{
-		Client:          mgr.GetClient(),
-		Scheme:          mgr.GetScheme(),
-		Recorder:        mgr.GetEventRecorderFor("ClusterInstanceController"),
-		Log:             clusterInstanceLogger,
-		TmplEngine:      ci.NewTemplateEngine(),
-		ConfigStore:     sharedConfigStore,
-		DeletionHandler: deletionHandler,
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Recorder:         mgr.GetEventRecorderFor("ClusterInstanceController"),
+		Log:              clusterInstanceLogger,
+		TmplEngine:       ci.NewTemplateEngine(),
+		ConfigStore:      sharedConfigStore,
+		DeletionHandler:  deletionHandler,
+		ReinstallHandler: reinstallHandler,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error("Unable to create controller",
 			zap.String("controller", "ClusterInstance"),
