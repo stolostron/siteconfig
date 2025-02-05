@@ -50,6 +50,7 @@ import (
 	"github.com/stolostron/siteconfig/internal/controller/configuration"
 	"github.com/stolostron/siteconfig/internal/controller/deletion"
 	cierrors "github.com/stolostron/siteconfig/internal/controller/errors"
+	"github.com/stolostron/siteconfig/internal/controller/reinstall"
 	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 )
@@ -72,12 +73,13 @@ const (
 // ClusterInstanceReconciler reconciles a ClusterInstance object
 type ClusterInstanceReconciler struct {
 	client.Client
-	Scheme          *runtime.Scheme
-	Recorder        record.EventRecorder
-	Log             *zap.Logger
-	TmplEngine      *ci.TemplateEngine
-	ConfigStore     *configuration.ConfigurationStore
-	DeletionHandler *deletion.DeletionHandler
+	Scheme           *runtime.Scheme
+	Recorder         record.EventRecorder
+	Log              *zap.Logger
+	TmplEngine       *ci.TemplateEngine
+	ConfigStore      *configuration.ConfigurationStore
+	DeletionHandler  *deletion.DeletionHandler
+	ReinstallHandler *reinstall.ReinstallHandler
 }
 
 // doNotRequeue returns a ctrl.Result indicating that no further reconciliation is required.
@@ -181,10 +183,20 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return doNotRequeue(), nil
 	}
 
-	if r.ConfigStore.GetAllowReinstalls() {
-		log.Info("SiteConfig Operator is configured to allow reinstalls")
-	} else {
-		log.Info("SiteConfig Operator is not configured for reinstalls")
+	// Check if reinstall is triggered
+	if reinstallSpec := clusterInstance.Spec.Reinstall; reinstallSpec != nil {
+		reinstallStatus := clusterInstance.Status.Reinstall
+		if reinstallStatus == nil || reinstallStatus.ObservedGeneration != reinstallSpec.Generation {
+
+			res, err := r.ReinstallHandler.ProcessRequest(ctx, clusterInstance)
+			if err != nil {
+				log.Error("Failed to process reinstall request", zap.Error(err))
+				return res, fmt.Errorf("encountered an error while processing reinstall request, err: %w", err)
+			}
+			if !res.IsZero() {
+				return res, nil
+			}
+		}
 	}
 
 	// Validate ClusterInstance
