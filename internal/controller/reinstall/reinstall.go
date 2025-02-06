@@ -24,8 +24,10 @@ import (
 
 	"go.uber.org/zap"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -38,6 +40,7 @@ import (
 	"github.com/stolostron/siteconfig/internal/controller/configuration"
 	"github.com/stolostron/siteconfig/internal/controller/deletion"
 	cierrors "github.com/stolostron/siteconfig/internal/controller/errors"
+	"github.com/stolostron/siteconfig/internal/controller/preservation"
 )
 
 const (
@@ -135,7 +138,11 @@ func (r *ReinstallHandler) ProcessRequest(
 	}{
 		{"Validating reinstall request", r.ensureValidReinstallRequest},
 		{"Setting reinstall request startTime", r.ensureStartTimeIsSet},
+		{"Checking preservation labels on ClusterInstance secrets", r.ensureClusterInstanceSecretsHavePreservedLabel},
+		{"Preserving data", r.ensureDataIsPreserved},
 		{"Deleting rendered manifests", r.ensureRenderedManifestsAreDeleted},
+		{"Restoring preserved data", r.ensurePreservedDataIsRestored},
+		{"Cleaning up preserved data", r.ensurePreservedDataIsCleanedUp},
 	}
 	for _, task := range tasks {
 		log.Info("Executing task", zap.String("Task", task.Description))
@@ -371,4 +378,280 @@ func (r *ReinstallHandler) finalizeReinstallRequest(
 		}
 	}
 	return nil
+}
+
+func (r *ReinstallHandler) ensureClusterInstanceSecretsHavePreservedLabel(
+	ctx context.Context,
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) (reconcile.Result, error) {
+
+	preservationDataBackedup := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallPreservationDataBackedup)
+	if preservationDataBackedup == nil {
+		return reconcile.Result{}, fmt.Errorf("condition %s has not been initialized",
+			v1alpha1.ReinstallPreservationDataBackedup)
+	}
+	if preservationDataBackedup.Reason != string(v1alpha1.Initialized) {
+		return reconcile.Result{}, nil
+	}
+
+	// apply label to ClusterInstance secrets
+	applyPreservationLabel := func(name string) error {
+		secret := &corev1.Secret{}
+		key := types.NamespacedName{Namespace: clusterInstance.Namespace, Name: name}
+		if err := r.Client.Get(ctx, key, secret); err != nil {
+			log.Sugar().Errorf("failed to retrieve Secret for applying preservation label", zap.Error(err))
+			return fmt.Errorf("failed to retrieve Secret for applying preservation label, err: %w", err)
+		}
+		patch := client.MergeFrom(secret.DeepCopy())
+		updateRequired := setOrUpdateLabel(&secret.ObjectMeta, preservation.InternalPreservationLabelKey,
+			preservation.InternalPreservationLabelValue)
+		if updateRequired {
+			if err := r.Client.Patch(ctx, secret, patch); err != nil {
+				log.Sugar().Errorf("failed to update Secret %s with preservation label", key.String(), zap.Error(err))
+				return fmt.Errorf("failed to update Secret %s with preservation label, err: %w", key.String(), err)
+			}
+			log.Sugar().Debugf("Updated Secret %s with preservation label", key.String())
+		}
+		return nil
+	}
+
+	clusterInstanceSecrets := []string{clusterInstance.Spec.PullSecretRef.Name}
+	for _, node := range clusterInstance.Spec.Nodes {
+		clusterInstanceSecrets = append(clusterInstanceSecrets, node.BmcCredentialsName.Name)
+	}
+
+	for _, secret := range clusterInstanceSecrets {
+		err := applyPreservationLabel(secret)
+		if err != nil {
+			return reconcile.Result{},
+				fmt.Errorf("encountered an error applying preservation label to ClusterInstance Secret, err: %w", err)
+		}
+	}
+
+	return reconcile.Result{}, nil
+}
+
+// ensureDataIsPreserved preserves resources
+func (r *ReinstallHandler) ensureDataIsPreserved(
+	ctx context.Context,
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) (result reconcile.Result, err error) {
+
+	result = reconcile.Result{}
+	err = nil
+
+	var (
+		preservationDataBackedupCondition, clusterIdentityDetectedCondition *metav1.Condition
+	)
+
+	defer func() {
+		patch := client.MergeFrom(clusterInstance.DeepCopy())
+		updateRequired := false
+
+		if preservationDataBackedupCondition != nil {
+			updateRequired = setReinstallStatusCondition(clusterInstance, *preservationDataBackedupCondition)
+		}
+
+		if clusterIdentityDetectedCondition != nil {
+			if changed := setReinstallStatusCondition(clusterInstance, *clusterIdentityDetectedCondition); changed {
+				updateRequired = true
+			}
+		}
+
+		if updateRequired {
+			result.Requeue = true
+			updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
+			if updateErr != nil {
+				result.RequeueAfter = requeueWithShortInterval
+				err = logAndWrapUpdateFailure(log, err, updateErr,
+					"failed to update reinstall preservation condition(s)")
+			}
+		}
+	}()
+
+	if clusterInstance.Spec.Reinstall.PreservationMode == v1alpha1.PreservationModeNone {
+		preservationDataBackedupCondition = reinstallPreservationDataBackedupConditionStatus(
+			metav1.ConditionFalse, v1alpha1.PreservationNotRequired, "PreservationMode is set to None.")
+		clusterIdentityDetectedCondition = reinstallClusterIdentityDataDetectedConditionStatus(
+			metav1.ConditionFalse, v1alpha1.PreservationNotRequired, "PreservationMode is set to None.")
+		return
+	}
+
+	preservationDataBackedupCondition = findReinstallStatusCondition(clusterInstance,
+		v1alpha1.ReinstallPreservationDataBackedup)
+	clusterIdentityDetectedCondition = findReinstallStatusCondition(clusterInstance,
+		v1alpha1.ReinstallClusterIdentityDataDetected)
+
+	setInProgress := false
+	if preservationDataBackedupCondition == nil ||
+		preservationDataBackedupCondition.Reason == string(v1alpha1.Initialized) {
+		preservationDataBackedupCondition = reinstallPreservationDataBackedupConditionStatus(
+			metav1.ConditionFalse, v1alpha1.InProgress, "Data is being preserved")
+		setInProgress = true
+	}
+
+	if clusterIdentityDetectedCondition == nil ||
+		clusterIdentityDetectedCondition.Reason == string(v1alpha1.Initialized) {
+		clusterIdentityDetectedCondition = reinstallClusterIdentityDataDetectedConditionStatus(
+			metav1.ConditionFalse, v1alpha1.InProgress, "Data is being preserved")
+		setInProgress = true
+	}
+
+	if setInProgress {
+		result.Requeue = true
+		return
+	}
+
+	// Determine if resources have been preserved already
+	preservationExecuted := false
+	switch preservationDataBackedupCondition.Reason {
+	case string(v1alpha1.Failed):
+		err = errors.New(preservationDataBackedupCondition.Message)
+		return
+
+	case string(v1alpha1.Completed), string(v1alpha1.DataUnavailable):
+		preservationExecuted = true
+	}
+
+	clusterIDDataDetectionExecuted := false
+	switch clusterIdentityDetectedCondition.Reason {
+	case string(v1alpha1.Failed):
+		err = errors.New(clusterIdentityDetectedCondition.Message)
+		return
+
+	case string(v1alpha1.DataAvailable), string(v1alpha1.DataUnavailable):
+		clusterIDDataDetectionExecuted = true
+	}
+
+	if preservationExecuted && clusterIDDataDetectionExecuted {
+		return
+	}
+
+	log.Info("Starting data preservation")
+
+	err = preservation.Backup(ctx, r.Client, log, clusterInstance)
+	if err != nil {
+		log.Error("Encountered error during data preservation", zap.Error(err))
+
+		preservationDataBackedupCondition = reinstallPreservationDataBackedupConditionStatus(
+			metav1.ConditionFalse, v1alpha1.Failed, err.Error())
+
+		clusterIdentityDetectedCondition = reinstallClusterIdentityDataDetectedConditionStatus(
+			metav1.ConditionFalse, v1alpha1.Failed, "Data preservation failed")
+
+		return
+	}
+
+	log.Info("Data preservation completed, computing backup summary...")
+
+	// Add a small delay to allow for the last resource preserved to be created before computing stats
+	time.Sleep(1 * time.Second)
+
+	preservationDataBackedupCondition, clusterIdentityDetectedCondition, err =
+		getDataPreservationSummary(ctx, r.Client, log, clusterInstance)
+
+	return
+}
+
+// ensurePreservedDataIsRestored restores preserved resources
+func (r *ReinstallHandler) ensurePreservedDataIsRestored(
+	ctx context.Context,
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) (result reconcile.Result, err error) {
+
+	result = reconcile.Result{}
+	err = nil
+
+	var preservationDataRestoredCondition *metav1.Condition
+
+	defer func() {
+		if preservationDataRestoredCondition != nil {
+			patch := client.MergeFrom(clusterInstance.DeepCopy())
+
+			if changed := setReinstallStatusCondition(clusterInstance, *preservationDataRestoredCondition); changed {
+				result.Requeue = true
+				updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
+				if updateErr != nil {
+					result.RequeueAfter = requeueWithShortInterval
+					err = logAndWrapUpdateFailure(log, err, updateErr,
+						fmt.Sprintf("failed to update reinstall restore data condition '%s'",
+							preservationDataRestoredCondition.Type))
+				}
+			}
+		}
+	}()
+
+	if clusterInstance.Spec.Reinstall.PreservationMode == v1alpha1.PreservationModeNone {
+
+		preservationDataRestoredCondition = reinstallPreservationDataRestoredConditionStatus(
+			metav1.ConditionFalse, v1alpha1.PreservationNotRequired, "PreservationMode is set to None.")
+
+		return
+	}
+
+	preservationDataRestoredCondition = findReinstallStatusCondition(clusterInstance,
+		v1alpha1.ReinstallPreservationDataRestored)
+
+	if preservationDataRestoredCondition == nil ||
+		preservationDataRestoredCondition.Reason == string(v1alpha1.Initialized) {
+		preservationDataRestoredCondition = reinstallPreservationDataRestoredConditionStatus(
+			metav1.ConditionFalse, v1alpha1.InProgress, "Data restoration in progress")
+		return
+	}
+
+	switch preservationDataRestoredCondition.Reason {
+	case string(v1alpha1.Failed):
+		err = errors.New(preservationDataRestoredCondition.Message)
+		return
+
+	case string(v1alpha1.Completed), string(v1alpha1.PreservationNotRequired), string(v1alpha1.DataUnavailable):
+		// Nothing to do:
+		// restore was completed successfully, or was not required, or no preservation data was found
+		return
+	}
+
+	log.Info("Starting data restoration")
+
+	err = preservation.Restore(ctx, r.Client, log, clusterInstance)
+	if err != nil {
+		log.Error("Encountered error during data restoration", zap.Error(err))
+		preservationDataRestoredCondition = reinstallPreservationDataRestoredConditionStatus(
+			metav1.ConditionFalse, v1alpha1.Failed, err.Error())
+		return
+	}
+
+	log.Info("Data restoration completed, computing restoration summary...")
+
+	// Add a small delay to allow for resource restoration to complete before computing stats
+	time.Sleep(1 * time.Second)
+	preservationDataRestoredCondition, err = getDataRestorationSummary(ctx, r.Client, log, clusterInstance)
+	return
+}
+
+// ensurePreservedDataIsCleanedUp restores preserved resources
+func (r *ReinstallHandler) ensurePreservedDataIsCleanedUp(
+	ctx context.Context,
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) (reconcile.Result, error) {
+	completedCleanup, err := preservation.Cleanup(ctx, r.Client, r.DeletionHandler, log, clusterInstance)
+	if err != nil {
+		if cierrors.IsDeletionTimeoutError(err) {
+			log.Warn("Cleanup of preserved resources timed out; deferring further attempts", zap.Error(err))
+			// Add hold annotation for manual intervention (CNF-15719)
+		} else {
+			log.Error("Cleanup of preserved reinstall data encountered an error", zap.Error(err))
+		}
+		return reconcile.Result{}, fmt.Errorf("encountered an error cleaning up preserved resources, error: %w", err)
+	}
+
+	if !completedCleanup {
+		log.Info("Waiting for preserved reinstall data to be cleaned up...")
+		return reconcile.Result{Requeue: true, RequeueAfter: deletionRequeueWithShortInterval}, nil
+	}
+
+	return reconcile.Result{}, nil
 }
