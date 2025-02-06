@@ -126,6 +126,59 @@ spec:
   additionalNTPSources:
 {{ .Spec.AdditionalNTPSources | toYaml | indent 4 }}`
 
+const InfraEnvX86_64 = `apiVersion: agent-install.openshift.io/v1beta1
+kind: InfraEnv
+metadata:
+  annotations:
+    siteconfig.open-cluster-management.io/sync-wave: "1"
+{{/* Underscores are not valid in names so we have to use a hyphen here */}}
+  name: "{{ .Spec.ClusterName }}-x86-64"
+  namespace: "{{ .Spec.ClusterName }}"
+spec:
+  clusterRef:
+    name: "{{ .Spec.ClusterName }}"
+    namespace: "{{ .Spec.ClusterName }}"
+  sshAuthorizedKey: "{{ .Spec.SSHPublicKey }}"
+{{ if .Spec.Proxy }}
+  proxy:
+{{ .Spec.Proxy | toYaml | indent 4 }}
+{{ end }}
+  cpuArchitecture: "x86_64"
+  pullSecretRef:
+    name: "{{ .Spec.PullSecretRef.Name }}"
+  ignitionConfigOverride: '{{ .Spec.IgnitionConfigOverride }}'
+  nmStateConfigLabelSelector:
+    matchLabels:
+      nmstate-label: "{{ .Spec.ClusterName }}"
+  additionalNTPSources:
+{{ .Spec.AdditionalNTPSources | toYaml | indent 4 }}`
+
+const InfraEnvAarch64 = `apiVersion: agent-install.openshift.io/v1beta1
+kind: InfraEnv
+metadata:
+  annotations:
+    siteconfig.open-cluster-management.io/sync-wave: "1"
+  name: "{{ .Spec.ClusterName }}-aarch64"
+  namespace: "{{ .Spec.ClusterName }}"
+spec:
+  clusterRef:
+    name: "{{ .Spec.ClusterName }}"
+    namespace: "{{ .Spec.ClusterName }}"
+  sshAuthorizedKey: "{{ .Spec.SSHPublicKey }}"
+{{ if .Spec.Proxy }}
+  proxy:
+{{ .Spec.Proxy | toYaml | indent 4 }}
+{{ end }}
+  cpuArchitecture: "aarch64"
+  pullSecretRef:
+    name: "{{ .Spec.PullSecretRef.Name }}"
+  ignitionConfigOverride: '{{ .Spec.IgnitionConfigOverride }}'
+  nmStateConfigLabelSelector:
+    matchLabels:
+      nmstate-label: "{{ .Spec.ClusterName }}"
+  additionalNTPSources:
+{{ .Spec.AdditionalNTPSources | toYaml | indent 4 }}`
+
 const KlusterletAddonConfig = `apiVersion: agent.open-cluster-management.io/v1
 kind: KlusterletAddonConfig
 metadata:
@@ -198,7 +251,12 @@ metadata:
 {{ end }}
     bmac.agent-install.openshift.io/role: "{{ .SpecialVars.CurrentNode.Role }}"
   labels:
+{{ if .SpecialVars.CurrentNode.CPUArchitecture }}
+{{/* Underscores are not valid in label names so we must replace any underscores with dashes */}}
+    infraenvs.agent-install.openshift.io: "{{ .Spec.ClusterName }}-{{ .SpecialVars.CurrentNode.CPUArchitecture | toString | replace "_" "-" }}"
+{{ else }}
     infraenvs.agent-install.openshift.io: "{{ .Spec.ClusterName }}"
+{{ end }}
 spec:
   bootMode: "{{ .SpecialVars.CurrentNode.BootMode }}"
   bmc:
@@ -208,6 +266,9 @@ spec:
   bootMACAddress: "{{ .SpecialVars.CurrentNode.BootMACAddress }}"
   automatedCleaningMode: "{{ .SpecialVars.CurrentNode.AutomatedCleaningMode }}"
   online: true
+{{ if .SpecialVars.CurrentNode.CPUArchitecture }}
+  architecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture | toString }}"
+{{ end }}
 {{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:
 {{ .SpecialVars.CurrentNode.RootDeviceHints | toYaml | indent 4 }}
@@ -218,6 +279,8 @@ func GetClusterTemplates() map[string]string {
 	data["AgentClusterInstall"] = AgentClusterInstall
 	data["ClusterDeployment"] = ClusterDeployment
 	data["InfraEnv"] = InfraEnv
+	data["InfraEnvX86_64"] = InfraEnvX86_64
+	data["InfraEnvAarch64"] = InfraEnvAarch64
 	data["ManagedCluster"] = ManagedCluster
 	data["KlusterletAddonConfig"] = KlusterletAddonConfig
 	return data
