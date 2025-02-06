@@ -18,6 +18,7 @@ package reinstall
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -30,6 +31,7 @@ import (
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
+	"github.com/stolostron/siteconfig/internal/controller/preservation"
 )
 
 func getManagedCluster(clusterInstance *v1alpha1.ClusterInstance) (*ci.RenderedObject, error) {
@@ -219,4 +221,106 @@ func logAndWrapUpdateFailure(log *zap.Logger, currentError, updateError error, e
 		return fmt.Errorf("%s, update error: %w", errorMsg, updateError)
 	}
 	return fmt.Errorf("%s, update error: %w, error: %w", errorMsg, updateError, currentError)
+}
+
+func setOrUpdateLabel(objectMeta *metav1.ObjectMeta, key, value string) bool {
+	if objectMeta.Labels == nil {
+		objectMeta.Labels = make(map[string]string)
+	}
+	if currentValue, ok := objectMeta.Labels[key]; !ok || currentValue != value {
+		objectMeta.Labels[key] = value
+		return true
+	}
+	return false
+}
+
+func getDataPreservationSummary(
+	ctx context.Context,
+	c client.Client,
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) (*metav1.Condition, *metav1.Condition, error) {
+	clusterIDCount, otherCount, err := preservation.GetPreservedResourceCounts(ctx, c, log, clusterInstance)
+	if err != nil {
+		log.Error("Failed to compute data preservation summary", zap.Error(err))
+		return reinstallPreservationDataBackedupConditionStatus(metav1.ConditionFalse, v1alpha1.Failed, err.Error()),
+			reinstallClusterIdentityDataDetectedConditionStatus(metav1.ConditionFalse, v1alpha1.Failed, err.Error()),
+			err
+	}
+
+	totalPreservedResources := clusterIDCount + otherCount
+	log.Info("Data preservation summary",
+		zap.String("Total Resources", fmt.Sprintf("%d", totalPreservedResources)),
+		zap.String("ClusterIdentity Resources", fmt.Sprintf("%d", clusterIDCount)),
+		zap.String("Other Resources", fmt.Sprintf("%d", otherCount)),
+	)
+
+	preservationDataBackedupCondition := reinstallPreservationDataBackedupConditionStatus(
+		metav1.ConditionTrue, v1alpha1.Completed,
+		fmt.Sprintf("Number of resources preserved: %d ", totalPreservedResources))
+	if totalPreservedResources == 0 {
+		preservationDataBackedupCondition = reinstallPreservationDataBackedupConditionStatus(
+			metav1.ConditionFalse, v1alpha1.DataUnavailable,
+			"No resources were found to be preserved in the ClusterInstance namespace with the preservation data label")
+	}
+
+	clusterIdentityDetectedCondition := reinstallClusterIdentityDataDetectedConditionStatus(
+		metav1.ConditionTrue, v1alpha1.DataAvailable,
+		fmt.Sprintf("Number of cluster identity resources detected: %d ", clusterIDCount))
+	if clusterIDCount == 0 {
+		if clusterInstance.Spec.Reinstall.PreservationMode == v1alpha1.PreservationModeClusterIdentity {
+			errorMsg := fmt.Sprintf("preservationMode set to '%s', found no cluster-identity resources",
+				v1alpha1.PreservationModeClusterIdentity)
+			log.Error(errorMsg)
+			clusterIdentityDetectedCondition = reinstallClusterIdentityDataDetectedConditionStatus(
+				metav1.ConditionFalse, v1alpha1.Failed, errorMsg)
+			return preservationDataBackedupCondition, clusterIdentityDetectedCondition, errors.New(errorMsg)
+		}
+		clusterIdentityDetectedCondition = reinstallClusterIdentityDataDetectedConditionStatus(
+			metav1.ConditionFalse,
+			v1alpha1.DataUnavailable,
+			"No cluster identity resources were detected for preservation")
+	}
+
+	return preservationDataBackedupCondition, clusterIdentityDetectedCondition, nil
+}
+
+func getDataRestorationSummary(
+	ctx context.Context,
+	c client.Client,
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) (*metav1.Condition, error) {
+
+	clusterIDCount, otherCount, err := preservation.GetRestoredResourceCounts(ctx, c, log, clusterInstance)
+	if err != nil {
+		log.Error("Failed to compute restoration summary", zap.Error(err))
+		return reinstallPreservationDataRestoredConditionStatus(
+			metav1.ConditionFalse, v1alpha1.Failed, err.Error()), err
+	}
+
+	totalRestoredResources := clusterIDCount + otherCount
+	log.Info("Data restoration summary",
+		zap.String("Total Resources", fmt.Sprintf("%d", totalRestoredResources)),
+		zap.String("ClusterIdentity Resources", fmt.Sprintf("%d", clusterIDCount)),
+		zap.String("Other Resources", fmt.Sprintf("%d", otherCount)),
+	)
+
+	if totalRestoredResources == 0 {
+		if clusterInstance.Spec.Reinstall.PreservationMode == v1alpha1.PreservationModeClusterIdentity {
+			errorMsg := fmt.Sprintf("no restored resources found, PreservationMode '%s' expects data to be restored",
+				v1alpha1.PreservationModeClusterIdentity)
+			log.Error("failing reinstall request as no restoration data was found", zap.Error(err))
+			return reinstallPreservationDataRestoredConditionStatus(
+				metav1.ConditionFalse, v1alpha1.Failed, errorMsg), errors.New(errorMsg)
+		}
+
+		return reinstallPreservationDataRestoredConditionStatus(
+			metav1.ConditionFalse, v1alpha1.DataUnavailable, "No restored resources found"), nil
+	}
+
+	return reinstallPreservationDataRestoredConditionStatus(
+		metav1.ConditionTrue, v1alpha1.Completed,
+		fmt.Sprintf("%d resources were successfully restored: %d cluster-identity resources, %d other resources",
+			totalRestoredResources, clusterIDCount, otherCount)), nil
 }
