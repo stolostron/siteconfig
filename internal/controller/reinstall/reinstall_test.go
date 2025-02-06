@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +37,7 @@ import (
 	"github.com/stolostron/siteconfig/internal/controller/configuration"
 	"github.com/stolostron/siteconfig/internal/controller/deletion"
 	cierrors "github.com/stolostron/siteconfig/internal/controller/errors"
+	"github.com/stolostron/siteconfig/internal/controller/preservation"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -595,6 +597,9 @@ var _ = Describe("ProcessRequest", func() {
 		name := "test"
 		namespace := "test"
 
+		pullSecret := generateClusterInstanceSecret("pull-secret", namespace)
+		bmcCredential := generateClusterInstanceSecret("bmc-secret-1", namespace)
+
 		clusterInstance = &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
@@ -602,7 +607,12 @@ var _ = Describe("ProcessRequest", func() {
 			},
 			Spec: v1alpha1.ClusterInstanceSpec{
 				Reinstall: &v1alpha1.ReinstallSpec{
-					Generation: "1234",
+					Generation:       "1234",
+					PreservationMode: v1alpha1.PreservationModeAll,
+				},
+				PullSecretRef: corev1.LocalObjectReference{Name: pullSecret.Name},
+				Nodes: []v1alpha1.NodeSpec{
+					{BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: bmcCredential.Name}},
 				},
 			},
 			Status: v1alpha1.ClusterInstanceStatus{
@@ -618,7 +628,7 @@ var _ = Describe("ProcessRequest", func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
-			WithObjects(clusterInstance).
+			WithObjects(clusterInstance, pullSecret, bmcCredential).
 			Build()
 
 		handler = &ReinstallHandler{
@@ -645,21 +655,11 @@ var _ = Describe("ProcessRequest", func() {
 	It("should complete the reinstall process successfully", func() {
 
 		setReinstallStatusCondition(clusterInstance, *reinstallRequestValidatedConditionStatus(metav1.ConditionTrue, v1alpha1.Completed, "Completed Valid reinstall request"))
+		setReinstallStatusCondition(clusterInstance, *reinstallPreservationDataBackedupConditionStatus(metav1.ConditionTrue, v1alpha1.Completed, "Finished"))
+		setReinstallStatusCondition(clusterInstance, *reinstallClusterIdentityDataDetectedConditionStatus(metav1.ConditionTrue, v1alpha1.DataAvailable, "Finished"))
 		setReinstallStatusCondition(clusterInstance, *reinstallRenderedManifestsDeletedConditionStatus(metav1.ConditionTrue, v1alpha1.Completed, "Finished"))
+		setReinstallStatusCondition(clusterInstance, *reinstallPreservationDataRestoredConditionStatus(metav1.ConditionTrue, v1alpha1.Completed, "Finished"))
 		setReinstallStatusCondition(clusterInstance, *reinstallRequestProcessedConditionStatus(metav1.ConditionFalse, v1alpha1.InProgress, "In progress"))
-
-		c = fakeclient.NewClientBuilder().
-			WithScheme(scheme.Scheme).
-			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
-			WithObjects(clusterInstance).
-			Build()
-
-		handler = &ReinstallHandler{
-			ConfigStore:     configStore,
-			Client:          c,
-			DeletionHandler: &deletion.DeletionHandler{Client: c, Logger: testLogger},
-			Logger:          testLogger,
-		}
 
 		handler.ConfigStore.SetAllowReinstalls(true)
 
@@ -686,4 +686,584 @@ var _ = Describe("ProcessRequest", func() {
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		Expect(cond.Reason).To(Equal(string(v1alpha1.Completed)))
 	})
+})
+
+var _ = Describe("ensureClusterInstanceSecretsHavePreservedLabel", func() {
+	var (
+		ctx        context.Context
+		c          client.Client
+		handler    *ReinstallHandler
+		testLogger *zap.Logger
+
+		testNamespace   = "test"
+		clusterInstance *v1alpha1.ClusterInstance
+
+		pullSecret, bmcCredential1, bmcCredential2 *corev1.Secret
+	)
+
+	BeforeEach(func() {
+
+		ctx = context.Background()
+		testLogger = zap.NewNop().Named("Test")
+
+		pullSecret = generateClusterInstanceSecret("pull-secret", testNamespace)
+		bmcCredential1 = generateClusterInstanceSecret("bmc-secret-1", testNamespace)
+		bmcCredential2 = generateClusterInstanceSecret("bmc-secret-2", testNamespace)
+
+		clusterInstance = &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      testNamespace,
+				Namespace: testNamespace,
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				PullSecretRef: corev1.LocalObjectReference{Name: pullSecret.Name},
+				Nodes: []v1alpha1.NodeSpec{
+					{BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: bmcCredential1.Name}},
+					{BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: bmcCredential2.Name}},
+				},
+			},
+			Status: v1alpha1.ClusterInstanceStatus{
+				Conditions: []metav1.Condition{},
+				Reinstall: &v1alpha1.ReinstallStatus{
+					Conditions: []metav1.Condition{{
+						Type:   string(v1alpha1.ReinstallPreservationDataBackedup),
+						Status: metav1.ConditionFalse,
+						Reason: string(v1alpha1.Initialized),
+					}},
+				},
+			},
+		}
+
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(clusterInstance, pullSecret, bmcCredential1, bmcCredential2).
+			Build()
+
+		handler = &ReinstallHandler{
+			Client: c,
+			Logger: testLogger,
+		}
+	})
+
+	It("should update secrets with preservation label when ClusterInstance secrets do not have the preservation label", func() {
+		for _, object := range []client.Object{pullSecret, bmcCredential1, bmcCredential2} {
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
+			Expect(object.GetLabels()).ToNot(HaveKey(preservation.InternalPreservationLabelKey))
+		}
+
+		result, err := handler.ensureClusterInstanceSecretsHavePreservedLabel(ctx, testLogger, clusterInstance)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result).To(BeZero())
+
+		for _, object := range []client.Object{pullSecret, bmcCredential1, bmcCredential2} {
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
+			Expect(object.GetLabels()).To(HaveKeyWithValue(preservation.InternalPreservationLabelKey, preservation.InternalPreservationLabelValue))
+		}
+	})
+
+	It("should not update secrets with preservation label when ReinstallPreservationDataBackedup is different from Initialized", func() {
+		clusterInstance.Status.Reinstall.Conditions = []metav1.Condition{{
+			Type:   string(v1alpha1.ReinstallPreservationDataBackedup),
+			Status: metav1.ConditionFalse,
+			Reason: string(v1alpha1.InProgress),
+		}}
+
+		result, err := handler.ensureClusterInstanceSecretsHavePreservedLabel(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeZero())
+
+		for _, object := range []client.Object{pullSecret, bmcCredential1, bmcCredential2} {
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
+			Expect(object.GetLabels()).ToNot(HaveKey(preservation.InternalPreservationLabelKey))
+		}
+	})
+
+	It("should return an error when the ReinstallPreservationDataBackedup condition is not set", func() {
+		clusterInstance.Status.Reinstall.Conditions = []metav1.Condition{}
+
+		_, err := handler.ensureClusterInstanceSecretsHavePreservedLabel(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("not been initialized"))
+	})
+
+	It("should return an error when secret retrieval fails", func() {
+		Expect(c.Delete(ctx, bmcCredential1)).To(Succeed())
+
+		_, err := handler.ensureClusterInstanceSecretsHavePreservedLabel(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to retrieve Secret"))
+	})
+
+	It("should return an error when secret update fails", func() {
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(clusterInstance, pullSecret, bmcCredential1, bmcCredential2).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Patch: func(ctx context.Context, client client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					return errors.New("inject error")
+				},
+			}).
+			Build()
+
+		handler = &ReinstallHandler{
+			Client: c,
+			Logger: testLogger,
+		}
+
+		_, err := handler.ensureClusterInstanceSecretsHavePreservedLabel(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to update Secret"))
+	})
+})
+
+var _ = Describe("ensureDataIsPreserved", func() {
+	var (
+		ctx        context.Context
+		c          client.Client
+		testLogger *zap.Logger
+		handler    *ReinstallHandler
+
+		testNamespace = "test"
+
+		clusterInstance *v1alpha1.ClusterInstance
+
+		secret1, secret2, secret3, secret4 *corev1.Secret
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		testLogger = zap.NewNop().Named("Test")
+
+		clusterInstance = &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      testNamespace,
+				Namespace: testNamespace,
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				Reinstall: &v1alpha1.ReinstallSpec{
+					PreservationMode: v1alpha1.PreservationModeAll,
+				},
+			},
+			Status: v1alpha1.ClusterInstanceStatus{
+				Conditions: []metav1.Condition{},
+				Reinstall:  &v1alpha1.ReinstallStatus{},
+			},
+		}
+
+		// Create preserved secrets
+		secret1 = createTestSecret("secret1", testNamespace, v1alpha1.PreservationModeClusterIdentity, true)
+		secret2 = createTestSecret("secret2", testNamespace, v1alpha1.PreservationModeClusterIdentity, true)
+		secret3 = createTestSecret("secret3", testNamespace, v1alpha1.PreservationModeAll, true)
+		secret4 = createTestSecret("secret4", testNamespace, v1alpha1.PreservationModeAll, true)
+
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(clusterInstance, secret1, secret2, secret3, secret4).
+			Build()
+
+		handler = &ReinstallHandler{
+			Client:          c,
+			DeletionHandler: &deletion.DeletionHandler{Client: c, Logger: testLogger},
+			Logger:          testLogger,
+		}
+	})
+
+	It("should return immediately if PreservationMode is None", func() {
+		clusterInstance.Spec.Reinstall.PreservationMode = v1alpha1.PreservationModeNone
+
+		result, err := handler.ensureDataIsPreserved(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(Equal(reconcile.Result{Requeue: true}))
+		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallPreservationDataBackedup)
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Reason).To(Equal(string(v1alpha1.PreservationNotRequired)))
+	})
+
+	It("should return if preservation is already completed", func() {
+		clusterInstance.Status.Reinstall.Conditions = []metav1.Condition{
+			{
+				Type:   string(v1alpha1.ReinstallPreservationDataBackedup),
+				Status: metav1.ConditionTrue,
+				Reason: string(v1alpha1.Completed),
+			},
+			{
+				Type:   string(v1alpha1.ReinstallClusterIdentityDataDetected),
+				Status: metav1.ConditionTrue,
+				Reason: string(v1alpha1.DataAvailable),
+			}}
+
+		result, err := handler.ensureDataIsPreserved(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeZero())
+	})
+
+	It("should return an error if preservation previously failed", func() {
+		errorMsg := "preservation failed"
+		clusterInstance.Status.Reinstall.Conditions = []metav1.Condition{
+			{
+				Type:    string(v1alpha1.ReinstallPreservationDataBackedup),
+				Status:  metav1.ConditionFalse,
+				Reason:  string(v1alpha1.Failed),
+				Message: errorMsg,
+			},
+			{
+				Type:    string(v1alpha1.ReinstallClusterIdentityDataDetected),
+				Status:  metav1.ConditionFalse,
+				Reason:  string(v1alpha1.Failed),
+				Message: errorMsg,
+			}}
+
+		result, err := handler.ensureDataIsPreserved(ctx, testLogger, clusterInstance)
+		Expect(err).To(MatchError(errorMsg))
+		Expect(result).To(BeZero())
+
+		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallPreservationDataBackedup)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Reason).To(Equal(string(v1alpha1.Failed)))
+		cond = findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallClusterIdentityDataDetected)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Reason).To(Equal(string(v1alpha1.Failed)))
+	})
+
+	It("should complete preservation successfully", func() {
+		clusterInstance.Status.Reinstall.Conditions = []metav1.Condition{
+			{
+				Type:   string(v1alpha1.ReinstallPreservationDataBackedup),
+				Status: metav1.ConditionFalse,
+				Reason: string(v1alpha1.InProgress),
+			},
+			{
+				Type:   string(v1alpha1.ReinstallClusterIdentityDataDetected),
+				Status: metav1.ConditionFalse,
+				Reason: string(v1alpha1.InProgress),
+			}}
+
+		result, err := handler.ensureDataIsPreserved(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(Equal(reconcile.Result{Requeue: true}))
+
+		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallPreservationDataBackedup)
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(string(v1alpha1.Completed)))
+		Expect(cond.Message).To(ContainSubstring("Number of resources preserved: 4"))
+
+		cond = findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallClusterIdentityDataDetected)
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(string(v1alpha1.DataAvailable)))
+		Expect(cond.Message).To(ContainSubstring("Number of cluster identity resources detected: 2"))
+	})
+
+	It("should handle errors during data preservation", func() {
+		// Trigger a preservation failure by setting PreservationMode to ClusterIdentity and
+		// delete resources to be preserved.
+		clusterInstance.Spec.Reinstall.PreservationMode = v1alpha1.PreservationModeClusterIdentity
+		for _, object := range []client.Object{secret1, secret2, secret3, secret4} {
+			Expect(c.Delete(ctx, object)).To(Succeed())
+		}
+
+		clusterInstance.Status.Reinstall.Conditions = []metav1.Condition{
+			{
+				Type:   string(v1alpha1.ReinstallPreservationDataBackedup),
+				Status: metav1.ConditionFalse,
+				Reason: string(v1alpha1.InProgress),
+			},
+			{
+				Type:   string(v1alpha1.ReinstallClusterIdentityDataDetected),
+				Status: metav1.ConditionFalse,
+				Reason: string(v1alpha1.InProgress),
+			}}
+
+		result, err := handler.ensureDataIsPreserved(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(result).To(Equal(reconcile.Result{Requeue: true}))
+
+		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallPreservationDataBackedup)
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(string(v1alpha1.DataUnavailable)))
+
+		cond = findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallClusterIdentityDataDetected)
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(string(v1alpha1.Failed)))
+	})
+
+})
+
+var _ = Describe("ensurePreservedDataIsRestored", func() {
+	var (
+		ctx        context.Context
+		c          client.Client
+		testLogger *zap.Logger
+		handler    *ReinstallHandler
+
+		testNamespace = "test"
+
+		clusterInstance *v1alpha1.ClusterInstance
+
+		secret1, secret2, secret3, secret4 *corev1.Secret
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		testLogger = zap.NewNop().Named("Test")
+
+		clusterInstance = &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      testNamespace,
+				Namespace: testNamespace,
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				Reinstall: &v1alpha1.ReinstallSpec{
+					PreservationMode: v1alpha1.PreservationModeAll,
+				},
+			},
+			Status: v1alpha1.ClusterInstanceStatus{
+				Conditions: []metav1.Condition{},
+				Reinstall:  &v1alpha1.ReinstallStatus{},
+			},
+		}
+
+		// Create preserved secrets
+		secret1 = createTestSecret("secret1", testNamespace, v1alpha1.PreservationModeClusterIdentity, false)
+		secret2 = createTestSecret("secret2", testNamespace, v1alpha1.PreservationModeClusterIdentity, false)
+		secret3 = createTestSecret("secret3", testNamespace, v1alpha1.PreservationModeAll, false)
+		secret4 = createTestSecret("secret4", testNamespace, v1alpha1.PreservationModeAll, false)
+
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(clusterInstance, secret1, secret2, secret3, secret4).
+			Build()
+
+		handler = &ReinstallHandler{
+			Client:          c,
+			DeletionHandler: &deletion.DeletionHandler{Client: c, Logger: testLogger},
+			Logger:          testLogger,
+		}
+	})
+
+	It("should return immediately if PreservationMode is None", func() {
+		clusterInstance.Spec.Reinstall.PreservationMode = v1alpha1.PreservationModeNone
+
+		result, err := handler.ensurePreservedDataIsRestored(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(Equal(reconcile.Result{Requeue: true}))
+		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallPreservationDataRestored)
+		Expect(cond.Reason).To(Equal(string(v1alpha1.PreservationNotRequired)))
+	})
+
+	It("should return if restoration is already completed", func() {
+		clusterInstance.Status.Reinstall.Conditions = []metav1.Condition{
+			{
+				Type:   string(v1alpha1.ReinstallPreservationDataRestored),
+				Status: metav1.ConditionTrue,
+				Reason: string(v1alpha1.Completed),
+			}}
+
+		result, err := handler.ensurePreservedDataIsRestored(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeZero())
+	})
+
+	It("should return an error if restoration previously failed", func() {
+		errorMsg := "restoration failed"
+		clusterInstance.Status.Reinstall.Conditions = []metav1.Condition{
+			{
+				Type:    string(v1alpha1.ReinstallPreservationDataRestored),
+				Status:  metav1.ConditionFalse,
+				Reason:  string(v1alpha1.Failed),
+				Message: errorMsg,
+			}}
+
+		result, err := handler.ensurePreservedDataIsRestored(ctx, testLogger, clusterInstance)
+		Expect(err).To(MatchError(errorMsg))
+		Expect(result).To(BeZero())
+	})
+
+	It("should restore preserved data if conditions are not completed or failed", func() {
+
+		clusterInstance.Status.Reinstall.Conditions = []metav1.Condition{
+			{
+				Type:    string(v1alpha1.ReinstallPreservationDataRestored),
+				Status:  metav1.ConditionFalse,
+				Reason:  string(v1alpha1.InProgress),
+				Message: "In progress",
+			}}
+
+		result, err := handler.ensurePreservedDataIsRestored(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(Equal(reconcile.Result{Requeue: true}))
+		// Check that Restoration completed successfully
+		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallPreservationDataRestored)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To((Equal(metav1.ConditionTrue)))
+		Expect(cond.Reason).To(Equal(string(v1alpha1.Completed)))
+	})
+
+	It("should return an error if restoration fails", func() {
+		// Induce error by deleting preserved objects and setting PreservationMode=ClusterIdentity
+		for _, object := range []client.Object{secret1, secret2, secret3, secret4} {
+			Expect(c.Delete(ctx, object)).To(Succeed())
+		}
+		clusterInstance.Spec.Reinstall.PreservationMode = v1alpha1.PreservationModeClusterIdentity
+
+		clusterInstance.Status.Reinstall.Conditions = []metav1.Condition{
+			{
+				Type:   string(v1alpha1.ReinstallPreservationDataRestored),
+				Status: metav1.ConditionFalse,
+				Reason: string(v1alpha1.InProgress),
+			}}
+
+		result, err := handler.ensurePreservedDataIsRestored(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(result).To(Equal(reconcile.Result{Requeue: true}))
+
+		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallPreservationDataRestored)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(string(v1alpha1.Failed)))
+	})
+
+})
+
+var _ = Describe("ensurePreservedDataIsCleanedUp", func() {
+
+	var (
+		ctx        context.Context
+		c          client.Client
+		testLogger *zap.Logger
+		handler    *ReinstallHandler
+
+		testNamespace = "test"
+
+		clusterInstance *v1alpha1.ClusterInstance
+
+		secret1, secret2, secret3, secret4 *corev1.Secret
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		testLogger = zap.NewNop().Named("Test")
+
+		clusterInstance = &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      testNamespace,
+				Namespace: testNamespace,
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				Reinstall: &v1alpha1.ReinstallSpec{
+					PreservationMode: v1alpha1.PreservationModeAll,
+				},
+			},
+			Status: v1alpha1.ClusterInstanceStatus{
+				Conditions: []metav1.Condition{},
+				Reinstall:  &v1alpha1.ReinstallStatus{},
+			},
+		}
+
+		// Create preserved secrets
+		secret1 = createTestSecret("secret1", testNamespace, v1alpha1.PreservationModeClusterIdentity, false)
+		secret2 = createTestSecret("secret2", testNamespace, v1alpha1.PreservationModeClusterIdentity, false)
+		secret3 = createTestSecret("secret3", testNamespace, v1alpha1.PreservationModeAll, false)
+		secret4 = createTestSecret("secret4", testNamespace, v1alpha1.PreservationModeAll, false)
+
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(clusterInstance, secret1, secret2, secret3, secret4).
+			Build()
+
+		handler = &ReinstallHandler{
+			Client:          c,
+			DeletionHandler: &deletion.DeletionHandler{Client: c, Logger: testLogger},
+			Logger:          testLogger,
+		}
+	})
+
+	It("should requeue with short interval when cleanup is not yet completed", func() {
+		// Verify that all preserved resources exist
+		for _, object := range []client.Object{secret1, secret2, secret3, secret4} {
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
+		}
+
+		result, err := handler.ensurePreservedDataIsCleanedUp(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(Equal(reconcile.Result{Requeue: true, RequeueAfter: deletionRequeueWithShortInterval}))
+	})
+
+	It("should delete all preserved resources when cleanup is completed", func() {
+		// Verify that all preserved resources exist
+		for _, object := range []client.Object{secret1, secret2, secret3, secret4} {
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
+		}
+
+		// First invocation of ensurePreservedDataIsCleanedUp should trigger deletion
+		_, err := handler.ensurePreservedDataIsCleanedUp(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Verify that all preserved resources have been deleted
+		for _, object := range []client.Object{secret1, secret2, secret3, secret4} {
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).NotTo(Succeed())
+		}
+
+		// Second invocation of ensurePreservedDataIsCleanedUp should return without an error with no requeue
+		result, err := handler.ensurePreservedDataIsCleanedUp(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+	})
+
+	It("should return a Timeout error when cleanup times out", func() {
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(clusterInstance, secret1, secret2, secret3, secret4).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Delete: func(ctx context.Context, fclient client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					return cierrors.NewDeletionTimeoutError("")
+				},
+			}).
+			Build()
+
+		handler = &ReinstallHandler{
+			Client:          c,
+			DeletionHandler: &deletion.DeletionHandler{Client: c, Logger: testLogger},
+			Logger:          testLogger,
+		}
+
+		result, err := handler.ensurePreservedDataIsCleanedUp(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(cierrors.IsDeletionTimeoutError(err)).To(BeTrue())
+		Expect(result).To(BeZero())
+	})
+
+	It("should return an error when cleanup encounters a generic error", func() {
+		errorMsg := "inject error"
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(clusterInstance, secret1, secret2, secret3, secret4).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Delete: func(ctx context.Context, fclient client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					return errors.New(errorMsg)
+				},
+			}).
+			Build()
+
+		handler = &ReinstallHandler{
+			Client:          c,
+			DeletionHandler: &deletion.DeletionHandler{Client: c, Logger: testLogger},
+			Logger:          testLogger,
+		}
+
+		result, err := handler.ensurePreservedDataIsCleanedUp(ctx, testLogger, clusterInstance)
+		Expect(err.Error()).To(ContainSubstring(errorMsg))
+		Expect(result).To(BeZero())
+	})
+
 })
