@@ -240,11 +240,11 @@ func isObjectDeleted(ctx context.Context, c client.Client, obj client.Object) (b
 }
 
 func initiateObjectDeletion(ctx context.Context, c client.Client, obj client.Object) error {
-	if err := c.Delete(ctx, obj, &client.DeleteOptions{
+	if err := client.IgnoreNotFound(c.Delete(ctx, obj, &client.DeleteOptions{
 		PropagationPolicy: ptr.To(metav1.DeletePropagationForeground),
-	}); err != nil {
+	})); err != nil {
 		return fmt.Errorf(
-			"failed to delete object (%s/%s): %w", obj.GetNamespace(), obj.GetName(), client.IgnoreNotFound(err))
+			"failed to delete object (%s/%s): %w", obj.GetNamespace(), obj.GetName(), err)
 	}
 	return nil
 }
