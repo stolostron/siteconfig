@@ -311,44 +311,49 @@ func backupResource(
 }
 
 func createResource(ctx context.Context, c client.Client, object client.Object, config config) error {
-	// Add labels to the preserved object.
-	labels := object.GetLabels()
-	if labels == nil {
-		labels = make(map[string]string)
+	mutateFn := func() error {
+		// Add labels to the preserved object.
+		labels := object.GetLabels()
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+
+		if config.ownerRef != "" {
+			labels[ci.OwnedByLabel] = config.ownerRef
+		}
+
+		// Add annotations to the preserved object.
+		annotations := object.GetAnnotations()
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+
+		annotations[resourceTypeAnnotationKey] = string(config.resourceType)
+
+		if config.reinstallGeneration != "" {
+			annotations[reinstallGenerationAnnotationKey] = config.reinstallGeneration
+		}
+
+		// Set additional label and annotation for retrieving and identifying backed-up resources.
+		preservedDataLabel := preservedDataLabelKey
+		additionalAnnotation := v1alpha1.PreservationLabelKey
+		if config.preservationMode == PreservationModeInternal {
+			preservedDataLabel = preservedInternalDataLabelKey
+			additionalAnnotation = InternalPreservationLabelKey
+		}
+		labels[preservedDataLabel] = fmt.Sprint(metav1.Now().Unix())
+		annotations[additionalAnnotation] = string(config.preservationMode)
+
+		object.SetLabels(labels)
+		object.SetAnnotations(annotations)
+
+		return nil
 	}
 
-	if config.ownerRef != "" {
-		labels[ci.OwnedByLabel] = config.ownerRef
-	}
-
-	// Add annotations to the preserved object.
-	annotations := object.GetAnnotations()
-	if annotations == nil {
-		annotations = make(map[string]string)
-	}
-
-	annotations[resourceTypeAnnotationKey] = string(config.resourceType)
-
-	if config.reinstallGeneration != "" {
-		annotations[reinstallGenerationAnnotationKey] = config.reinstallGeneration
-	}
-
-	// Set additional label and annotation for retrieving and identifying backed-up resources.
-	preservedDataLabel := preservedDataLabelKey
-	additionalAnnotation := v1alpha1.PreservationLabelKey
-	if config.preservationMode == PreservationModeInternal {
-		preservedDataLabel = preservedInternalDataLabelKey
-		additionalAnnotation = InternalPreservationLabelKey
-	}
-	labels[preservedDataLabel] = fmt.Sprint(metav1.Now().Unix())
-	annotations[additionalAnnotation] = string(config.preservationMode)
-
-	object.SetLabels(labels)
-	object.SetAnnotations(annotations)
-
-	// Create the backup resource.
-	if err := c.Create(ctx, object); err != nil {
-		return fmt.Errorf("failed to create preserved %s (%s/%s): %w",
+	// Use CreateOrUpdate to create or update the preserved resource.
+	_, err := controllerutil.CreateOrUpdate(ctx, c, object, mutateFn)
+	if err != nil {
+		return fmt.Errorf("failed to create or update preserved %s (%s/%s): %w",
 			object.GetObjectKind().GroupVersionKind().Kind,
 			object.GetNamespace(), object.GetName(),
 			err,
