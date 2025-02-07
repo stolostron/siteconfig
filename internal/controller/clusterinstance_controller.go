@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
@@ -169,6 +170,26 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	)
 
 	log.Info("Loaded ClusterInstance")
+
+	// Check if paused annotation is set
+	if clusterInstance.IsPaused() {
+		msg := fmt.Sprintf("Paused annotation '%s' is set, this requires a manual resolution. "+
+			"Please resolve the error and remove the annotation to continue reconciling the ClusterInstance CR",
+			v1alpha1.PausedAnnotation)
+		log.Warn(msg)
+		return ctrl.Result{}, nil
+	}
+
+	// Ensure ClusterInstance.Status.Paused is nil:
+	// - cleanup of Paused status when the Paused annotation is cleared.
+	if clusterInstance.Status.Paused != nil {
+		patch := client.MergeFrom(clusterInstance.DeepCopy())
+		clusterInstance.Status.Paused = nil
+		if err := r.Client.Status().Patch(ctx, clusterInstance, patch); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to clear Paused status, error: %w", err)
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
 
 	if res, err := r.handleFinalizer(ctx, log, clusterInstance); !res.IsZero() || err != nil {
 		if err != nil {
@@ -348,12 +369,15 @@ func (r *ClusterInstanceReconciler) handleFinalizer(
 
 	if err != nil {
 		if cierrors.IsDeletionTimeoutError(err) {
-			log.Warn("Finalization timed out; deferring further attempts")
-			// Add hold annotation for manual intervention (CNF-15719)
-			return ctrl.Result{Requeue: false}, nil
+			log.Warn("Finalization timed out; pausing reconciliation")
+			// Add paused annotation for manual intervention
+			if err1 := ci.ApplyPause(ctx, r.Client, log, clusterInstance, err.Error()); err1 != nil {
+				err = fmt.Errorf("encountered an error pausing ClusterInstance, error: %w", err1)
+			}
+			return ctrl.Result{}, err
 		}
 		log.Error("Finalization encountered an error", zap.Error(err))
-		return ctrl.Result{Requeue: true}, fmt.Errorf("finalization encountered an error: %w", err)
+		return ctrl.Result{}, fmt.Errorf("finalization encountered an error: %w", err)
 	}
 
 	if !deletionCompleted {
@@ -588,7 +612,8 @@ func createOrPatch(
 		// Only issue a Patch if the before and after resources (minus status) differ
 		if err := c.Patch(ctx, updatedLiveObj, patch); err != nil {
 			log.Warn("Failed to update resource", zap.Error(err))
-			return controllerutil.OperationResultNone, fmt.Errorf("failed to update resource during patch operation: %w", err)
+			return controllerutil.OperationResultNone,
+				fmt.Errorf("failed to update resource during patch operation: %w", err)
 		}
 		return controllerutil.OperationResultUpdated, nil
 	}
@@ -759,8 +784,11 @@ func (r *ClusterInstanceReconciler) pruneManifests(
 	if err != nil {
 		if cierrors.IsDeletionTimeoutError(err) {
 			log.Warn("Pruning operation timed out; manual intervention may be required", zap.Error(err))
-			// Add hold annotation for manual intervention (CNF-15719)
-			return false, nil
+			// Add paused annotation for manual intervention
+			if err1 := ci.ApplyPause(ctx, r.Client, log, clusterInstance, err.Error()); err1 != nil {
+				err = fmt.Errorf("encountered an error pausing ClusterInstance, error: %w", err1)
+			}
+			return false, err
 		}
 		log.Error("Pruning operation encountered an error", zap.Error(err))
 		return false, fmt.Errorf("pruning operation encountered an error: %w", err)
@@ -857,10 +885,25 @@ func (r *ClusterInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Log.Sugar().Infof("ClusterInstanceReconciler is configured to reconcile %d requests concurrently",
 		r.ConfigStore.GetMaxConcurrentReconciles())
 
+	holdAnnotationPredicate := predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			// Allow reconcile on the addition or removal of the HoldAnnotation
+			_, oldEvent := e.ObjectOld.GetAnnotations()[v1alpha1.PausedAnnotation]
+			_, newEvent := e.ObjectNew.GetAnnotations()[v1alpha1.PausedAnnotation]
+			return oldEvent != newEvent
+		},
+	}
+
 	//nolint:wrapcheck
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.ClusterInstance{}).
-		WithEventFilter(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{})).
-		WithOptions(controller.Options{MaxConcurrentReconciles: r.ConfigStore.GetMaxConcurrentReconciles()}).
+		WithEventFilter(predicate.Or(
+			predicate.GenerationChangedPredicate{},
+			predicate.LabelChangedPredicate{},
+			holdAnnotationPredicate,
+		)).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: r.ConfigStore.GetMaxConcurrentReconciles(),
+		}).
 		Complete(r)
 }

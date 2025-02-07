@@ -115,37 +115,50 @@ func (r *ReinstallHandler) ProcessRequest(
 
 	result = reconcile.Result{}
 	err = nil
-	updateEndtime := false
+	setEndtime := false
+	applyPause := false
 
 	defer func() {
 		patch := client.MergeFrom(clusterInstance.DeepCopy())
-		if updateEndtime {
+		if setEndtime && err != nil {
 			clusterInstance.Status.Reinstall.RequestEndTime = metav1.Now()
-			// Add hold annotation for manual intervention (CNF-15719)
 		}
-
 		changed := setReinstallStatusCondition(clusterInstance, *reinstallRequestProcessedCondition)
-		if changed || updateEndtime {
-			if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
+		if changed || setEndtime {
+			updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
+			if updateErr != nil {
 				err = logAndWrapUpdateFailure(log, err, updateErr,
 					fmt.Sprintf("failed to update reinstall condition '%s'", reinstallRequestProcessedCondition.Type))
+				return
 			}
+		}
+
+		// Check if the Paused annotation needs to be applied
+		if applyPause {
+			log.Info("Attempting to pause ClusterInstance reconciliation")
+			if err1 := ci.ApplyPause(ctx, r.Client, log, clusterInstance, err.Error()); err1 != nil && err == nil {
+				err = fmt.Errorf("encountered an error pausing ClusterInstance, error: %w", err1)
+			}
+			log.Info("Paused ClusterInstance reconciliation")
 		}
 	}()
 
 	tasks := []struct {
-		Description string
-		Run         func(context.Context, *zap.Logger, *v1alpha1.ClusterInstance) (reconcile.Result, error)
+		Description                 string
+		Run                         func(context.Context, *zap.Logger, *v1alpha1.ClusterInstance) (reconcile.Result, error)
+		FailReinstallRequestOnError bool
 	}{
-		{"Validating reinstall request", r.ensureValidReinstallRequest},
-		{"Setting reinstall request startTime", r.ensureStartTimeIsSet},
-		{"Applying preservation labels to ClusterInstance secrets", r.applyPreservedLabelToClusterInstanceSecrets},
-		{"Preserving data", r.ensureDataIsPreserved},
-		{"Deleting rendered manifests", r.ensureRenderedManifestsAreDeleted},
-		{"Restoring preserved data", r.ensurePreservedDataIsRestored},
+		{"Validating reinstall request", r.ensureValidReinstallRequest, true},
+		{"Setting reinstall request startTime", r.ensureStartTimeIsSet, true},
+		{"Applying preservation labels to ClusterInstance secrets", r.applyPreservedLabelToClusterInstanceSecrets, true},
+		{"Preserving data", r.ensureDataIsPreserved, true},
+		{"Deleting rendered manifests", r.ensureRenderedManifestsAreDeleted, false},
+		{"Restoring preserved data", r.ensurePreservedDataIsRestored, true},
 	}
 	for _, task := range tasks {
 		log.Info("Executing task", zap.String("Task", task.Description))
+		reinstallRequestProcessedCondition = reinstallRequestProcessedConditionStatus(metav1.ConditionFalse,
+			v1alpha1.InProgress, task.Description)
 		result, err = task.Run(ctx, log, clusterInstance)
 		if !result.IsZero() {
 			log.Info("ClusterInstance to be requeued")
@@ -156,12 +169,18 @@ func (r *ReinstallHandler) ProcessRequest(
 			reinstallRequestProcessedCondition = reinstallRequestProcessedConditionStatus(
 				metav1.ConditionFalse, v1alpha1.Failed,
 				fmt.Sprintf("Encountered error executing task: %s. Error: %v", task.Description, err))
-			updateEndtime = true
+			if task.FailReinstallRequestOnError {
+				setEndtime = true
+			} else {
+				applyPause = true
+			}
 			return
 		}
 		log.Info("Task completed", zap.String("Task", task.Description))
 	}
 
+	reinstallRequestProcessedCondition = reinstallRequestProcessedConditionStatus(metav1.ConditionFalse,
+		v1alpha1.InProgress, "Finalizing reinstall request")
 	log.Info("Finalizing reinstall request")
 	if err = r.finalizeReinstallRequest(ctx, log, clusterInstance); err != nil {
 		return
@@ -281,10 +300,13 @@ func (r *ReinstallHandler) ensureRenderedManifestsAreDeleted(ctx context.Context
 	defer func() {
 		if renderedManifestsDeletedCondition != nil {
 			if changed := setReinstallStatusCondition(clusterInstance, *renderedManifestsDeletedCondition); changed {
-				result.Requeue = true
 				if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 					err = logAndWrapUpdateFailure(log, err, updateErr,
 						fmt.Sprintf("failed to update reinstall condition '%s'", renderedManifestsDeletedCondition.Type))
+					return
+				}
+				if changed && err == nil {
+					result.Requeue = true
 				}
 			}
 		}
@@ -320,11 +342,10 @@ func (r *ReinstallHandler) ensureRenderedManifestsAreDeleted(ctx context.Context
 
 	if err != nil {
 		if cierrors.IsDeletionTimeoutError(err) {
-			log.Warn("Deletion timed out, deferring further attempts")
-			// Add hold annotation for manual intervention (CNF-15719)
+			msg := "Timed-out waiting for rendered manifests to be deleted."
+			log.Info(msg)
 			renderedManifestsDeletedCondition = reinstallRenderedManifestsDeletedConditionStatus(
-				metav1.ConditionFalse, v1alpha1.TimedOut,
-				"Timed-out waiting for rendered manifests to be deleted.")
+				metav1.ConditionFalse, v1alpha1.TimedOut, msg)
 			return
 		}
 
