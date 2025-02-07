@@ -471,6 +471,28 @@ var _ = Describe("createResource", func() {
 		Expect(annotations[reinstallGenerationAnnotationKey]).To(Equal(testConfig.reinstallGeneration))
 	})
 
+	It("should update the resource if it already exists", func() {
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithObjects(obj).
+			Build()
+
+		updatedObj := &corev1.ConfigMap{}
+		err := c.Get(ctx, testConfig.resourceKey, updatedObj)
+		Expect(err).ToNot(HaveOccurred())
+		data := map[string]string{"this": "changed"}
+		updatedObj.Data = data
+		Expect(c.Update(ctx, updatedObj)).To(Succeed())
+
+		err = createResource(ctx, c, obj, testConfig)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(c.Get(ctx, testConfig.resourceKey, updatedObj)).To(Succeed())
+		Expect(updatedObj.GetLabels()).To(HaveKey(preservedDataLabelKey), "preservedDataLabelKey should be set")
+		Expect(updatedObj.GetAnnotations()).To(HaveKey(resourceTypeAnnotationKey), "resourceTypeAnnotationKey should be set")
+		Expect(updatedObj.Data).To(Equal(data))
+	})
+
 	It("should return an error if the client fails to create the resource", func() {
 		c = fakeclient.NewClientBuilder().
 			WithScheme(scheme.Scheme).
@@ -484,6 +506,22 @@ var _ = Describe("createResource", func() {
 		err := createResource(ctx, c, obj, testConfig)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("failed to create"))
+	})
+
+	It("should return an error if the client fails to update the existing resource", func() {
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithObjects(obj).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Update: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+					return fmt.Errorf("inject error")
+				},
+			}).
+			Build()
+
+		err := createResource(ctx, c, obj, testConfig)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("inject error"))
 	})
 })
 
