@@ -727,6 +727,11 @@ func classifyPreservedResource(obj client.Object) resourceCategory {
 		return resourceCategoryUnknown
 	}
 
+	// Check if annotations has the ClusterIdentityDataAnnotationKey
+	if _, ok := annotations[ClusterIdentityDataAnnotationKey]; ok {
+		return resourceCategoryClusterIdentity
+	}
+
 	switch annotations[v1alpha1.PreservationLabelKey] {
 	case string(v1alpha1.PreservationModeClusterIdentity):
 		return resourceCategoryClusterIdentity
