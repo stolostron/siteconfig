@@ -83,7 +83,6 @@ func (d *DeletionHandler) DeleteObjects(
 	deletionCompleted = false
 	err = nil
 
-	patch := client.MergeFrom(clusterInstance.DeepCopy())
 	manifestsRendered := append([]v1alpha1.ManifestReference{}, clusterInstance.Status.ManifestsRendered...)
 
 	objectSyncWaveMap := ci.SyncWaveMap{}
@@ -98,6 +97,7 @@ func (d *DeletionHandler) DeleteObjects(
 	)
 
 	defer func() {
+		patch := client.MergeFrom(clusterInstance.DeepCopy())
 		// Update ManifestsRendered if there are changes
 		manifestsRendered = filterOutDeletedManifests(manifestsRendered, manifestsDeleted)
 		if !equality.Semantic.DeepEqual(clusterInstance.Status.ManifestsRendered, manifestsRendered) {

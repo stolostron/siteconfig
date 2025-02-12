@@ -489,7 +489,7 @@ var _ = Describe("ensureRenderedManifestsAreDeleted", func() {
 		result, err := handler.ensureRenderedManifestsAreDeleted(ctx, testLogger, clusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(cierrors.IsDeletionTimeoutError(err)).To(BeTrue())
-		Expect(result.Requeue).To(BeTrue())
+		Expect(result).To(BeZero())
 	})
 
 	It("should return an error if deletion fails", func() {
@@ -517,7 +517,7 @@ var _ = Describe("ensureRenderedManifestsAreDeleted", func() {
 		result, err := handler.ensureRenderedManifestsAreDeleted(ctx, testLogger, clusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring(errorMsg))
-		Expect(result.Requeue).To(BeTrue())
+		Expect(result).To(BeZero())
 	})
 
 	It("should requeue if deletion is still in progress", func() {
@@ -587,6 +587,8 @@ var _ = Describe("ProcessRequest", func() {
 		clusterInstance *v1alpha1.ClusterInstance
 
 		pullSecret, bmcCredential *corev1.Secret
+
+		name, namespace string
 	)
 
 	BeforeEach(func() {
@@ -597,8 +599,8 @@ var _ = Describe("ProcessRequest", func() {
 		configStore, err = configuration.NewConfigurationStore(configuration.NewDefaultConfiguration())
 		Expect(err).ToNot(HaveOccurred())
 
-		name := "test"
-		namespace := "test"
+		name = "test"
+		namespace = "test"
 
 		pullSecret = generateClusterInstanceSecret("pull-secret", namespace)
 		bmcCredential = generateClusterInstanceSecret("bmc-secret-1", namespace)
@@ -688,15 +690,17 @@ var _ = Describe("ProcessRequest", func() {
 		Expect(clusterInstance.Status.Reinstall.RequestEndTime).To(BeZero())
 		Expect(clusterInstance.Status.Reinstall.ObservedGeneration).To(BeEmpty())
 
-		_, err := handler.ProcessRequest(ctx, clusterInstance)
-		Expect(err).NotTo(HaveOccurred())
-
 		// Invoke 1st execution of ProcessRequest -> this will trigger updates to clusterInstance.Status.Reinstall
 		result, err := handler.ProcessRequest(ctx, clusterInstance)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(BeZero())
 
 		// Verify the expected clusterInstance.Status.Reinstall
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+		reinstallStatus := clusterInstance.Status.Reinstall
+		Expect(reinstallStatus.InProgressGeneration).To(BeEmpty())
+		Expect(clusterInstance.Status.Reinstall.RequestEndTime).ToNot(BeZero())
+		Expect(clusterInstance.Status.Reinstall.ObservedGeneration).To(Equal(clusterInstance.Spec.Reinstall.Generation))
 		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallRequestProcessed)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
@@ -705,7 +709,89 @@ var _ = Describe("ProcessRequest", func() {
 		// Invoke 2nd execution of ProcessRequest should do nothing -> reinstall request should be processed
 		result, err = handler.ProcessRequest(ctx, clusterInstance)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(BeZero())
+	})
+
+	It("should set the Paused annotation on the ClusterInstance when an error occurs", func() {
+
+		object := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "cm1",
+				Namespace: namespace,
+				Labels:    map[string]string{ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(namespace, name)},
+			},
+		}
+
+		clusterInstance = &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				Reinstall: &v1alpha1.ReinstallSpec{
+					PreservationMode: v1alpha1.PreservationModeNone,
+					Generation:       "1234",
+				},
+			},
+			Status: v1alpha1.ClusterInstanceStatus{
+				Conditions: []metav1.Condition{},
+				Reinstall: &v1alpha1.ReinstallStatus{
+					InProgressGeneration: "1234",
+					RequestStartTime:     metav1.Now(),
+					RequestEndTime:       metav1.Time{},
+				},
+				ManifestsRendered: []v1alpha1.ManifestReference{
+					{
+						APIGroup:  ptr.To("v1"),
+						Kind:      "ConfigMap",
+						Name:      object.GetName(),
+						Namespace: object.GetNamespace(),
+						SyncWave:  0,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+					},
+				},
+			},
+		}
+
+		setReinstallStatusCondition(clusterInstance, *reinstallRequestValidatedConditionStatus(metav1.ConditionTrue, v1alpha1.Completed, "Valid reinstall request"))
+		setReinstallStatusCondition(clusterInstance, *reinstallPreservationDataBackedupConditionStatus(metav1.ConditionFalse, v1alpha1.PreservationNotRequired, "PreservationMode is set to None."))
+		setReinstallStatusCondition(clusterInstance, *reinstallClusterIdentityDataDetectedConditionStatus(metav1.ConditionFalse, v1alpha1.PreservationNotRequired, "PreservationMode is set to None."))
+		setReinstallStatusCondition(clusterInstance, *reinstallRenderedManifestsDeletedConditionStatus(metav1.ConditionFalse, v1alpha1.InProgress, "Rendered manifests are being deleted"))
+		setReinstallStatusCondition(clusterInstance, *reinstallPreservationDataRestoredConditionStatus(metav1.ConditionFalse, v1alpha1.PreservationNotRequired, "PreservationMode is set to None."))
+		setReinstallStatusCondition(clusterInstance, *reinstallRequestProcessedConditionStatus(metav1.ConditionFalse, v1alpha1.InProgress, "In progress"))
+
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(clusterInstance, object).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Delete: func(ctx context.Context, fclient client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					return cierrors.NewDeletionTimeoutError("")
+				},
+			}).
+			Build()
+
+		handler = &ReinstallHandler{
+			ConfigStore:     configStore,
+			Client:          c,
+			DeletionHandler: &deletion.DeletionHandler{Client: c, Logger: testLogger},
+			Logger:          testLogger,
+		}
+
+		handler.ConfigStore.SetAllowReinstalls(true)
+
+		// Verify that the paused annotation is not set on the ClusterInstance
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+		Expect(clusterInstance.IsPaused()).To(BeFalse())
+
+		result, err := handler.ProcessRequest(ctx, clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(cierrors.IsDeletionTimeoutError(err)).To(BeTrue())
+		Expect(result).To(BeZero())
+
+		// Verify that the paused annotation is set on the ClusterInstance
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+		Expect(clusterInstance.IsPaused()).To(BeTrue())
 	})
 })
 

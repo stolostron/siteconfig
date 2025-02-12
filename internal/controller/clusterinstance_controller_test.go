@@ -161,6 +161,66 @@ var _ = Describe("Reconcile", func() {
 		Expect(res).To(Equal(ctrl.Result{}))
 	})
 
+	Context("Test Paused Annotation", func() {
+		It("returns a zero result with no error when the paused annotation is set", func() {
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+			err := ci.ApplyPause(ctx, c, testLogger, clusterInstance, "test")
+			Expect(err).NotTo(HaveOccurred())
+
+			res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(BeZero())
+		})
+
+		It("continues reconciling a ClusterInstance object when the paused annotation is removed", func() {
+			// Set ObjectMeta.Generation and Status.ObservedGeneration to be different to ensure reconcile
+			generation := int64(1)
+			clusterInstance.ObjectMeta.Generation = generation
+			clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
+				ObservedGeneration: generation - 1,
+			}
+			metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, v1alpha1.PausedAnnotation, "")
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+			Expect(clusterInstance.IsPaused()).To(BeTrue())
+
+			// Verify that zero result is returned (due to the presence of the paused annotation)
+			result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(BeZero())
+
+			// Remove the paused annotation
+			err = ci.RemovePause(ctx, c, testLogger, clusterInstance)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+			Expect(clusterInstance.IsPaused()).To(BeFalse())
+
+			// Verify that reconcile continues -- we can expect errors to occur in the ClusterInstance validations stage
+			result, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+			Expect(err).To(HaveOccurred())
+			Expect(result).NotTo(BeZero())
+		})
+
+		It("clears the Paused status when the paused annotation is not present", func() {
+			clusterInstance.Status.Paused = &v1alpha1.PausedStatus{
+				TimeSet: metav1.Now(),
+				Reason:  "foobar",
+			}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+			Expect(clusterInstance.Annotations).ToNot(HaveKey(v1alpha1.PausedAnnotation))
+
+			res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).NotTo(BeZero())
+
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+			Expect(clusterInstance.Status.Paused).To(BeNil())
+		})
+	})
+
 	It("doesn't error for a missing ClusterInstance", func() {
 		key := types.NamespacedName{
 			Namespace: testParams.ClusterName,
@@ -364,6 +424,7 @@ var _ = Describe("handleFinalizer", func() {
 				},
 			},
 		}
+		clusterInstance.DeletionTimestamp = &metav1.Time{Time: metav1.Now().UTC()}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		// Create manifests
@@ -538,87 +599,77 @@ var _ = Describe("handleFinalizer", func() {
 		Expect(c.Get(ctx, keyMc, mc)).ToNot(Succeed())
 	})
 
-	When("a timeout occurs", func() {
-		It("does not requeue the reconciler", func() {
+	It("sets the Paused annotation when a Timeout error occurs", func() {
 
-			deleteWithoutTimeout := false
-			testClient := fakeclient.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
-				Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-					return c.Get(ctx, key, obj, opts...)
+		// Specify BareMetalHost object
+		bmh := &bmh_v1alpha1.BareMetalHost{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "node-0",
+				Namespace: clusterNamespace,
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
 				},
-				Create: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-					return c.Create(ctx, obj, opts...)
+				Finalizers: []string{"block-deletion"},
+			},
+		}
+
+		// Specify ClusterInstance, ensure it's initialized with DeletionTimestamp
+		clusterInstance := &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              clusterName,
+				Namespace:         clusterNamespace,
+				DeletionTimestamp: &metav1.Time{Time: metav1.Now().UTC()},
+				Finalizers:        []string{clusterInstanceFinalizer, "do-not-delete"},
+			},
+			Status: v1alpha1.ClusterInstanceStatus{
+				ManifestsRendered: []v1alpha1.ManifestReference{
+					{
+						APIGroup:  ptr.To(BareMetalHostApiVersion),
+						Kind:      BareMetalHostKind,
+						Name:      bmh.Name,
+						Namespace: bmh.Namespace,
+						SyncWave:  1,
+						Status:    v1alpha1.ManifestRenderedSuccess,
+					},
 				},
-				Delete: func(ctx context.Context, fclient client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
-					if deleteWithoutTimeout {
-						return c.Delete(ctx, obj, opts...)
-					}
+			},
+		}
+
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(bmh, clusterInstance).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Delete: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
 					return cierrors.NewDeletionTimeoutError("")
 				},
-				Patch: func(ctx context.Context, client client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-					return c.Patch(ctx, obj, patch, opts...)
-				},
-				SubResourcePatch: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-					return c.Status().Patch(ctx, obj, patch, opts...)
-				},
-			}).Build()
+			}).
+			Build()
 
-			r = &ClusterInstanceReconciler{
-				Client:          testClient,
-				Scheme:          scheme.Scheme,
-				Log:             testLogger,
-				DeletionHandler: &deletion.DeletionHandler{Client: c, Logger: testLogger},
-			}
+		r = &ClusterInstanceReconciler{
+			Client:          c,
+			Scheme:          scheme.Scheme,
+			Log:             testLogger,
+			TmplEngine:      ci.NewTemplateEngine(),
+			DeletionHandler: &deletion.DeletionHandler{Client: c, Logger: testLogger},
+		}
 
-			manifestName := TestClusterInstanceName
-			clusterInstance := &v1alpha1.ClusterInstance{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       clusterName,
-					Namespace:  clusterNamespace,
-					Finalizers: []string{clusterInstanceFinalizer},
-				},
-				Status: v1alpha1.ClusterInstanceStatus{
-					ManifestsRendered: []v1alpha1.ManifestReference{
-						{
-							APIGroup:  ptr.To(ClusterDeploymentApiVersion),
-							Kind:      ClusterDeploymentKind,
-							Name:      manifestName,
-							Namespace: clusterNamespace,
-							SyncWave:  1,
-							Status:    v1alpha1.ManifestRenderedSuccess,
-						},
-					},
-				},
-			}
-			Expect(testClient.Create(ctx, clusterInstance)).To(Succeed())
+		// Ensure BareMetalHost and ClusterInstance objects exist
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(bmh), bmh)).To(Succeed())
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+		Expect(clusterInstance.DeletionTimestamp).ToNot(BeZero())
 
-			// Create BareMetalHost object
-			bmh := &bmh_v1alpha1.BareMetalHost{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      manifestName,
-					Namespace: clusterNamespace,
-					Labels: map[string]string{
-						ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
-					},
-					Finalizers: []string{"block-deletion"},
-				},
-			}
-			Expect(testClient.Create(ctx, bmh)).To(Succeed())
+		// Execute handleFinalizer in which a Deletion Timeout error is injected
+		res, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(cierrors.IsDeletionTimeoutError(err)).To(BeTrue())
+		// Since we expect the paused annotation and Paused objects to be set, we expect a requeue
+		Expect(res).ToNot(BeNil())
 
-			// Delete ClusterInstance for finalizer
-			deleteWithoutTimeout = true
-			Expect(testClient.Delete(ctx, clusterInstance)).To(Succeed())
-
-			// Enable trigger timeout error on deletion
-			deleteWithoutTimeout = false
-
-			// Fetch the ClusterInstance to get the DeletionTimestamp
-			Expect(testClient.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
-
-			res, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(res).To(Equal(ctrl.Result{Requeue: false}))
-		})
+		// Verify that the paused annotation is set on the ClusterInstance
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+		Expect(clusterInstance.IsPaused()).To(BeTrue())
+		Expect(clusterInstance.Status.Paused.Reason).To(ContainSubstring(err.Error()))
 	})
 })
 
@@ -1007,6 +1058,94 @@ var _ = Describe("pruneManifests", func() {
 
 	})
 
+	It("fails to prunes manifests due to a Timeout error", func() {
+
+		generation := int64(1)
+		clusterInstanceKey := types.NamespacedName{Namespace: TestClusterInstanceNamespace, Name: TestClusterInstanceName}
+		clusterInstance := &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       clusterInstanceKey.Name,
+				Namespace:  clusterInstanceKey.Namespace,
+				Finalizers: []string{clusterInstanceFinalizer},
+				Generation: generation,
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				PruneManifests: []v1alpha1.ResourceRef{
+					{
+						APIVersion: BareMetalHostApiVersion,
+						Kind:       BareMetalHostKind,
+					},
+				},
+				Nodes: []v1alpha1.NodeSpec{
+					{
+						HostName: TestNode1Hostname,
+					},
+				},
+			},
+			Status: v1alpha1.ClusterInstanceStatus{
+				ManifestsRendered:  manifestsRenderedRefs,
+				ObservedGeneration: generation - 1,
+			},
+		}
+
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(clusterInstance).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Delete: func(ctx context.Context, fclient client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					return cierrors.NewDeletionTimeoutError("")
+				},
+			}).Build()
+
+		r = &ClusterInstanceReconciler{
+			Client:          c,
+			Scheme:          scheme.Scheme,
+			Log:             testLogger,
+			TmplEngine:      ci.NewTemplateEngine(),
+			DeletionHandler: &deletion.DeletionHandler{Client: c, Logger: testLogger},
+		}
+
+		objects = []ci.RenderedObject{bmh1RenderedObject}
+		objectKeys = []types.NamespacedName{bmh1Key}
+		manifestsRenderedRefs = []v1alpha1.ManifestReference(nil)
+		pruneList := objects
+
+		// Create the manifests and confirm they exist
+		manifestsRenderedRefs = []v1alpha1.ManifestReference(nil)
+		for index, object := range objects {
+			obj := object.GetObject()
+			obj.SetResourceVersion("")
+			Expect(c.Create(ctx, &obj)).To(Succeed())
+			obj2 := &unstructured.Unstructured{}
+			obj2.SetGroupVersionKind(obj.GroupVersionKind())
+			Expect(c.Get(ctx, objectKeys[index], obj2)).To(Succeed())
+			manifestsRenderedRefs = append(manifestsRenderedRefs, *object.ManifestReference())
+		}
+
+		pruningCompleted, err := r.pruneManifests(ctx, testLogger, clusterInstance, pruneList)
+		Expect(err).To(HaveOccurred())
+		Expect(cierrors.IsDeletionTimeoutError(err)).To(BeTrue())
+		Expect(pruningCompleted).To(BeFalse())
+
+		Expect(c.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
+		Expect(clusterInstance.Annotations).To(HaveKey(v1alpha1.PausedAnnotation))
+		Expect(clusterInstance.Status.Paused.Reason).To(ContainSubstring(err.Error()))
+		result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: clusterInstanceKey})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeZero())
+
+		// Remove the hold-annotation and verify that the Paused status is cleared
+		Expect(ci.RemovePause(ctx, c, testLogger, clusterInstance)).To(Succeed())
+
+		Expect(c.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
+		Expect(clusterInstance.Annotations).ToNot(HaveKey(v1alpha1.PausedAnnotation))
+		Expect(clusterInstance.Status.Paused).To(BeNil())
+
+		result, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+		Expect(err).To(HaveOccurred()) // expect ClusterInstance validation error
+		Expect(result).NotTo(BeZero())
+	})
 })
 
 var _ = Describe("handleValidate", func() {
