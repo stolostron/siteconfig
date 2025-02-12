@@ -16,22 +16,22 @@ metadata:
 
 ### When is the Paused Annotation Applied?
 When an irrecoverable error occurs, the `ClusterInstance` controller in the SiteConfig Operator
-sets the paused annotation. Additionally, it updates `ClusterInstance.Status.HoldReconciliation` with
+sets the paused annotation. Additionally, it updates `ClusterInstance.Status.Paused` with
 information about the error, including the reason for the failure. If more details are needed,
 users can check the controller logs.
 
 ### How to Identify a Paused ClusterInstance?
-The `HOLDAPPLIED` column in `oc get clusterinstances -A` displays when the paused annotation
+The `PAUSED` column in `oc get clusterinstances -A` displays when the paused annotation
 is applied:
 
 ```sh
 $ oc get clusterinstances -A
-NAMESPACE   NAME         HOLDAPPLIED   PROVISIONSTATUS   PROVISIONDETAILS          AGE
+NAMESPACE   NAME         PAUSED        PROVISIONSTATUS   PROVISIONDETAILS          AGE
 my-cluster  my-cluster   5m12s         InProgress        Provisioning cluster      61m27s
 ```
 
 ```sh
-$ oc get clusterinstance -n my-cluster my-cluster -ojsonpath='{.status.holdReconciliation}' | jq
+$ oc get clusterinstance -n my-cluster my-cluster -ojsonpath='{.status.paused}' | jq
 {
   "reason": "deletion timeout exceeded for object (BareMetalHost:my-cluster/node-0): Timed out waiting to delete object (BareMetalHost:my-cluster/node-0)",
   "timeSet": "2025-02-10T17:25:40Z"
