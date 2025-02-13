@@ -145,6 +145,9 @@ spec:
   automatedCleaningMode: "{{ .SpecialVars.CurrentNode.AutomatedCleaningMode }}"
   online: true
   externallyProvisioned: true
+{{ if .SpecialVars.CurrentNode.CPUArchitecture }}
+  architecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture | toString }}"
+{{ end }}
 {{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:
 {{ .SpecialVars.CurrentNode.RootDeviceHints | toYaml | indent 4 }}
