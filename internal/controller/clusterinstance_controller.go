@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -239,20 +240,61 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Only update the ObservedGeneration when all the above processes have been successfully executed
 	if clusterInstance.Status.ObservedGeneration != clusterInstance.ObjectMeta.Generation {
-		log.Sugar().Infof("Updating ObservedGeneration to %d", clusterInstance.ObjectMeta.Generation)
-		patch := client.MergeFrom(clusterInstance.DeepCopy())
-		clusterInstance.Status.ObservedGeneration = clusterInstance.ObjectMeta.Generation
-
-		if err := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); err != nil {
-			return ctrl.Result{}, fmt.Errorf(
-				"failed to patch ClusterInstance status for ObservedGeneration update to %d: %w",
-				clusterInstance.ObjectMeta.Generation, err)
+		if err := r.updateObservedStatus(ctx, log, clusterInstance); err != nil {
+			return ctrl.Result{}, fmt.Errorf("encountered an error updating observed ClusterInstance status: %w", err)
 		}
-
-		return ctrl.Result{}, nil
 	}
 
 	return doNotRequeue(), nil
+}
+
+func (r *ClusterInstanceReconciler) updateObservedStatus(
+	ctx context.Context,
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) error {
+	// Capture and compare snapshot of ClusterInstance.Spec
+	lastSpecJSON, exists := clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation]
+	lastAppliedSpec := &v1alpha1.ClusterInstanceSpec{}
+	if exists {
+		if err := json.Unmarshal([]byte(lastSpecJSON), lastAppliedSpec); err != nil {
+			return fmt.Errorf("failed to unmarshal last-applied Spec: %w", err)
+		}
+	}
+
+	if !exists || !equality.Semantic.DeepEqual(clusterInstance.Spec, lastAppliedSpec) {
+		currentSpecJSON, err := json.Marshal(clusterInstance.Spec)
+		if err != nil {
+			return fmt.Errorf("failed to marshal current ClusterInstance spec: %w", err)
+		}
+
+		log.Sugar().Infof("Updating  %s annotation to %v", v1alpha1.LastClusterInstanceSpecAnnotation,
+			string(currentSpecJSON))
+		patch := client.MergeFrom(clusterInstance.DeepCopy())
+		metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, v1alpha1.LastClusterInstanceSpecAnnotation,
+			string(currentSpecJSON))
+		if err := r.Client.Patch(ctx, clusterInstance, patch); err != nil {
+			return fmt.Errorf("failed to update %s annotation: %w",
+				v1alpha1.LastClusterInstanceSpecAnnotation, err)
+		}
+
+		// Re-fetch updated ClusterInstance
+		if err := r.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance); err != nil {
+			log.Error("Failed to get ClusterInstance", zap.Error(err))
+			return fmt.Errorf("failed to re-fetch ClusterInstance: %w", err)
+		}
+	}
+
+	log.Sugar().Infof("Updating ObservedGeneration to %d", clusterInstance.ObjectMeta.Generation)
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
+	clusterInstance.Status.ObservedGeneration = clusterInstance.ObjectMeta.Generation
+
+	if err := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); err != nil {
+		return fmt.Errorf("failed to patch ClusterInstance status for ObservedGeneration update to %d: %w",
+			clusterInstance.ObjectMeta.Generation, err)
+	}
+
+	return nil
 }
 
 func (r *ClusterInstanceReconciler) applyACMBackupLabelToInstallTemplates(

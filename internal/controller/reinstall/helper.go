@@ -18,8 +18,10 @@ package reinstall
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 
 	"go.uber.org/zap"
 
@@ -27,6 +29,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/wI2L/jsondiff"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
@@ -323,4 +327,61 @@ func getDataRestorationSummary(
 		metav1.ConditionTrue, v1alpha1.Completed,
 		fmt.Sprintf("%d resources were successfully restored: %d cluster-identity resources, %d other resources",
 			totalRestoredResources, clusterIDCount, otherCount)), nil
+}
+
+func computeClusterInstanceSpecDiff(clusterInstance *v1alpha1.ClusterInstance) (string, error) {
+
+	lastObserved, ok := clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation]
+	if !ok {
+		return "", nil
+	}
+
+	lastObservedSpec := &v1alpha1.ClusterInstanceSpec{}
+	if err := json.Unmarshal([]byte(lastObserved), lastObservedSpec); err != nil {
+		return "", fmt.Errorf("failed to unmarshal last-observed spec: %w", err)
+	}
+
+	lastObservedSpecJSON, err := json.Marshal(lastObservedSpec)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal last-observed ClusterInstance spec: %w", err)
+	}
+
+	currentSpecJSON, err := json.Marshal(clusterInstance.Spec)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal current ClusterInstance spec: %w", err)
+	}
+
+	// Generate JSON Patch using jsondiff
+	diff, err := jsondiff.CompareJSON(lastObservedSpecJSON, currentSpecJSON)
+	if err != nil {
+		return "", fmt.Errorf(
+			"failed to compute the difference between the last and the current ClusterInstance specs: %w", err)
+	}
+
+	// Return empty string for no differences
+	if len(diff) == 0 {
+		return "", nil
+	}
+
+	// Sort the Difference by Path (i.e. spec field), Value and then by Operation Type (add, replace, remove)
+	sort.SliceStable(diff, func(i, j int) bool {
+		if diff[i].Path != diff[j].Path {
+			return diff[i].Path < diff[j].Path
+		}
+		vi, _ := json.Marshal(diff[i].Value)
+		vj, _ := json.Marshal(diff[j].Value)
+		if string(vi) != string(vj) {
+			return string(vi) < string(vj)
+		}
+		return diff[i].Type < diff[j].Type
+	})
+
+	// Convert JSON Patch to string
+	diffJSON, err := json.Marshal(diff)
+	if err != nil {
+		return "", fmt.Errorf(
+			"failed to marshal the difference between the last and the current ClusterInstance specs as JSON: %w", err)
+	}
+
+	return string(diffJSON), nil
 }

@@ -18,7 +18,9 @@ package reinstall
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -38,6 +40,7 @@ import (
 	"github.com/stolostron/siteconfig/internal/controller/deletion"
 	cierrors "github.com/stolostron/siteconfig/internal/controller/errors"
 	"github.com/stolostron/siteconfig/internal/controller/preservation"
+	"github.com/wI2L/jsondiff"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -173,6 +176,7 @@ var _ = Describe("finalizeReinstallRequest", func() {
 				Namespace: "test",
 			},
 			Spec: v1alpha1.ClusterInstanceSpec{
+				ClusterName: "foobar",
 				Reinstall: &v1alpha1.ReinstallSpec{
 					Generation:       "gen-2",
 					PreservationMode: v1alpha1.PreservationModeNone,
@@ -222,6 +226,146 @@ var _ = Describe("finalizeReinstallRequest", func() {
 		err := handler.finalizeReinstallRequest(ctx, testLogger, clusterInstance)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(clusterInstance.Status.Reinstall.RequestEndTime.IsZero()).To(BeFalse())
+	})
+
+	It("should set the ReinstallHistory", func() {
+		lastApplied := clusterInstance.DeepCopy()
+		lastApplied.Spec.ClusterName = "old-name"
+		lastAppliedBytes, _ := json.Marshal(lastApplied.Spec)
+		metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, v1alpha1.LastClusterInstanceSpecAnnotation, string(lastAppliedBytes))
+
+		clusterInstance.Spec.ClusterName = "new-name"
+		Expect(c.Update(ctx, clusterInstance)).To(Succeed())
+
+		// Update Reinstall Status
+		testReinstallStartTime := metav1.NewTime(time.Date(2025, 1, 1, 0, 0, 0, 0, time.Local))
+		testReinstallEndTime := metav1.NewTime(time.Date(2025, 1, 1, 0, 5, 0, 0, time.Local))
+
+		clusterInstance.Status.Reinstall = &v1alpha1.ReinstallStatus{
+			ObservedGeneration:   "gen-2",
+			InProgressGeneration: "",
+			RequestStartTime:     testReinstallStartTime,
+			RequestEndTime:       testReinstallEndTime,
+		}
+		Expect(c.Status().Update(ctx, clusterInstance)).To(Succeed())
+
+		err := handler.finalizeReinstallRequest(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len(clusterInstance.Status.Reinstall.History)).To(Equal(1))
+
+		expectedDiff := jsondiff.Patch{
+			{
+				Value: "new-name",
+				Type:  jsondiff.OperationReplace,
+				Path:  "/clusterName",
+			},
+		}
+		ClusterInstanceSpecDiff, err := json.Marshal(expectedDiff)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(clusterInstance.Status.Reinstall.History).To(Equal([]v1alpha1.ReinstallHistory{
+			{
+				Generation:              "gen-2",
+				RequestStartTime:        testReinstallStartTime,
+				RequestEndTime:          testReinstallEndTime,
+				ClusterInstanceSpecDiff: string(ClusterInstanceSpecDiff),
+			},
+		}))
+	})
+
+	It("should not update the ReinstallHistory if previously set for the same generation", func() {
+		lastApplied := clusterInstance.DeepCopy()
+		lastApplied.Spec.ClusterName = "old-name"
+		lastAppliedBytes, _ := json.Marshal(lastApplied.Spec)
+		metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, v1alpha1.LastClusterInstanceSpecAnnotation, string(lastAppliedBytes))
+		clusterInstance.Spec.ClusterName = "new-name"
+		Expect(c.Update(ctx, clusterInstance)).To(Succeed())
+
+		// Update Reinstall Status
+		testReinstallStartTime := metav1.NewTime(time.Date(2025, 1, 1, 0, 0, 0, 0, time.Local))
+		testReinstallEndTime := metav1.NewTime(time.Date(2025, 1, 1, 0, 5, 0, 0, time.Local))
+
+		clusterInstance.Status.Reinstall = &v1alpha1.ReinstallStatus{
+			ObservedGeneration:   "gen-2",
+			InProgressGeneration: "",
+			RequestStartTime:     testReinstallStartTime,
+			RequestEndTime:       testReinstallEndTime,
+			History: []v1alpha1.ReinstallHistory{
+				{
+					Generation:              "gen-2",
+					RequestStartTime:        testReinstallStartTime,
+					RequestEndTime:          testReinstallEndTime,
+					ClusterInstanceSpecDiff: "this-should-not-change",
+				},
+			},
+		}
+		Expect(c.Status().Update(ctx, clusterInstance)).To(Succeed())
+
+		err := handler.finalizeReinstallRequest(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len(clusterInstance.Status.Reinstall.History)).To(Equal(1))
+		Expect(clusterInstance.Status.Reinstall.History[0].ClusterInstanceSpecDiff).To(Equal("this-should-not-change"))
+	})
+
+	It("should add a new ReinstallHistory record for a new reinstall request", func() {
+		lastApplied := clusterInstance.DeepCopy()
+		lastApplied.Spec.ClusterName = "old-name"
+		lastApplied.Spec.Reinstall.Generation = "old-generation"
+		lastAppliedBytes, _ := json.Marshal(lastApplied.Spec)
+		metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, v1alpha1.LastClusterInstanceSpecAnnotation, string(lastAppliedBytes))
+		clusterInstance.Spec.ClusterName = "new-name"
+		Expect(c.Update(ctx, clusterInstance)).To(Succeed())
+
+		// Update Reinstall Status
+		testReinstallStartTime := metav1.NewTime(time.Date(2025, 1, 1, 0, 0, 0, 0, time.Local))
+		testReinstallEndTime := metav1.NewTime(time.Date(2025, 1, 1, 0, 5, 0, 0, time.Local))
+
+		clusterInstance.Status.Reinstall = &v1alpha1.ReinstallStatus{
+			ObservedGeneration:   "gen-2",
+			InProgressGeneration: "",
+			RequestStartTime:     testReinstallStartTime,
+			RequestEndTime:       testReinstallEndTime,
+			History: []v1alpha1.ReinstallHistory{
+				{
+					Generation:              "gen-1",
+					RequestStartTime:        testReinstallStartTime,
+					RequestEndTime:          testReinstallEndTime,
+					ClusterInstanceSpecDiff: "foobar",
+				},
+			},
+		}
+		Expect(c.Status().Update(ctx, clusterInstance)).To(Succeed())
+
+		err := handler.finalizeReinstallRequest(ctx, testLogger, clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len(clusterInstance.Status.Reinstall.History)).To(Equal(2))
+		expectedDiff := jsondiff.Patch{
+			{
+				Value: "new-name",
+				Type:  jsondiff.OperationReplace,
+				Path:  "/clusterName",
+			},
+			{
+				Value: clusterInstance.Spec.Reinstall.Generation,
+				Type:  jsondiff.OperationReplace,
+				Path:  "/reinstall/generation",
+			},
+		}
+		ClusterInstanceSpecDiff, err := json.Marshal(expectedDiff)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(clusterInstance.Status.Reinstall.History[1]).To(Equal(v1alpha1.ReinstallHistory{
+			Generation:              "gen-2",
+			RequestStartTime:        testReinstallStartTime,
+			RequestEndTime:          testReinstallEndTime,
+			ClusterInstanceSpecDiff: string(ClusterInstanceSpecDiff),
+		}))
+	})
+
+	It("should return an error if the ClusterInstance.Spec diff cannot be computed", func() {
+		metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, v1alpha1.LastClusterInstanceSpecAnnotation, "error")
+		Expect(c.Update(ctx, clusterInstance)).To(Succeed())
+
+		err := handler.finalizeReinstallRequest(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
 	})
 
 	It("should return an error if patching fails", func() {

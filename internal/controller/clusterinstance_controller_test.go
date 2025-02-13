@@ -19,6 +19,8 @@ package controller
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -271,6 +273,120 @@ var _ = Describe("Reconcile", func() {
 		// ObjectMeta.Generation
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(Equal(ctrl.Result{}))
+	})
+})
+
+var _ = Describe("Reconcile", func() {
+	var (
+		c               client.Client
+		r               *ClusterInstanceReconciler
+		ctx             = context.Background()
+		testLogger      = zap.NewNop().Named("Test")
+		clusterInstance *v1alpha1.ClusterInstance
+	)
+
+	BeforeEach(func() {
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			Build()
+
+		r = &ClusterInstanceReconciler{
+			Client: c,
+			Scheme: scheme.Scheme,
+			Log:    testLogger,
+		}
+
+		clusterInstance = &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       TestClusterInstanceName,
+				Namespace:  TestClusterInstanceNamespace,
+				Finalizers: []string{clusterInstanceFinalizer},
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				ClusterName:            TestClusterInstanceName,
+				ClusterImageSetNameRef: "testimage:foobar",
+				SSHPublicKey:           "test-ssh",
+				BaseDomain:             "abcd",
+				ClusterType:            v1alpha1.ClusterTypeSNO,
+				TemplateRefs: []v1alpha1.TemplateRef{
+					{Name: "test-cluster-template", Namespace: "default"}},
+				Nodes: []v1alpha1.NodeSpec{{
+					BmcAddress:         "192.0.2.1",
+					BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: "bmc"},
+					TemplateRefs: []v1alpha1.TemplateRef{
+						{Name: "test-node-template", Namespace: "default"}}}}},
+		}
+	})
+
+	It("should update annotation and observedGeneration if spec changed", func() {
+		currentSpecJSON, err := json.Marshal(clusterInstance.Spec)
+		Expect(err).ToNot(HaveOccurred())
+		metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, v1alpha1.LastClusterInstanceSpecAnnotation, string(currentSpecJSON))
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		err = r.updateObservedStatus(ctx, testLogger, clusterInstance)
+		Expect(err).ToNot(HaveOccurred())
+
+		updatedCI := &v1alpha1.ClusterInstance{}
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), updatedCI)).To(Succeed())
+		Expect(updatedCI.Annotations).To(HaveKeyWithValue(v1alpha1.LastClusterInstanceSpecAnnotation, string(currentSpecJSON)))
+		Expect(updatedCI.Status.ObservedGeneration).To(Equal(clusterInstance.Generation))
+	})
+
+	It("should return error if patching annotation fails", func() {
+
+		errorMsg := "inject error"
+		c = fakeclient.NewClientBuilder().
+			WithInterceptorFuncs(interceptor.Funcs{
+				Patch: func(ctx context.Context, client client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					return errors.New(errorMsg)
+				},
+			}).
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(clusterInstance).
+			Build()
+		r.Client = c
+		err := r.updateObservedStatus(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to update"))
+	})
+
+	It("should return error if re-fetching ClusterInstance fails", func() {
+		errorMsg := "inject error"
+		c = fakeclient.NewClientBuilder().
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					return errors.New(errorMsg)
+				},
+			}).
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(clusterInstance).
+			Build()
+		r.Client = c
+		err := r.updateObservedStatus(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to re-fetch ClusterInstance"))
+	})
+
+	It("should return error if patching status fails", func() {
+		errorMsg := "inject error"
+		c = fakeclient.NewClientBuilder().
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					return errors.New(errorMsg)
+				},
+			}).
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			WithObjects(clusterInstance).
+			Build()
+		r.Client = c
+		err := r.updateObservedStatus(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to patch ClusterInstance status"))
 	})
 })
 

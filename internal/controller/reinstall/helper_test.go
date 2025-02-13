@@ -18,6 +18,7 @@ package reinstall
 
 import (
 	"context"
+	"encoding/json"
 
 	"go.uber.org/zap"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
 	"github.com/stolostron/siteconfig/internal/controller/preservation"
+	"github.com/wI2L/jsondiff"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -497,4 +499,123 @@ var _ = Describe("Data Preservation Tests", func() {
 
 	})
 
+})
+
+var _ = Describe("computeClusterInstanceSpecDiff", func() {
+	var clusterInstance *v1alpha1.ClusterInstance
+
+	BeforeEach(func() {
+		clusterInstance = &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "site-sno-du-1",
+				Namespace:   "site-sno-du-1",
+				Annotations: make(map[string]string),
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				ClusterName:            "site-sno-du-1",
+				PullSecretRef:          corev1.LocalObjectReference{Name: "pullSecretName"},
+				ClusterImageSetNameRef: "openshift-test",
+				SSHPublicKey:           "ssh-rsa",
+				BaseDomain:             "example.com",
+				ApiVIPs:                []string{"192.0.2.1", "192.0.2.2"},
+				HoldInstallation:       false,
+				AdditionalNTPSources:   []string{"NTP.server1", "192.0.2.3"},
+				MachineNetwork:         []v1alpha1.MachineNetworkEntry{{CIDR: "203.0.113.0/24"}},
+				ClusterNetwork:         []v1alpha1.ClusterNetworkEntry{{CIDR: "203.0.113.0/24", HostPrefix: 23}},
+				ServiceNetwork:         []v1alpha1.ServiceNetworkEntry{{CIDR: "203.0.113.0/24"}},
+				NetworkType:            "OVNKubernetes",
+				ExtraLabels:            map[string]map[string]string{"ManagedCluster": {"group-du-sno": "test", "common": "true", "sites": "site-sno-du-1"}},
+				InstallConfigOverrides: "{\"capabilities\":{\"baselineCapabilitySet\": \"None\", \"additionalEnabledCapabilities\": [ \"marketplace\", \"NodeTuning\" ] }}",
+				ExtraManifestsRefs:     []corev1.LocalObjectReference{{Name: "foobar1"}, {Name: "foobar2"}},
+				TemplateRefs:           []v1alpha1.TemplateRef{{Name: "cluster-v1", Namespace: "site-sno-du-1"}},
+				Nodes: []v1alpha1.NodeSpec{{
+					BmcAddress:         "idrac-virtualmedia+https://198.51.100.0/redfish/v1/Systems/System.Embedded.1",
+					BmcCredentialsName: v1alpha1.BmcCredentialsName{Name: "bmc-secret"},
+					BootMACAddress:     "00:00:5E:00:53:00",
+					HostName:           "node1",
+					Role:               "master",
+					BootMode:           "UEFI",
+					InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
+					TemplateRefs:       []v1alpha1.TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+				}},
+			},
+		}
+	})
+
+	It("should return an empty string with no error when the annotation is missing", func() {
+		diff, err := computeClusterInstanceSpecDiff(clusterInstance)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(diff).To(BeEmpty())
+	})
+
+	It("should return an error when the last observed ClusterInstance spec cannot be unmarshaled ", func() {
+		clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation] = "{invalid-json}"
+
+		diff, err := computeClusterInstanceSpecDiff(clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to unmarshal last-observed spec"))
+		Expect(diff).To(BeEmpty())
+	})
+
+	It("should return an empty diff when there is no difference in spec", func() {
+
+		lastAppliedBytes, _ := json.Marshal(clusterInstance.Spec)
+		metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, v1alpha1.LastClusterInstanceSpecAnnotation, string(lastAppliedBytes))
+
+		diff, err := computeClusterInstanceSpecDiff(clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(diff).To(BeEmpty())
+	})
+
+	It("should return a valid diff when the spec has changed", func() {
+
+		lastAppliedBytes, _ := json.Marshal(clusterInstance.Spec.DeepCopy())
+		// clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation] = string(lastAppliedBytes)
+		metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, v1alpha1.LastClusterInstanceSpecAnnotation, string(lastAppliedBytes))
+
+		// Modify the spec
+
+		clusterInstance.Spec.ClusterName = "foobar"
+		clusterInstance.Spec.Reinstall = &v1alpha1.ReinstallSpec{
+			Generation:       "1",
+			PreservationMode: v1alpha1.PreservationModeNone,
+		}
+		clusterInstance.Spec.Nodes[0].BootMACAddress = "2345"
+		newNode := v1alpha1.NodeSpec{
+			HostName: "node2",
+		}
+		clusterInstance.Spec.Nodes = append(clusterInstance.Spec.Nodes, newNode)
+
+		expectedDiff := jsondiff.Patch{
+			{
+				Value: "foobar",
+				Type:  jsondiff.OperationReplace,
+				Path:  "/clusterName",
+			},
+			{
+				Value: newNode,
+				Type:  jsondiff.OperationAdd,
+				Path:  "/nodes/-",
+			},
+			{
+				Value: "2345",
+				Type:  jsondiff.OperationReplace,
+				Path:  "/nodes/0/bootMACAddress",
+			},
+			{
+				Value: v1alpha1.ReinstallSpec{
+					Generation:       "1",
+					PreservationMode: v1alpha1.PreservationModeNone,
+				},
+				Type: jsondiff.OperationAdd,
+				Path: "/reinstall",
+			},
+		}
+		expected, err := json.Marshal(expectedDiff)
+		Expect(err).ToNot(HaveOccurred())
+
+		diff2, err := computeClusterInstanceSpecDiff(clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(diff2).To(Equal(string(expected)))
+	})
 })
