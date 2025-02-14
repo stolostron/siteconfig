@@ -141,13 +141,21 @@ unittest:
 	@echo "Running unit tests"
 	go test -v ./...
 
+.PHONY: test-coverage
+test-coverage:
+	@echo "Computing test coverage"
+	go test -coverprofile test-coverage.out ./...
+	(head -n 1 test-coverage.out && tail -n +2 test-coverage.out | sort) > sorted-coverage.out
+	mv sorted-coverage.out test-coverage.out
+
+
 .PHONY: ci-test-unit
 ci-test-unit:
 	gotestsum --jsonfile-timing-events=$(unit_test_json_output) --format short-verbose -- -p 1 -v $(TESTFLAGS) \
 		./...
 
 .PHONY: ci-job
-ci-job: common-deps-update generate fmt vet golangci-lint unittest shellcheck bashate bundle-check
+ci-job: common-deps-update generate fmt vet golangci-lint unittest test-coverage shellcheck bashate bundle-check
 
 ##@ Build
 

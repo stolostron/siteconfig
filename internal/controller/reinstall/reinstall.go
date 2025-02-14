@@ -381,6 +381,12 @@ func (r *ReinstallHandler) finalizeReinstallRequest(
 		return fmt.Errorf("failed to cleanup preserved resources, error: %w", err)
 	}
 
+	// Compute clusterInstanceSpec diff
+	clusterInstanceDiff, err := computeClusterInstanceSpecDiff(clusterInstance)
+	if err != nil {
+		return fmt.Errorf("encountered an error determining the ClusterInstance Spec changes, error: %w", err)
+	}
+
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
 	updateRequired := false
 
@@ -399,7 +405,30 @@ func (r *ReinstallHandler) finalizeReinstallRequest(
 		updateRequired = true
 	}
 
-	// Set clusterInstance.Status.Reinstall.History (CNF-15747)
+	// Set clusterInstance.Status.Reinstall.History
+	record := v1alpha1.ReinstallHistory{
+		Generation:              clusterInstance.Spec.Reinstall.Generation,
+		RequestStartTime:        clusterInstance.Status.Reinstall.RequestStartTime,
+		RequestEndTime:          clusterInstance.Status.Reinstall.RequestEndTime,
+		ClusterInstanceSpecDiff: clusterInstanceDiff,
+	}
+	if clusterInstance.Status.Reinstall.History == nil {
+		clusterInstance.Status.Reinstall.History = []v1alpha1.ReinstallHistory{record}
+		updateRequired = true
+	} else {
+		// Determine whether the computed history record should be added to Status.Reinstall.History
+		exists := false
+		for _, historyRecord := range clusterInstance.Status.Reinstall.History {
+			if historyRecord.Generation == clusterInstance.Spec.Reinstall.Generation {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			clusterInstance.Status.Reinstall.History = append(clusterInstance.Status.Reinstall.History, record)
+			updateRequired = true
+		}
+	}
 
 	if updateRequired {
 		if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
