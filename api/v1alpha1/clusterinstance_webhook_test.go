@@ -60,6 +60,20 @@ var _ = Describe("ValidateCreate", func() {
 		}
 	})
 
+	It("should return an error if reinstall spec is set on creation", func() {
+		clusterInstance.Spec.Reinstall = &ReinstallSpec{Generation: "test-1"}
+		_, err := v.ValidateCreate(context.Background(), clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("reinstall spec cannot be set during initial installation"))
+	})
+
+	It("should return an error if any validation fails", func() {
+		clusterInstance.Spec.TemplateRefs = nil
+		_, err := v.ValidateCreate(context.TODO(), clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("validation failed"))
+	})
+
 	It("should succeed for a valid ClusterInstance", func() {
 		warnings, err := v.ValidateCreate(context.Background(), clusterInstance)
 		Expect(err).NotTo(HaveOccurred())
@@ -117,7 +131,7 @@ var _ = Describe("ValidateUpdate", func() {
 
 	})
 
-	It("should return nil - dummy test", func() {
+	It("should return en error for spec changes while provisioning is in-progress", func() {
 		oldClusterInstance.Status = ClusterInstanceStatus{
 			Conditions: []metav1.Condition{
 				{
@@ -139,7 +153,139 @@ var _ = Describe("ValidateUpdate", func() {
 		}
 
 		_, err := v.ValidateUpdate(ctx, oldObj, newObj)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec update not allowed during provisioning"))
 	})
 
+	Context("Provisioning Completed", func() {
+		BeforeEach(func() {
+			oldClusterInstance.Status = ClusterInstanceStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionTrue,
+						Reason: string(Completed),
+					},
+				},
+			}
+			oldObj = oldClusterInstance
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newObj = newClusterInstance
+		})
+
+		It("should return nil for no spec changes", func() {
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil for valid spec change", func() {
+			newClusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{
+				"BareMetalHost": {
+					"foo": "bar",
+				},
+			}
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
+
+	Context("Reinstall Tests", func() {
+
+		BeforeEach(func() {
+			oldClusterInstance.Status = ClusterInstanceStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionTrue,
+						Reason: string(Completed),
+					},
+				},
+			}
+			oldObj = oldClusterInstance
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newObj = newClusterInstance
+		})
+
+		It("should return error for BootMACAddress changes with reinstall not requested", func() {
+			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-should-not-change"
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("detected unauthorized changes in immutable fields: /nodes/0/bootMACAddress"))
+		})
+
+		It("should allow BootMACAddress changes when reinstall is requested", func() {
+			newClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "test-1",
+			}
+
+			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-is-allowed"
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should return an error for BootMACAddress changes when reinstall is not requested", func() {
+			oldClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "test-1",
+			}
+			oldClusterInstance.Status.Reinstall = &ReinstallStatus{
+				ObservedGeneration:   "test-1",
+				InProgressGeneration: "",
+				RequestEndTime:       metav1.Now(),
+			}
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "test-1",
+			}
+			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-is-not-allowed"
+			newObj = newClusterInstance
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("invalid spec changes detected"))
+		})
+
+		It("should not allow BootMACAddress changes when reinstall is in progress", func() {
+			oldClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "test-1",
+			}
+			oldClusterInstance.Status.Reinstall = &ReinstallStatus{
+				InProgressGeneration: "test-1",
+				ObservedGeneration:   "test-0",
+				RequestEndTime:       metav1.Time{},
+			}
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "test-2",
+			}
+			newClusterInstance.Status.Reinstall = &ReinstallStatus{
+				InProgressGeneration: "test-1",
+				ObservedGeneration:   "test-0",
+				RequestEndTime:       metav1.Time{},
+			}
+
+			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-is-not-allowed"
+			newObj = newClusterInstance
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("invalid reinstall fields: reinstall generation update is not allowed while a request is still active"))
+		})
+
+		It("should allow BootMACAddress changes when a new reinstall is requested", func() {
+			oldClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "test-1",
+			}
+
+			newClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "test-1",
+			}
+
+			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-is-allowed"
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
 })
