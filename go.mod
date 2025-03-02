@@ -6,7 +6,7 @@ require (
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/onsi/ginkgo/v2 v2.22.0
 	github.com/onsi/gomega v1.36.0
-	github.com/openshift/hive/apis v0.0.0-20240306163002-9c5806a63531
+	github.com/openshift/hive/apis 66218d805d4a
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.31.4
 	k8s.io/apiextensions-apiserver v0.31.3 // indirect
