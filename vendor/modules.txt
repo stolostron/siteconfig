@@ -209,7 +209,7 @@ github.com/openshift/api/config/v1
 # github.com/openshift/assisted-service v1.0.10-0.20230830164851-6573b5d7021d
 ## explicit; go 1.18
 github.com/openshift/assisted-service/pkg/validations
-# github.com/openshift/assisted-service/api v0.0.0 => github.com/openshift/assisted-service/api v0.0.0-20241205172455-37118fd1b930
+# github.com/openshift/assisted-service/api v0.0.0 => github.com/openshift/assisted-service/api v0.0.0-20250301063121-0889f438699f
 ## explicit; go 1.21
 github.com/openshift/assisted-service/api/common
 github.com/openshift/assisted-service/api/hiveextension/v1beta1
@@ -912,5 +912,5 @@ sigs.k8s.io/structured-merge-diff/v4/value
 ## explicit; go 1.12
 sigs.k8s.io/yaml
 sigs.k8s.io/yaml/goyaml.v2
-# github.com/openshift/assisted-service/api => github.com/openshift/assisted-service/api v0.0.0-20241205172455-37118fd1b930
+# github.com/openshift/assisted-service/api => github.com/openshift/assisted-service/api v0.0.0-20250301063121-0889f438699f
 # github.com/openshift/assisted-service/models => github.com/openshift/assisted-service/models v0.0.0-20241205172455-37118fd1b930
