@@ -143,7 +143,7 @@ spec:
     credentialsName: "{{ .SpecialVars.CurrentNode.BmcCredentialsName.Name }}"
   bootMACAddress: "{{ .SpecialVars.CurrentNode.BootMACAddress }}"
   automatedCleaningMode: "{{ .SpecialVars.CurrentNode.AutomatedCleaningMode }}"
-  online: true
+  online: false
   externallyProvisioned: true
 {{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:

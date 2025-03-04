@@ -4,7 +4,7 @@ metadata:
   labels:
     app.kubernetes.io/name: siteconfig-controller
     app.kubernetes.io/component: siteconfig
-    control-plane: controller-manager
+    control-plane: siteconfig-controller-manager
     pod-security.kubernetes.io/audit: privileged
     pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/warn: privileged
@@ -15,25 +15,25 @@ metadata:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: siteconfig-controller-manager
   namespace: system
   labels:
     app.kubernetes.io/name: siteconfig-controller
     app.kubernetes.io/component: siteconfig
-    control-plane: controller-manager
+    control-plane: siteconfig-controller-manager
 spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: siteconfig-controller
       app.kubernetes.io/component: siteconfig
-      control-plane: controller-manager
+      control-plane: siteconfig-controller-manager
   replicas: 1
   template:
     metadata:
       labels:
         app.kubernetes.io/name: siteconfig-controller
         app.kubernetes.io/component: siteconfig
-        control-plane: controller-manager
+        control-plane: siteconfig-controller-manager
       annotations:
         openshift.io/scc: restricted
         target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
@@ -43,10 +43,13 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-      - command:
+      - name: manager      
+        command:
         - /usr/local/bin/siteconfig-manager
         args:
-        - --leader-elect
+        - "--health-probe-bind-address=:8081"
+        - "--metrics-bind-address=127.0.0.1:8080"
+        - "--leader-elect"        
         env:
         - name: POD_NAMESPACE
           valueFrom:
@@ -54,7 +57,6 @@ spec:
               fieldPath: metadata.namespace
         image: controller:latest
         imagePullPolicy: Always
-        name: manager
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -77,5 +79,41 @@ spec:
             cpu: 100m
             memory: 256Mi
             ephemeral-storage: "1Gi"
-      serviceAccountName: controller-manager
+        ports:
+        - containerPort: 9443
+          name: webhook-server
+          protocol: TCP        
+        volumeMounts:
+        - mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: cert
+          readOnly: true        
+      - name: kube-rbac-proxy
+        image: gcr.io/kubebuilder/kube-rbac-proxy:v0.14.1
+        args:
+        - "--secure-listen-address=0.0.0.0:8443"
+        - "--upstream=http://127.0.0.1:8080/"
+        - "--logtostderr=true"
+        - "--v=0"
+        ports:
+        - containerPort: 8443
+          protocol: TCP
+          name: https
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 5m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - "ALL"            
+      serviceAccountName: siteconfig-controller-manager
       terminationGracePeriodSeconds: 10
+      volumes:
+      - name: cert
+        secret:
+          defaultMode: 420
+          secretName: siteconfig-webhook-server-cert

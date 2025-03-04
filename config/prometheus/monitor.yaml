@@ -4,14 +4,8 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
-    control-plane: controller-manager
-    app.kubernetes.io/name: servicemonitor
-    app.kubernetes.io/instance: controller-manager-metrics-monitor
-    app.kubernetes.io/component: metrics
-    app.kubernetes.io/created-by: siteconfig
-    app.kubernetes.io/part-of: siteconfig
-    app.kubernetes.io/managed-by: kustomize
-  name: controller-manager-metrics-monitor
+    control-plane: siteconfig-controller-manager
+  name: siteconfig-controller-manager-metrics-monitor
   namespace: system
 spec:
   endpoints:
@@ -23,4 +17,4 @@ spec:
         insecureSkipVerify: true
   selector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: siteconfig-controller-manager

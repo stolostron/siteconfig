@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	ctrlruntimezap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 
@@ -105,8 +106,12 @@ func main() {
 		//MetricsBindAddress:     metricsAddr,
 		//Port:                   9443,
 		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "manager." + v1alpha1.Group,
+		WebhookServer: webhook.NewServer(webhook.Options{
+			Port:    9443,
+			CertDir: "/tmp/k8s-webhook-server/serving-certs",
+		}),
+		LeaderElection:   enableLeaderElection,
+		LeaderElectionID: "manager." + v1alpha1.Group,
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -208,6 +213,12 @@ func main() {
 		setupLog.Error("Unable to create controller",
 			zap.String("controller", "ClusterDeploymentReconciler"),
 			zap.Error(err))
+		os.Exit(1)
+	}
+
+	// Create ClusterInstance validating admission webhook
+	if err = (&v1alpha1.ClusterInstance{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error("Unable to create webhook", zap.String("webhook", "ClusterInstance"), zap.Error(err))
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

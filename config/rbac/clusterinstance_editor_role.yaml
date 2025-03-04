@@ -2,13 +2,6 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  labels:
-    app.kubernetes.io/name: clusterrole
-    app.kubernetes.io/instance: clusterinstance-editor-role
-    app.kubernetes.io/component: rbac
-    app.kubernetes.io/created-by: siteconfig
-    app.kubernetes.io/part-of: siteconfig
-    app.kubernetes.io/managed-by: kustomize
   name: clusterinstance-editor-role
 rules:
 - apiGroups:
