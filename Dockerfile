@@ -1,5 +1,5 @@
 # Build the siteconfig-manager binary
-FROM registry.redhat.io/ubi9/go-toolset:1.22.9 AS builder
+FROM registry.ci.openshift.org/stolostron/builder:go1.23-linux AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -25,7 +25,7 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} GO111MODULE=on \
 
 #####################################################################################################
 # Build the controller image
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5-1739420147
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 ENV SUMMARY="SiteConfig Operator is a template-driven cluster provisioning solution" \
     DESCRIPTION="SiteConfig operator as a template-driven cluster provisioning solution, which allows you to \
