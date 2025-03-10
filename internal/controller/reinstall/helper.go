@@ -17,6 +17,7 @@ limitations under the License.
 package reinstall
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -370,7 +371,7 @@ func computeClusterInstanceSpecDiff(clusterInstance *v1alpha1.ClusterInstance) (
 		}
 		vi, _ := json.Marshal(diff[i].Value)
 		vj, _ := json.Marshal(diff[j].Value)
-		if string(vi) != string(vj) {
+		if !bytes.Equal(vi, vj) {
 			return string(vi) < string(vj)
 		}
 		return diff[i].Type < diff[j].Type
