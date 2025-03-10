@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="1.55.2"
+VERSION="1.64.6"
 
 rootdir=$(git rev-parse --show-toplevel)
 if [ -z "${rootdir}" ]; then
