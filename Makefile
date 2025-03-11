@@ -144,10 +144,9 @@ unittest:
 .PHONY: test-coverage
 test-coverage:
 	@echo "Computing test coverage"
-	go test -coverprofile test-coverage.out ./...
-	(head -n 1 test-coverage.out && tail -n +2 test-coverage.out | sort) > sorted-coverage.out
+	go test -coverprofile=test-coverage.out -coverpkg=./... ./...
+	awk 'NR==1{print; next} {print | "sort -u"}' test-coverage.out > sorted-coverage.out
 	mv sorted-coverage.out test-coverage.out
-
 
 .PHONY: ci-test-unit
 ci-test-unit:

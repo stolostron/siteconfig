@@ -211,6 +211,7 @@ func updateCIDeploymentConditions(cd *hivev1.ClusterDeployment, ci *v1alpha1.Clu
 func getClusterInstanceOwner(labels map[string]string) string {
 	return labels[ci.OwnedByLabel]
 }
+
 func isOwnedByClusterInstance(labels map[string]string) bool {
 	return getClusterInstanceOwner(labels) != ""
 }
