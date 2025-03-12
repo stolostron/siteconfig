@@ -3,7 +3,7 @@
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
 # - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
-VERSION ?= 2.13.0
+VERSION ?= 2.14.0
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
@@ -144,10 +144,9 @@ unittest:
 .PHONY: test-coverage
 test-coverage:
 	@echo "Computing test coverage"
-	go test -coverprofile test-coverage.out ./...
-	(head -n 1 test-coverage.out && tail -n +2 test-coverage.out | sort) > sorted-coverage.out
+	go test -coverprofile=test-coverage.out -coverpkg=./... ./...
+	awk 'NR==1{print; next} {print | "sort -u"}' test-coverage.out > sorted-coverage.out
 	mv sorted-coverage.out test-coverage.out
-
 
 .PHONY: ci-test-unit
 ci-test-unit:

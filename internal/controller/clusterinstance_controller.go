@@ -153,7 +153,7 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Get the ClusterInstance CR
 	clusterInstance := &v1alpha1.ClusterInstance{}
-	if err := r.Get(ctx, req.NamespacedName, clusterInstance); err != nil {
+	if err := r.Client.Get(ctx, req.NamespacedName, clusterInstance); err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Error("ClusterInstance not found")
 			return doNotRequeue(), nil
@@ -279,7 +279,7 @@ func (r *ClusterInstanceReconciler) updateObservedStatus(
 		}
 
 		// Re-fetch updated ClusterInstance
-		if err := r.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance); err != nil {
+		if err := r.Client.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance); err != nil {
 			log.Error("Failed to get ClusterInstance", zap.Error(err))
 			return fmt.Errorf("failed to re-fetch ClusterInstance: %w", err)
 		}
@@ -330,7 +330,7 @@ func (r *ClusterInstanceReconciler) applyACMBackupLabelToInstallTemplates(
 		}
 
 		cm := &corev1.ConfigMap{}
-		if err := r.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, cm); err != nil {
+		if err := r.Client.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, cm); err != nil {
 			return fmt.Errorf("failed to get ConfigMap %s/%s: %w", ref.Namespace, ref.Name, err)
 		}
 
@@ -346,7 +346,7 @@ func (r *ClusterInstanceReconciler) applyACMBackupLabelToInstallTemplates(
 		labels[acmBackupLabel] = acmBackupLabelValue
 		cm.SetLabels(labels)
 
-		if err := r.Patch(ctx, cm, patch); err != nil {
+		if err := r.Client.Patch(ctx, cm, patch); err != nil {
 			return fmt.Errorf("failed to patch ConfigMap %s/%s: %w", cm.GetNamespace(), cm.GetName(), err)
 		}
 
@@ -431,7 +431,7 @@ func (r *ClusterInstanceReconciler) handleFinalizer(
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
 	controllerutil.RemoveFinalizer(clusterInstance, clusterInstanceFinalizer)
 
-	if err := r.Patch(ctx, clusterInstance, patch); err != nil {
+	if err := r.Client.Patch(ctx, clusterInstance, patch); err != nil {
 		log.Error("Failed to remove finalizer", zap.Error(err))
 		return ctrl.Result{}, fmt.Errorf("failed to remove finalizer for ClusterInstance %s/%s: %w",
 			clusterInstance.Namespace, clusterInstance.Name, err)
@@ -456,7 +456,7 @@ func (r *ClusterInstanceReconciler) ensureFinalizer(
 	controllerutil.AddFinalizer(clusterInstance, clusterInstanceFinalizer)
 
 	// Persist the finalizer addition
-	if err := r.Patch(ctx, clusterInstance, patch); err != nil {
+	if err := r.Client.Patch(ctx, clusterInstance, patch); err != nil {
 		log.Error("Failed to add finalizer", zap.Error(err))
 		return ctrl.Result{}, fmt.Errorf("failed to add finalizer to ClusterInstance %s/%s: %w",
 			clusterInstance.Namespace, clusterInstance.Name, err)

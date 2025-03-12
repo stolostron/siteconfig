@@ -210,7 +210,7 @@ metadata:
     capabilities: Basic Install
     operators.operatorframework.io/builder: operator-sdk-v1.33.0
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
-  name: siteconfig.v2.13.0
+  name: siteconfig.v2.14.0
   namespace: placeholder
 spec:
   apiservicedefinitions: {}
@@ -417,7 +417,7 @@ spec:
                   valueFrom:
                     fieldRef:
                       fieldPath: metadata.namespace
-                image: quay.io/stolostron/siteconfig-operator:2.13.0
+                image: quay.io/stolostron/siteconfig-operator:2.14.0
                 imagePullPolicy: Always
                 livenessProbe:
                   httpGet:
@@ -544,7 +544,7 @@ spec:
   maturity: alpha
   provider:
     name: Red Hat
-  version: 2.13.0
+  version: 2.14.0
   webhookdefinitions:
   - admissionReviewVersions:
     - v1
