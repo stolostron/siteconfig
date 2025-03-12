@@ -143,7 +143,7 @@ spec:
   online: false
   externallyProvisioned: true
 {{ if .SpecialVars.CurrentNode.CPUArchitecture }}
-  architecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture | toString }}"
+  architecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture }}"
 {{ end }}
 {{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:
