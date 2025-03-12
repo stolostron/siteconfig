@@ -106,6 +106,7 @@ func validatePostProvisioningChanges(
 	if allowReinstall {
 		allowedUpdates = append(allowedUpdates, []string{
 			"/reinstall",
+			"/nodes/*/bmcAddress",
 			"/nodes/*/bootMACAddress",
 			"/nodes/*/nodeNetwork/interfaces/macAddress",
 			"/nodes/*/rootDeviceHints",
