@@ -164,7 +164,7 @@ spec:
 {{ .Spec.Proxy | toYaml | indent 4 }}
 {{ end }}
 {{ if .SpecialVars.CurrentNode.CPUArchitecture }}
-  cpuArchitecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture | toString }}"
+  cpuArchitecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture }}"
 {{ end }}
   pullSecretRef:
     name: "{{ .Spec.PullSecretRef.Name }}"
@@ -247,7 +247,7 @@ spec:
   automatedCleaningMode: "{{ .SpecialVars.CurrentNode.AutomatedCleaningMode }}"
   online: true
 {{ if .SpecialVars.CurrentNode.CPUArchitecture }}
-  architecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture | toString }}"
+  architecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture }}"
 {{ end }}
 {{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:
