@@ -8,6 +8,934 @@ metadata:
           "apiVersion": "siteconfig.open-cluster-management.io/v1alpha1",
           "kind": "ClusterInstance",
           "metadata": {
+            "name": "example-ai-3node",
+            "namespace": "example-ai-3node"
+          },
+          "spec": {
+            "additionalNTPSources": [
+              "1111:2222:3333:4444::2"
+            ],
+            "apiVIPs": [
+              "1111:2222:3333:4444::1:1"
+            ],
+            "baseDomain": "example.com",
+            "clusterImageSetNameRef": "openshift-4.16",
+            "clusterName": "example-ai-3node",
+            "clusterNetwork": [
+              {
+                "cidr": "1001:1::/48",
+                "hostPrefix": 64
+              }
+            ],
+            "clusterType": "HighlyAvailable",
+            "extraLabels": {
+              "ManagedCluster": {
+                "common": true,
+                "du-profile": "latest",
+                "group-du-3node": "",
+                "sites": "example-multinode"
+              }
+            },
+            "extraManifestsRefs": [
+              {
+                "name": "sno-extra-manifest-configmap"
+              }
+            ],
+            "ingressVIPs": [
+              "1111:2222:3333:4444::1:2"
+            ],
+            "networkType": "OVNKubernetes",
+            "nodes": [
+              {
+                "bmcAddress": "idrac-virtualmedia+https://[1111:2222:3333:4444::bbbb:1]/redfish/v1/Systems/System.Embedded.1",
+                "bmcCredentialsName": {
+                  "name": "example-node1-bmh-secret"
+                },
+                "bootMACAddress": "AA:BB:CC:DD:EE:11",
+                "bootMode": "UEFISecureBoot",
+                "hostName": "example-node1.example.com",
+                "nodeLabels": {
+                  "custom-label/parameter1": true,
+                  "node-role.kubernetes.io/master-du": null
+                },
+                "nodeNetwork": {
+                  "config": {
+                    "dns-resolver": {
+                      "config": {
+                        "search": [
+                          "example.com"
+                        ],
+                        "server": [
+                          "1111:2222:3333:4444::2"
+                        ]
+                      }
+                    },
+                    "interfaces": [
+                      {
+                        "ipv4": {
+                          "enabled": false
+                        },
+                        "ipv6": {
+                          "address": [
+                            {
+                              "ip": "1111:2222:3333:4444::aaaa:1",
+                              "prefix-length": 64
+                            }
+                          ],
+                          "enabled": true
+                        },
+                        "name": "eno1",
+                        "state": "up",
+                        "type": "ethernet"
+                      }
+                    ],
+                    "routes": {
+                      "config": [
+                        {
+                          "destination": "::/0",
+                          "next-hop-address": "1111:2222:3333:4444::1",
+                          "next-hop-interface": "eno1",
+                          "table-id": 254
+                        }
+                      ]
+                    }
+                  },
+                  "interfaces": [
+                    {
+                      "macAddress": "AA:BB:CC:DD:EE:11",
+                      "name": "eno1"
+                    }
+                  ]
+                },
+                "role": "master",
+                "rootDeviceHints": {
+                  "deviceName": "/dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0"
+                },
+                "templateRefs": [
+                  {
+                    "name": "ai-node-templates-v1",
+                    "namespace": "siteconfig-operator"
+                  }
+                ]
+              },
+              {
+                "bmcAddress": "idrac-virtualmedia+https://[1111:2222:3333:4444::bbbb:2]/redfish/v1/Systems/System.Embedded.1",
+                "bmcCredentialsName": {
+                  "name": "example-node2-bmh-secret"
+                },
+                "bootMACAddress": "AA:BB:CC:DD:EE:22",
+                "bootMode": "UEFISecureBoot",
+                "hostName": "example-node2.example.com",
+                "nodeNetwork": {
+                  "config": {
+                    "dns-resolver": {
+                      "config": {
+                        "search": [
+                          "example.com"
+                        ],
+                        "server": [
+                          "1111:2222:3333:4444::2"
+                        ]
+                      }
+                    },
+                    "interfaces": [
+                      {
+                        "ipv4": {
+                          "enabled": false
+                        },
+                        "ipv6": {
+                          "address": [
+                            {
+                              "ip": "1111:2222:3333:4444::aaaa:2",
+                              "prefix-length": 64
+                            }
+                          ],
+                          "enabled": true
+                        },
+                        "name": "eno1",
+                        "state": "up",
+                        "type": "ethernet"
+                      }
+                    ],
+                    "routes": {
+                      "config": [
+                        {
+                          "destination": "::/0",
+                          "next-hop-address": "1111:2222:3333:4444::1",
+                          "next-hop-interface": "eno1",
+                          "table-id": 254
+                        }
+                      ]
+                    }
+                  },
+                  "interfaces": [
+                    {
+                      "macAddress": "AA:BB:CC:DD:EE:22",
+                      "name": "eno1"
+                    }
+                  ]
+                },
+                "role": "master",
+                "rootDeviceHints": {
+                  "deviceName": "/dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0"
+                },
+                "templateRefs": [
+                  {
+                    "name": "ai-node-templates-v1",
+                    "namespace": "siteconfig-operator"
+                  }
+                ]
+              },
+              {
+                "bmcAddress": "idrac-virtualmedia+https://[1111:2222:3333:4444::bbbb:3]/redfish/v1/Systems/System.Embedded.1",
+                "bmcCredentialsName": {
+                  "name": "example-node3-bmh-secret"
+                },
+                "bootMACAddress": "AA:BB:CC:DD:EE:33",
+                "bootMode": "UEFISecureBoot",
+                "hostName": "example-node3.example.com",
+                "nodeNetwork": {
+                  "config": {
+                    "dns-resolver": {
+                      "config": {
+                        "search": [
+                          "example.com"
+                        ],
+                        "server": [
+                          "1111:2222:3333:4444::2"
+                        ]
+                      }
+                    },
+                    "interfaces": [
+                      {
+                        "ipv4": {
+                          "enabled": false
+                        },
+                        "ipv6": {
+                          "address": [
+                            {
+                              "ip": "1111:2222:3333:4444::aaaa:3",
+                              "prefix-length": 64
+                            }
+                          ],
+                          "enabled": true
+                        },
+                        "name": "eno1",
+                        "state": "up",
+                        "type": "ethernet"
+                      }
+                    ],
+                    "routes": {
+                      "config": [
+                        {
+                          "destination": "::/0",
+                          "next-hop-address": "1111:2222:3333:4444::1",
+                          "next-hop-interface": "eno1",
+                          "table-id": 254
+                        }
+                      ]
+                    }
+                  },
+                  "interfaces": [
+                    {
+                      "macAddress": "AA:BB:CC:DD:EE:33",
+                      "name": "eno1"
+                    }
+                  ]
+                },
+                "role": "master",
+                "rootDeviceHints": {
+                  "deviceName": "/dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0"
+                },
+                "templateRefs": [
+                  {
+                    "name": "ai-node-templates-v1",
+                    "namespace": "siteconfig-operator"
+                  }
+                ]
+              }
+            ],
+            "pullSecretRef": {
+              "name": "assisted-deployment-pull-secret"
+            },
+            "serviceNetwork": [
+              {
+                "cidr": "1001:2::/112"
+              }
+            ],
+            "sshPublicKey": "ssh-rsa AAAA...",
+            "templateRefs": [
+              {
+                "name": "ai-cluster-templates-v1",
+                "namespace": "siteconfig-operator"
+              }
+            ]
+          }
+        },
+        {
+          "apiVersion": "siteconfig.open-cluster-management.io/v1alpha1",
+          "kind": "ClusterInstance",
+          "metadata": {
+            "name": "example-ai-sno",
+            "namespace": "example-ai-sno"
+          },
+          "spec": {
+            "additionalNTPSources": [
+              "1111:2222:3333:4444::2"
+            ],
+            "baseDomain": "example.com",
+            "clusterImageSetNameRef": "openshift-4.16",
+            "clusterName": "example-ai-sno",
+            "clusterNetwork": [
+              {
+                "cidr": "1001:1::/48",
+                "hostPrefix": 64
+              }
+            ],
+            "cpuPartitioningMode": "AllNodes",
+            "extraLabels": {
+              "ManagedCluster": {
+                "common": true,
+                "du-profile": "latest",
+                "group-du-sno": "",
+                "sites": "example-sno"
+              }
+            },
+            "extraManifestsRefs": [
+              {
+                "name": "sno-extra-manifest-configmap"
+              }
+            ],
+            "installConfigOverrides": "{\n  \"capabilities\": {\n    \"baselineCapabilitySet\": \"None\",\n    \"additionalEnabledCapabilities\": [\n      \"NodeTuning\",\n      \"OperatorLifecycleManager\",\n      \"Ingress\"\n    ]\n  }\n}\n",
+            "machineNetwork": [
+              {
+                "cidr": "1111:2222:3333:4444::/64"
+              }
+            ],
+            "networkType": "OVNKubernetes",
+            "nodes": [
+              {
+                "bmcAddress": "idrac-virtualmedia+https://[1111:2222:3333:4444::bbbb:1]/redfish/v1/Systems/System.Embedded.1",
+                "bmcCredentialsName": {
+                  "name": "example-node1-bmh-secret"
+                },
+                "bootMACAddress": "AA:BB:CC:DD:EE:11",
+                "bootMode": "UEFISecureBoot",
+                "hostName": "example-node1.example.com",
+                "ignitionConfigOverride": "{\n  \"ignition\": {\n    \"version\": \"3.2.0\"\n  },\n  \"storage\": {\n    \"disks\": [\n      {\n        \"device\": \"/dev/disk/by-id/wwn-0x6b07b250ebb9d0002a33509f24af1f62\",\n        \"partitions\": [\n          {\n            \"label\": \"var-lib-containers\",\n            \"sizeMiB\": 0,\n            \"startMiB\": 250000\n          }\n        ],\n        \"wipeTable\": false\n      }\n    ],\n    \"filesystems\": [\n      {\n        \"device\": \"/dev/disk/by-partlabel/var-lib-containers\",\n        \"format\": \"xfs\",\n        \"mountOptions\": [\n          \"defaults\",\n          \"prjquota\"\n        ],\n        \"path\": \"/var/lib/containers\",\n        \"wipeFilesystem\": true\n      }\n    ]\n  },\n  \"systemd\": {\n    \"units\": [\n      {\n        \"contents\": \"# Generated by Butane\\n[Unit]\\nRequires=systemd-fsck@dev-disk-by\\\\x2dpartlabel-var\\\\x2dlib\\\\x2dcontainers.service\\nAfter=systemd-fsck@dev-disk-by\\\\x2dpartlabel-var\\\\x2dlib\\\\x2dcontainers.service\\n\\n[Mount]\\nWhere=/var/lib/containers\\nWhat=/dev/disk/by-partlabel/var-lib-containers\\nType=xfs\\nOptions=defaults,prjquota\\n\\n[Install]\\nRequiredBy=local-fs.target\",\n        \"enabled\": true,\n        \"name\": \"var-lib-containers.mount\"\n      }\n    ]\n  }\n}\n",
+                "nodeNetwork": {
+                  "config": {
+                    "dns-resolver": {
+                      "config": {
+                        "search": [
+                          "example.com"
+                        ],
+                        "server": [
+                          "1111:2222:3333:4444::2"
+                        ]
+                      }
+                    },
+                    "interfaces": [
+                      {
+                        "ipv4": {
+                          "enabled": false
+                        },
+                        "ipv6": {
+                          "address": [
+                            {
+                              "ip": "1111:2222:3333:4444::aaaa:1",
+                              "prefix-length": 64
+                            }
+                          ],
+                          "enabled": true
+                        },
+                        "name": "eno1",
+                        "state": "up",
+                        "type": "ethernet"
+                      }
+                    ],
+                    "routes": {
+                      "config": [
+                        {
+                          "destination": "::/0",
+                          "next-hop-address": "1111:2222:3333:4444::1",
+                          "next-hop-interface": "eno1",
+                          "table-id": 254
+                        }
+                      ]
+                    }
+                  },
+                  "interfaces": [
+                    {
+                      "macAddress": "AA:BB:CC:DD:EE:11",
+                      "name": "eno1"
+                    }
+                  ]
+                },
+                "role": "master",
+                "rootDeviceHints": {
+                  "deviceName": "/dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0"
+                },
+                "templateRefs": [
+                  {
+                    "name": "ai-node-templates-v1",
+                    "namespace": "siteconfig-operator"
+                  }
+                ]
+              }
+            ],
+            "pullSecretRef": {
+              "name": "assisted-deployment-pull-secret"
+            },
+            "serviceNetwork": [
+              {
+                "cidr": "1001:2::/112"
+              }
+            ],
+            "sshPublicKey": "ssh-rsa AAAA...",
+            "templateRefs": [
+              {
+                "name": "ai-cluster-templates-v1",
+                "namespace": "siteconfig-operator"
+              }
+            ]
+          }
+        },
+        {
+          "apiVersion": "siteconfig.open-cluster-management.io/v1alpha1",
+          "kind": "ClusterInstance",
+          "metadata": {
+            "name": "example-ai-standard",
+            "namespace": "example-ai-standard"
+          },
+          "spec": {
+            "additionalNTPSources": [
+              "1111:2222:3333:4444::2"
+            ],
+            "apiVIPs": [
+              "1111:2222:3333:4444::1:1"
+            ],
+            "baseDomain": "example.com",
+            "clusterImageSetNameRef": "openshift-4.16",
+            "clusterName": "example-ai-standard",
+            "clusterNetwork": [
+              {
+                "cidr": "1001:1::/48",
+                "hostPrefix": 64
+              }
+            ],
+            "clusterType": "HighlyAvailable",
+            "extraLabels": {
+              "ManagedCluster": {
+                "common": true,
+                "du-profile": "latest",
+                "group-du-standard": "",
+                "sites": "example-multinode"
+              }
+            },
+            "extraManifestsRefs": [
+              {
+                "name": "sno-extra-manifest-configmap"
+              }
+            ],
+            "ingressVIPs": [
+              "1111:2222:3333:4444::1:2"
+            ],
+            "networkType": "OVNKubernetes",
+            "nodes": [
+              {
+                "bmcAddress": "idrac-virtualmedia+https://[1111:2222:3333:4444::bbbb:1]/redfish/v1/Systems/System.Embedded.1",
+                "bmcCredentialsName": {
+                  "name": "example-node1-bmh-secret"
+                },
+                "bootMACAddress": "AA:BB:CC:DD:EE:11",
+                "bootMode": "UEFISecureBoot",
+                "hostName": "example-node1.example.com",
+                "nodeNetwork": {
+                  "config": {
+                    "dns-resolver": {
+                      "config": {
+                        "search": [
+                          "example.com"
+                        ],
+                        "server": [
+                          "1111:2222:3333:4444::2"
+                        ]
+                      }
+                    },
+                    "interfaces": [
+                      {
+                        "ipv4": {
+                          "enabled": false
+                        },
+                        "ipv6": {
+                          "address": [
+                            {
+                              "ip": "1111:2222:3333:4444::aaaa:1",
+                              "prefix-length": 64
+                            }
+                          ],
+                          "enabled": true
+                        },
+                        "name": "eno1",
+                        "state": "up",
+                        "type": "ethernet"
+                      }
+                    ],
+                    "routes": {
+                      "config": [
+                        {
+                          "destination": "::/0",
+                          "next-hop-address": "1111:2222:3333:4444::1",
+                          "next-hop-interface": "eno1",
+                          "table-id": 254
+                        }
+                      ]
+                    }
+                  },
+                  "interfaces": [
+                    {
+                      "macAddress": "AA:BB:CC:DD:EE:11",
+                      "name": "eno1"
+                    }
+                  ]
+                },
+                "role": "master",
+                "rootDeviceHints": {
+                  "deviceName": "/dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0"
+                },
+                "templateRefs": [
+                  {
+                    "name": "ai-node-templates-v1",
+                    "namespace": "siteconfig-operator"
+                  }
+                ]
+              },
+              {
+                "bmcAddress": "idrac-virtualmedia+https://[1111:2222:3333:4444::bbbb:2]/redfish/v1/Systems/System.Embedded.1",
+                "bmcCredentialsName": {
+                  "name": "example-node2-bmh-secret"
+                },
+                "bootMACAddress": "AA:BB:CC:DD:EE:22",
+                "bootMode": "UEFISecureBoot",
+                "hostName": "example-node2.example.com",
+                "nodeNetwork": {
+                  "config": {
+                    "dns-resolver": {
+                      "config": {
+                        "search": [
+                          "example.com"
+                        ],
+                        "server": [
+                          "1111:2222:3333:4444::2"
+                        ]
+                      }
+                    },
+                    "interfaces": [
+                      {
+                        "ipv4": {
+                          "enabled": false
+                        },
+                        "ipv6": {
+                          "address": [
+                            {
+                              "ip": "1111:2222:3333:4444::aaaa:2",
+                              "prefix-length": 64
+                            }
+                          ],
+                          "enabled": true
+                        },
+                        "name": "eno1",
+                        "state": "up",
+                        "type": "ethernet"
+                      }
+                    ],
+                    "routes": {
+                      "config": [
+                        {
+                          "destination": "::/0",
+                          "next-hop-address": "1111:2222:3333:4444::1",
+                          "next-hop-interface": "eno1",
+                          "table-id": 254
+                        }
+                      ]
+                    }
+                  },
+                  "interfaces": [
+                    {
+                      "macAddress": "AA:BB:CC:DD:EE:22",
+                      "name": "eno1"
+                    }
+                  ]
+                },
+                "role": "master",
+                "rootDeviceHints": {
+                  "deviceName": "/dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0"
+                },
+                "templateRefs": [
+                  {
+                    "name": "ai-node-templates-v1",
+                    "namespace": "siteconfig-operator"
+                  }
+                ]
+              },
+              {
+                "bmcAddress": "idrac-virtualmedia+https://[1111:2222:3333:4444::bbbb:3]/redfish/v1/Systems/System.Embedded.1",
+                "bmcCredentialsName": {
+                  "name": "example-node3-bmh-secret"
+                },
+                "bootMACAddress": "AA:BB:CC:DD:EE:33",
+                "bootMode": "UEFISecureBoot",
+                "hostName": "example-node3.example.com",
+                "nodeNetwork": {
+                  "config": {
+                    "dns-resolver": {
+                      "config": {
+                        "search": [
+                          "example.com"
+                        ],
+                        "server": [
+                          "1111:2222:3333:4444::2"
+                        ]
+                      }
+                    },
+                    "interfaces": [
+                      {
+                        "ipv4": {
+                          "enabled": false
+                        },
+                        "ipv6": {
+                          "address": [
+                            {
+                              "ip": "1111:2222:3333:4444::aaaa:3",
+                              "prefix-length": 64
+                            }
+                          ],
+                          "enabled": true
+                        },
+                        "name": "eno1",
+                        "state": "up",
+                        "type": "ethernet"
+                      }
+                    ],
+                    "routes": {
+                      "config": [
+                        {
+                          "destination": "::/0",
+                          "next-hop-address": "1111:2222:3333:4444::1",
+                          "next-hop-interface": "eno1",
+                          "table-id": 254
+                        }
+                      ]
+                    }
+                  },
+                  "interfaces": [
+                    {
+                      "macAddress": "AA:BB:CC:DD:EE:33",
+                      "name": "eno1"
+                    }
+                  ]
+                },
+                "role": "master",
+                "rootDeviceHints": {
+                  "deviceName": "/dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0"
+                },
+                "templateRefs": [
+                  {
+                    "name": "ai-node-templates-v1",
+                    "namespace": "siteconfig-operator"
+                  }
+                ]
+              },
+              {
+                "bmcAddress": "idrac-virtualmedia+https://[1111:2222:3333:4444::bbbb:4]/redfish/v1/Systems/System.Embedded.1",
+                "bmcCredentialsName": {
+                  "name": "example-node4-bmh-secret"
+                },
+                "bootMACAddress": "AA:BB:CC:DD:EE:44",
+                "bootMode": "UEFISecureBoot",
+                "hostName": "example-node4.example.com",
+                "nodeNetwork": {
+                  "config": {
+                    "dns-resolver": {
+                      "config": {
+                        "search": [
+                          "example.com"
+                        ],
+                        "server": [
+                          "1111:2222:3333:4444::2"
+                        ]
+                      }
+                    },
+                    "interfaces": [
+                      {
+                        "ipv4": {
+                          "enabled": false
+                        },
+                        "ipv6": {
+                          "address": [
+                            {
+                              "ip": "1111:2222:3333:4444::aaaa:4",
+                              "prefix-length": 64
+                            }
+                          ],
+                          "enabled": true
+                        },
+                        "name": "eno1",
+                        "state": "up",
+                        "type": "ethernet"
+                      }
+                    ],
+                    "routes": {
+                      "config": [
+                        {
+                          "destination": "::/0",
+                          "next-hop-address": "1111:2222:3333:4444::1",
+                          "next-hop-interface": "eno1",
+                          "table-id": 254
+                        }
+                      ]
+                    }
+                  },
+                  "interfaces": [
+                    {
+                      "macAddress": "AA:BB:CC:DD:EE:44",
+                      "name": "eno1"
+                    }
+                  ]
+                },
+                "role": "worker",
+                "rootDeviceHints": {
+                  "deviceName": "/dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0"
+                },
+                "templateRefs": [
+                  {
+                    "name": "ai-node-templates-v1",
+                    "namespace": "siteconfig-operator"
+                  }
+                ]
+              },
+              {
+                "bmcAddress": "idrac-virtualmedia+https://[1111:2222:3333:4444::bbbb:5]/redfish/v1/Systems/System.Embedded.1",
+                "bmcCredentialsName": {
+                  "name": "example-node5-bmh-secret"
+                },
+                "bootMACAddress": "AA:BB:CC:DD:EE:55",
+                "bootMode": "UEFISecureBoot",
+                "hostName": "example-node5.example.com",
+                "nodeNetwork": {
+                  "config": {
+                    "dns-resolver": {
+                      "config": {
+                        "search": [
+                          "example.com"
+                        ],
+                        "server": [
+                          "1111:2222:3333:4444::2"
+                        ]
+                      }
+                    },
+                    "interfaces": [
+                      {
+                        "ipv4": {
+                          "enabled": false
+                        },
+                        "ipv6": {
+                          "address": [
+                            {
+                              "ip": "1111:2222:3333:4444::aaaa:5",
+                              "prefix-length": 64
+                            }
+                          ],
+                          "enabled": true
+                        },
+                        "name": "eno1",
+                        "state": "up",
+                        "type": "ethernet"
+                      }
+                    ],
+                    "routes": {
+                      "config": [
+                        {
+                          "destination": "::/0",
+                          "next-hop-address": "1111:2222:3333:4444::1",
+                          "next-hop-interface": "eno1",
+                          "table-id": 254
+                        }
+                      ]
+                    }
+                  },
+                  "interfaces": [
+                    {
+                      "macAddress": "AA:BB:CC:DD:EE:55",
+                      "name": "eno1"
+                    }
+                  ]
+                },
+                "role": "worker",
+                "rootDeviceHints": {
+                  "deviceName": "/dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0"
+                },
+                "templateRefs": [
+                  {
+                    "name": "ai-node-templates-v1",
+                    "namespace": "siteconfig-operator"
+                  }
+                ]
+              }
+            ],
+            "pullSecretRef": {
+              "name": "assisted-deployment-pull-secret"
+            },
+            "serviceNetwork": [
+              {
+                "cidr": "1001:2::/112"
+              }
+            ],
+            "sshPublicKey": "ssh-rsa AAAA...",
+            "templateRefs": [
+              {
+                "name": "ai-cluster-templates-v1",
+                "namespace": "siteconfig-operator"
+              }
+            ]
+          }
+        },
+        {
+          "apiVersion": "siteconfig.open-cluster-management.io/v1alpha1",
+          "kind": "ClusterInstance",
+          "metadata": {
+            "name": "example-ibi-sno",
+            "namespace": "example-ibi-sno"
+          },
+          "spec": {
+            "additionalNTPSources": [
+              "1111:2222:3333:4444::2"
+            ],
+            "baseDomain": "example.com",
+            "caBundleRef": {
+              "name": "ibi-ca-bundle-ref"
+            },
+            "clusterImageSetNameRef": "openshift-4.16",
+            "clusterName": "example-ibi-sno",
+            "clusterNetwork": [
+              {
+                "cidr": "1001:1::/48",
+                "hostPrefix": 64
+              }
+            ],
+            "clusterType": "SNO",
+            "cpuPartitioningMode": "AllNodes",
+            "extraLabels": {
+              "ManagedCluster": {
+                "common": true,
+                "du-profile": "latest",
+                "group-du-sno": "",
+                "sites": "example-sno"
+              }
+            },
+            "extraManifestsRefs": [
+              {
+                "name": "sno-extra-manifest-configmap"
+              }
+            ],
+            "machineNetwork": [
+              {
+                "cidr": "1111:2222:3333:4444::/64"
+              }
+            ],
+            "networkType": "OVNKubernetes",
+            "nodes": [
+              {
+                "bmcAddress": "idrac-virtualmedia+https://[1111:2222:3333:4444::bbbb:1]/redfish/v1/Systems/System.Embedded.1",
+                "bmcCredentialsName": {
+                  "name": "example-node1-bmh-secret"
+                },
+                "bootMACAddress": "AA:BB:CC:DD:EE:11",
+                "bootMode": "UEFISecureBoot",
+                "hostName": "example-node1.example.com",
+                "nodeNetwork": {
+                  "config": {
+                    "dns-resolver": {
+                      "config": {
+                        "search": [
+                          "example.com"
+                        ],
+                        "server": [
+                          "1111:2222:3333:4444::2"
+                        ]
+                      }
+                    },
+                    "interfaces": [
+                      {
+                        "ipv4": {
+                          "enabled": false
+                        },
+                        "ipv6": {
+                          "address": [
+                            {
+                              "ip": "1111:2222:3333:4444::aaaa:1",
+                              "prefix-length": 64
+                            }
+                          ],
+                          "enabled": true
+                        },
+                        "name": "eno1",
+                        "state": "up",
+                        "type": "ethernet"
+                      }
+                    ],
+                    "routes": {
+                      "config": [
+                        {
+                          "destination": "::/0",
+                          "next-hop-address": "1111:2222:3333:4444::1",
+                          "next-hop-interface": "eno1",
+                          "table-id": 254
+                        }
+                      ]
+                    }
+                  },
+                  "interfaces": [
+                    {
+                      "macAddress": "AA:BB:CC:DD:EE:11",
+                      "name": "eno1"
+                    }
+                  ]
+                },
+                "role": "master",
+                "rootDeviceHints": {
+                  "deviceName": "/dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0"
+                },
+                "templateRefs": [
+                  {
+                    "name": "ibi-node-templates-v1",
+                    "namespace": "siteconfig-operator"
+                  }
+                ]
+              }
+            ],
+            "pullSecretRef": {
+              "name": "image-based-deployment-pull-secret"
+            },
+            "serviceNetwork": [
+              {
+                "cidr": "1001:2::/112"
+              }
+            ],
+            "sshPublicKey": "ssh-rsa AAAA...",
+            "templateRefs": [
+              {
+                "name": "ibi-cluster-templates-v1",
+                "namespace": "siteconfig-operator"
+              }
+            ]
+          }
+        },
+        {
+          "apiVersion": "siteconfig.open-cluster-management.io/v1alpha1",
+          "kind": "ClusterInstance",
+          "metadata": {
             "name": "site-sno-du-1",
             "namespace": "site-sno-du-1"
           },

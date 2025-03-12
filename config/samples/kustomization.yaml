@@ -1,4 +1,8 @@
 ## Append samples of your project ##
 resources:
 - siteconfig_v1alpha1_clusterinstance.yaml
+- assisted-installer/example-sno.yaml
+- assisted-installer/example-standard.yaml
+- assisted-installer/example-3node.yaml
+- image-based-installer/example-sno.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples
