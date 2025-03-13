@@ -130,8 +130,13 @@ spec:
 const BareMetalHost = `apiVersion: metal3.io/v1alpha1
 kind: BareMetalHost
 metadata:
+{{ if .SpecialVars.CurrentNode.NodeRef }}
+  name: "{{ .SpecialVars.CurrentNode.NodeRef.Name }}"
+  namespace: "{{ .SpecialVars.CurrentNode.NodeRef.Namespace }}"
+{{ else }}
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
-  namespace: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}" 
+{{ end }}      
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
     inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
