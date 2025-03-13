@@ -164,6 +164,17 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
 			Expect(err).ToNot(HaveOccurred())
 		})
+
+		It("should return nil for changes to nodes.bmcAddress when reinstall is triggered", func() {
+			newClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "reinstall-1",
+			}
+			newClusterInstance.Spec.Nodes[0].BmcAddress = "this-is-allowed"
+			reinstallRequested := isReinstallRequested(newClusterInstance)
+			Expect(reinstallRequested).To(BeTrue())
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, reinstallRequested)
+			Expect(err).ToNot(HaveOccurred())
+		})
 	})
 
 	Context("invalid spec changes", func() {
@@ -176,6 +187,13 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 			}
 			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
 			Expect(err).To(HaveOccurred())
+		})
+
+		It("should return error for BmcAddress changes", func() {
+			newClusterInstance.Spec.Nodes[0].BmcAddress = "this-should-not-change"
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("detected unauthorized changes in immutable fields: /nodes/0/bmcAddress"))
 		})
 
 		It("should return error for BootMACAddress changes", func() {
