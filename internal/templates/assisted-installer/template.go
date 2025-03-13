@@ -106,8 +106,19 @@ kind: InfraEnv
 metadata:
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
-  name: "{{ .Spec.ClusterName }}"
+{{ if .SpecialVars.CurrentNode.NodeRef }}
+  name: "{{ .SpecialVars.CurrentNode.NodeRef.Name }}"
+  namespace: "{{ .SpecialVars.CurrentNode.NodeRef.Namespace }}"
+{{ else }}
+  name: "{{ .SpecialVars.CurrentNode.HostName }}"
   namespace: "{{ .Spec.ClusterName }}"
+{{ end }}
+  labels:
+{{ if .SpecialVars.CurrentNode.NodeRef }}
+    baremetalhost.metal3.io/namespace: "{{ .SpecialVars.CurrentNode.NodeRef.Namespace }}"
+{{ else }}
+    baremetalhost.metal3.io/namespace: "{{ .Spec.ClusterName }}"
+{{ end }}
 spec:
   clusterRef:
     name: "{{ .Spec.ClusterName }}"
@@ -179,8 +190,13 @@ spec:
 const BareMetalHost = `apiVersion: metal3.io/v1alpha1
 kind: BareMetalHost
 metadata:
+{{ if .SpecialVars.CurrentNode.NodeRef }}
+  name: "{{ .SpecialVars.CurrentNode.NodeRef.Name }}"
+  namespace: "{{ .SpecialVars.CurrentNode.NodeRef.Namespace }}"
+{{ else }}
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
-  namespace: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}" 
+{{ end }}    
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "3"
     inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
@@ -198,7 +214,11 @@ metadata:
 {{ end }}
     bmac.agent-install.openshift.io/role: "{{ .SpecialVars.CurrentNode.Role }}"
   labels:
-    infraenvs.agent-install.openshift.io: "{{ .Spec.ClusterName }}"
+{{ if .SpecialVars.CurrentNode.NodeRef }}
+    infraenvs.agent-install.openshift.io: "{{ .SpecialVars.CurrentNode.NodeRef.Name }}"
+{{ else }}
+    infraenvs.agent-install.openshift.io: "{{ .SpecialVars.CurrentNode.HostName }}"
+{{ end }}
 spec:
   bootMode: "{{ .SpecialVars.CurrentNode.BootMode }}"
   bmc:
@@ -217,7 +237,6 @@ func GetClusterTemplates() map[string]string {
 	data := make(map[string]string)
 	data["AgentClusterInstall"] = AgentClusterInstall
 	data["ClusterDeployment"] = ClusterDeployment
-	data["InfraEnv"] = InfraEnv
 	data["ManagedCluster"] = ManagedCluster
 	data["KlusterletAddonConfig"] = KlusterletAddonConfig
 	return data
@@ -225,6 +244,7 @@ func GetClusterTemplates() map[string]string {
 
 func GetNodeTemplates() map[string]string {
 	data := make(map[string]string)
+	data["InfraEnv"] = InfraEnv
 	data["BareMetalHost"] = BareMetalHost
 	data["NMStateConfig"] = NMStateConfig
 	return data
