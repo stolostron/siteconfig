@@ -163,6 +163,9 @@ spec:
   proxy:
 {{ .Spec.Proxy | toYaml | indent 4 }}
 {{ end }}
+{{ if .SpecialVars.CurrentNode.CPUArchitecture }}
+  cpuArchitecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture }}"
+{{ end }}
   pullSecretRef:
     name: "{{ .Spec.PullSecretRef.Name }}"
   ignitionConfigOverride: '{{ .Spec.IgnitionConfigOverride }}'
@@ -243,6 +246,9 @@ spec:
   bootMACAddress: "{{ .SpecialVars.CurrentNode.BootMACAddress }}"
   automatedCleaningMode: "{{ .SpecialVars.CurrentNode.AutomatedCleaningMode }}"
   online: true
+{{ if .SpecialVars.CurrentNode.CPUArchitecture }}
+  architecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture }}"
+{{ end }}
 {{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:
 {{ .SpecialVars.CurrentNode.RootDeviceHints | toYaml | indent 4 }}
