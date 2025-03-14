@@ -71,6 +71,18 @@ var _ = Describe("Validate", func() {
 		Expect(err).ToNot(HaveOccurred())
 	})
 
+	It("successfully validates a well-defined ClusterInstance with a BMC credential defined in a separate Node namespace", func() {
+
+		bmcCredential := GetMockBmcSecret("node1-bmc", "foobar")
+		Expect(c.Create(ctx, bmcCredential)).To(Succeed())
+
+		clusterInstance.Spec.Nodes[0].BmcCredentialsName = v1alpha1.BmcCredentialsName{Name: bmcCredential.Name}
+		clusterInstance.Spec.Nodes[0].HostRef = &v1alpha1.HostRef{Name: "node1", Namespace: bmcCredential.Namespace}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		Expect(Validate(ctx, c, clusterInstance)).To(Succeed())
+	})
+
 	It("fails validation when cluster name is not defined", func() {
 		clusterInstance.Spec.ClusterName = ""
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
@@ -151,6 +163,15 @@ var _ = Describe("Validate", func() {
 
 	It("fails validation due to missing BMC credential secret", func() {
 		clusterInstance.Spec.Nodes[0].BmcCredentialsName = v1alpha1.BmcCredentialsName{Name: doesNotExist}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		err := Validate(ctx, c, clusterInstance)
+		Expect(err).To(MatchError(ContainSubstring("failed to validate BMC credentials")))
+	})
+
+	It("fails validation due to missing BMC credential secret in referenced Node namespace", func() {
+		clusterInstance.Spec.Nodes[0].BmcCredentialsName = v1alpha1.BmcCredentialsName{Name: doesNotExist}
+		clusterInstance.Spec.Nodes[0].HostRef = &v1alpha1.HostRef{Name: "node1", Namespace: "foobar"}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
 		err := Validate(ctx, c, clusterInstance)

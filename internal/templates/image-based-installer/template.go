@@ -21,39 +21,9 @@ const (
 	NodeLevelInstallTemplates    = "ibi-node-templates-v1"
 )
 
-const ImageClusterInstall = `apiVersion: extensions.hive.openshift.io/v1alpha1
-kind: ImageClusterInstall
-metadata:
-  name: "{{ .Spec.ClusterName }}"
-  namespace: "{{ .Spec.ClusterName }}"
-  annotations:
-    siteconfig.open-cluster-management.io/sync-wave: "1"
-spec:
-  clusterDeploymentRef:
-    name: "{{ .Spec.ClusterName }}"
-  imageSetRef:
-    name: "{{ .Spec.ClusterImageSetNameRef }}"
-  hostname: "{{ .SpecialVars.CurrentNode.HostName }}"
-  sshKey: "{{ .Spec.SSHPublicKey }}"
-{{ if .Spec.CaBundleRef }}
-  caBundleRef:
-{{ .Spec.CaBundleRef | toYaml | indent 4 }}
-{{ end }}
-{{ if .Spec.ExtraManifestsRefs }}
-  extraManifestsRefs:
-{{ .Spec.ExtraManifestsRefs | toYaml | indent 4 }}
-{{ end }}
-  bareMetalHostRef:
-    name: "{{ .SpecialVars.CurrentNode.HostName }}"
-    namespace: "{{ .Spec.ClusterName }}"
-{{ if .Spec.MachineNetwork }}
-  machineNetwork: "{{ (index .Spec.MachineNetwork 0).CIDR }}"
-{{ end }}
-{{ if .Spec.Proxy }}
-  proxy:
-{{ .Spec.Proxy | toYaml | indent 4 }}
-{{ end }}
-`
+/*
+  Cluster-level installation templates
+*/
 
 const ClusterDeployment = `apiVersion: hive.openshift.io/v1
 kind: ClusterDeployment
@@ -74,22 +44,6 @@ spec:
     none: {}
   pullSecretRef:
     name: "{{ .Spec.PullSecretRef.Name }}"`
-
-// nolint:gosec
-// This is for dynamic templating purposes, not hardcoded credentials (gosec G101).
-const NetworkSecret = `{{ if .SpecialVars.CurrentNode.NodeNetwork }}
-apiVersion: v1
-kind: Secret
-metadata:
-  annotations:
-    siteconfig.open-cluster-management.io/sync-wave: "1"
-  name: "{{ .SpecialVars.CurrentNode.HostName }}"
-  namespace: "{{ .Spec.ClusterName }}"
-type: Opaque
-data:
-  nmstate: |
-{{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig | toYaml | b64enc | indent 4}}
-{{ end }}`
 
 const KlusterletAddonConfig = `apiVersion: agent.open-cluster-management.io/v1
 kind: KlusterletAddonConfig
@@ -127,11 +81,54 @@ metadata:
 spec:
   hubAcceptsClient: true`
 
+/*
+  Node-level installation templates
+*/
+
+const ImageClusterInstall = `apiVersion: extensions.hive.openshift.io/v1alpha1
+kind: ImageClusterInstall
+metadata:
+  name: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}"
+  annotations:
+    siteconfig.open-cluster-management.io/sync-wave: "1"
+spec:
+  clusterDeploymentRef:
+    name: "{{ .Spec.ClusterName }}"
+  imageSetRef:
+    name: "{{ .Spec.ClusterImageSetNameRef }}"
+  hostname: "{{ .SpecialVars.CurrentNode.HostName }}"
+  sshKey: "{{ .Spec.SSHPublicKey }}"
+{{ if .Spec.CaBundleRef }}
+  caBundleRef:
+{{ .Spec.CaBundleRef | toYaml | indent 4 }}
+{{ end }}
+{{ if .Spec.ExtraManifestsRefs }}
+  extraManifestsRefs:
+{{ .Spec.ExtraManifestsRefs | toYaml | indent 4 }}
+{{ end }}
+  bareMetalHostRef:
+    name: "{{ .SpecialVars.CurrentNode.HostName }}"
+    namespace: "{{ .Spec.ClusterName }}"
+{{ if .Spec.MachineNetwork }}
+  machineNetwork: "{{ (index .Spec.MachineNetwork 0).CIDR }}"
+{{ end }}
+{{ if .Spec.Proxy }}
+  proxy:
+{{ .Spec.Proxy | toYaml | indent 4 }}
+{{ end }}
+`
+
 const BareMetalHost = `apiVersion: metal3.io/v1alpha1
 kind: BareMetalHost
 metadata:
+{{ if .SpecialVars.CurrentNode.HostRef }}
+  name: "{{ .SpecialVars.CurrentNode.HostRef.Name }}"
+  namespace: "{{ .SpecialVars.CurrentNode.HostRef.Namespace }}"
+{{ else }}
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
-  namespace: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}" 
+{{ end }}      
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
     inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
@@ -151,6 +148,27 @@ spec:
 {{ end }}
 {{ if .SpecialVars.CurrentNode.NodeNetwork }}
   preprovisioningNetworkDataName: {{ .SpecialVars.CurrentNode.HostName }}
+{{ end }}`
+
+// nolint:gosec
+// This is for dynamic templating purposes, not hardcoded credentials (gosec G101).
+const NetworkSecret = `{{ if .SpecialVars.CurrentNode.NodeNetwork }}
+apiVersion: v1
+kind: Secret
+metadata:
+  annotations:
+    siteconfig.open-cluster-management.io/sync-wave: "1"
+{{ if .SpecialVars.CurrentNode.HostRef }}
+  name: "{{ .SpecialVars.CurrentNode.HostRef.Name }}"
+  namespace: "{{ .SpecialVars.CurrentNode.HostRef.Namespace }}"
+{{ else }}
+  name: "{{ .SpecialVars.CurrentNode.HostName }}"
+  namespace: "{{ .Spec.ClusterName }}"
+{{ end }}
+type: Opaque
+data:
+  nmstate: |
+{{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig | toYaml | b64enc | indent 4}}
 {{ end }}`
 
 func GetClusterTemplates() map[string]string {

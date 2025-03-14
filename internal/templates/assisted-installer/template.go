@@ -21,6 +21,10 @@ const (
 	NodeLevelInstallTemplates    = "ai-node-templates-v1"
 )
 
+/*
+  Cluster-level installation templates
+*/
+
 const AgentClusterInstall = `apiVersion: extensions.hive.openshift.io/v1beta1
 kind: AgentClusterInstall
 metadata:
@@ -101,31 +105,6 @@ spec:
   pullSecretRef:
     name: "{{ .Spec.PullSecretRef.Name }}"`
 
-const InfraEnv = `apiVersion: agent-install.openshift.io/v1beta1
-kind: InfraEnv
-metadata:
-  annotations:
-    siteconfig.open-cluster-management.io/sync-wave: "1"
-  name: "{{ .Spec.ClusterName }}"
-  namespace: "{{ .Spec.ClusterName }}"
-spec:
-  clusterRef:
-    name: "{{ .Spec.ClusterName }}"
-    namespace: "{{ .Spec.ClusterName }}"
-  sshAuthorizedKey: "{{ .Spec.SSHPublicKey }}"
-{{ if .Spec.Proxy }}
-  proxy:
-{{ .Spec.Proxy | toYaml | indent 4 }}
-{{ end }}
-  pullSecretRef:
-    name: "{{ .Spec.PullSecretRef.Name }}"
-  ignitionConfigOverride: '{{ .Spec.IgnitionConfigOverride }}'
-  nmStateConfigLabelSelector:
-    matchLabels:
-      nmstate-label: "{{ .Spec.ClusterName }}"
-  additionalNTPSources:
-{{ .Spec.AdditionalNTPSources | toYaml | indent 4 }}`
-
 const KlusterletAddonConfig = `apiVersion: agent.open-cluster-management.io/v1
 kind: KlusterletAddonConfig
 metadata:
@@ -147,23 +126,6 @@ spec:
   searchCollector:
     enabled: false`
 
-const NMStateConfig = `{{ if .SpecialVars.CurrentNode.NodeNetwork }}
-apiVersion: agent-install.openshift.io/v1beta1
-kind: NMStateConfig
-metadata:
-  annotations:
-    siteconfig.open-cluster-management.io/sync-wave: "1"
-  name: "{{ .SpecialVars.CurrentNode.HostName }}"
-  namespace: "{{ .Spec.ClusterName }}"
-  labels:
-    nmstate-label: "{{ .Spec.ClusterName }}"
-spec:
-  config:
-{{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig | toYaml | indent 4}}
-  interfaces:
-{{ .SpecialVars.CurrentNode.NodeNetwork.Interfaces | toYaml | indent 4 }}
-{{ end }}`
-
 const ManagedCluster = `apiVersion: cluster.open-cluster-management.io/v1
 kind: ManagedCluster
 metadata:
@@ -176,11 +138,80 @@ metadata:
 spec:
   hubAcceptsClient: true`
 
+/*
+  Node-level installation templates
+*/
+
+const InfraEnv = `apiVersion: agent-install.openshift.io/v1beta1
+kind: InfraEnv
+metadata:
+  annotations:
+    siteconfig.open-cluster-management.io/sync-wave: "1"
+{{ if .SpecialVars.CurrentNode.HostRef }}
+  name: "{{ .SpecialVars.CurrentNode.HostRef.Name }}"
+  namespace: "{{ .SpecialVars.CurrentNode.HostRef.Namespace }}"
+{{ else }}
+  name: "{{ .SpecialVars.CurrentNode.HostName }}"
+  namespace: "{{ .Spec.ClusterName }}"
+{{ end }}
+spec:
+  clusterRef:
+    name: "{{ .Spec.ClusterName }}"
+    namespace: "{{ .Spec.ClusterName }}"
+  sshAuthorizedKey: "{{ .Spec.SSHPublicKey }}"
+{{ if .Spec.Proxy }}
+  proxy:
+{{ .Spec.Proxy | toYaml | indent 4 }}
+{{ end }}
+  pullSecretRef:
+    name: "{{ .Spec.PullSecretRef.Name }}"
+  ignitionConfigOverride: '{{ .Spec.IgnitionConfigOverride }}'
+  nmStateConfigLabelSelector:
+    matchLabels:
+{{ if .SpecialVars.CurrentNode.HostRef }}
+      nmstate-label: "{{ .SpecialVars.CurrentNode.HostRef.Name }}"
+{{ else }}
+      nmstate-label: "{{ .SpecialVars.CurrentNode.HostName }}"
+{{ end }}
+  additionalNTPSources:
+{{ .Spec.AdditionalNTPSources | toYaml | indent 4 }}`
+
+const NMStateConfig = `{{ if .SpecialVars.CurrentNode.NodeNetwork }}
+apiVersion: agent-install.openshift.io/v1beta1
+kind: NMStateConfig
+metadata:
+  annotations:
+    siteconfig.open-cluster-management.io/sync-wave: "1"
+{{ if .SpecialVars.CurrentNode.HostRef }}
+  name: "{{ .SpecialVars.CurrentNode.HostRef.Name }}"
+  namespace: "{{ .SpecialVars.CurrentNode.HostRef.Namespace }}"
+{{ else }}
+  name: "{{ .SpecialVars.CurrentNode.HostName }}"
+  namespace: "{{ .Spec.ClusterName }}"
+{{ end }}
+  labels:
+{{ if .SpecialVars.CurrentNode.HostRef }}
+    nmstate-label: "{{ .SpecialVars.CurrentNode.HostRef.Name }}"
+{{ else }}
+    nmstate-label: "{{ .SpecialVars.CurrentNode.HostName }}"
+{{ end }}
+spec:
+  config:
+{{ .SpecialVars.CurrentNode.NodeNetwork.NetConfig | toYaml | indent 4}}
+  interfaces:
+{{ .SpecialVars.CurrentNode.NodeNetwork.Interfaces | toYaml | indent 4 }}
+{{ end }}`
+
 const BareMetalHost = `apiVersion: metal3.io/v1alpha1
 kind: BareMetalHost
 metadata:
+{{ if .SpecialVars.CurrentNode.HostRef }}
+  name: "{{ .SpecialVars.CurrentNode.HostRef.Name }}"
+  namespace: "{{ .SpecialVars.CurrentNode.HostRef.Namespace }}"
+{{ else }}
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
-  namespace: "{{ .Spec.ClusterName }}"
+  namespace: "{{ .Spec.ClusterName }}" 
+{{ end }}    
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "3"
     inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
@@ -198,7 +229,11 @@ metadata:
 {{ end }}
     bmac.agent-install.openshift.io/role: "{{ .SpecialVars.CurrentNode.Role }}"
   labels:
-    infraenvs.agent-install.openshift.io: "{{ .Spec.ClusterName }}"
+{{ if .SpecialVars.CurrentNode.HostRef }}
+    infraenvs.agent-install.openshift.io: "{{ .SpecialVars.CurrentNode.HostRef.Name }}"
+{{ else }}
+    infraenvs.agent-install.openshift.io: "{{ .SpecialVars.CurrentNode.HostName }}"
+{{ end }}
 spec:
   bootMode: "{{ .SpecialVars.CurrentNode.BootMode }}"
   bmc:
@@ -217,7 +252,6 @@ func GetClusterTemplates() map[string]string {
 	data := make(map[string]string)
 	data["AgentClusterInstall"] = AgentClusterInstall
 	data["ClusterDeployment"] = ClusterDeployment
-	data["InfraEnv"] = InfraEnv
 	data["ManagedCluster"] = ManagedCluster
 	data["KlusterletAddonConfig"] = KlusterletAddonConfig
 	return data
@@ -225,6 +259,7 @@ func GetClusterTemplates() map[string]string {
 
 func GetNodeTemplates() map[string]string {
 	data := make(map[string]string)
+	data["InfraEnv"] = InfraEnv
 	data["BareMetalHost"] = BareMetalHost
 	data["NMStateConfig"] = NMStateConfig
 	return data
