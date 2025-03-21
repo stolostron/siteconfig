@@ -96,6 +96,7 @@ func validatePostProvisioningChanges(
 		"/extraLabels",
 		"/suppressedManifests",
 		"/pruneManifests",
+		"/clusterImageSetNameRef",
 		"/nodes/*/extraAnnotations",
 		"/nodes/*/extraLabels",
 		"/nodes/*/suppressedManifests",
