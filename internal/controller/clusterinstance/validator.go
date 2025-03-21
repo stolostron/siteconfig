@@ -61,12 +61,16 @@ func validateResources(ctx context.Context, c client.Client, clusterInstance *v1
 
 	// Check that node BMC secrets exist in namespace
 	for _, node := range clusterInstance.Spec.Nodes {
-		key = types.NamespacedName{Name: node.BmcCredentialsName.Name, Namespace: clusterInstance.Namespace}
+		bmcCredentialNS := clusterInstance.Namespace
+		if node.HostRef != nil {
+			bmcCredentialNS = node.HostRef.Namespace
+		}
+		key = types.NamespacedName{Name: node.BmcCredentialsName.Name, Namespace: bmcCredentialNS}
 		bmcSecret := &corev1.Secret{}
 		if err := c.Get(ctx, key, bmcSecret); err != nil {
 			return fmt.Errorf(
 				"failed to validate BMC credentials: %s in namespace %s [Node: Hostname=%s], err: %w",
-				node.BmcCredentialsName.Name, clusterInstance.Spec.ClusterName, node.HostName, err)
+				node.BmcCredentialsName.Name, bmcCredentialNS, node.HostName, err)
 		}
 	}
 

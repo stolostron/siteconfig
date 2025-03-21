@@ -273,19 +273,27 @@ func validateRenderedTemplate(manifest map[string]interface{}, templateKey strin
 	return nil
 }
 
-func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterData) (map[string]interface{}, error) {
-
-	renderedTemplate := make(map[string]interface{})
+func ParseTemplate(templateKey, templateStr string) (*template.Template, error) {
 	fMap := funcMap()
 	t, err := template.New(templateKey).Funcs(fMap).Parse(templateStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse template %s: %w", templateKey, err)
+		return nil, fmt.Errorf("failed to parse template: %w", err)
+	}
+	return t, nil
+}
+
+func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterData) (map[string]interface{}, error) {
+
+	renderedTemplate := make(map[string]interface{})
+	t, err := ParseTemplate(templateKey, templateStr)
+	if err != nil {
+		return nil, fmt.Errorf("encountered an error parsing template %s: %w", templateKey, err)
 	}
 
 	var buffer bytes.Buffer
 	err = t.Execute(&buffer, data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute template: %w", err)
+		return nil, fmt.Errorf("failed to execute template %s: %w", templateKey, err)
 	}
 
 	// Ensure there's non-whitespace content
