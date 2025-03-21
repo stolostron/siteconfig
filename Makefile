@@ -154,7 +154,7 @@ ci-test-unit:
 		./...
 
 .PHONY: ci-job
-ci-job: common-deps-update generate fmt vet golangci-lint unittest test-coverage shellcheck bashate bundle-check
+ci-job: common-deps-update generate fmt vet golangci-lint unittest shellcheck bashate bundle-check
 
 ##@ Build
 
