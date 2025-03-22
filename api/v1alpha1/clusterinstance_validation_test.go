@@ -157,6 +157,12 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 
+		It("should return nil for clusterImageSetNameRef", func() {
+			newClusterInstance.Spec.ClusterImageSetNameRef = "openshift-test-updated"
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
 		It("should return nil for extraLabel", func() {
 			newClusterInstance.Spec.ExtraLabels["ClusterDeployment"] = map[string]string{
 				"foo": "bar",
