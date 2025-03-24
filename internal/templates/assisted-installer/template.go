@@ -165,6 +165,11 @@ spec:
 {{ end }}
 {{ if .SpecialVars.CurrentNode.CPUArchitecture }}
   cpuArchitecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture }}"
+{{ else if and
+    (.Spec.CPUArchitecture)
+    (ne .Spec.CPUArchitecture "multi")
+}}
+  cpuArchitecture: "{{ .Spec.CPUArchitecture }}"
 {{ end }}
   pullSecretRef:
     name: "{{ .Spec.PullSecretRef.Name }}"
@@ -248,6 +253,11 @@ spec:
   online: true
 {{ if .SpecialVars.CurrentNode.CPUArchitecture }}
   architecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture }}"
+{{ else if and
+    (.Spec.CPUArchitecture)
+    (ne .Spec.CPUArchitecture "multi")
+}}
+  architecture: "{{ .Spec.CPUArchitecture }}"
 {{ end }}
 {{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:
