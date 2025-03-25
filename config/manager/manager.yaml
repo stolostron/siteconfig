@@ -48,8 +48,10 @@ spec:
         - /usr/local/bin/siteconfig-manager
         args:
         - "--health-probe-bind-address=:8081"
-        - "--metrics-bind-address=127.0.0.1:8080"
-        - "--leader-elect"        
+        - "--metrics-bind-address=127.0.0.1:8443"
+        - "--metrics-tls-cert-dir=/secrets/certs/metrics"
+        - "--clusterinstance-webhook-tls-cert-dir=/secrets/certs/webhook-server"        
+        - "--leader-elect"
         env:
         - name: POD_NAMESPACE
           valueFrom:
@@ -82,39 +84,25 @@ spec:
         ports:
         - containerPort: 9443
           name: webhook-server
-          protocol: TCP        
-        volumeMounts:
-        - mountPath: /tmp/k8s-webhook-server/serving-certs
-          name: cert
-          readOnly: true        
-      - name: kube-rbac-proxy
-        image: quay.io/openshift/origin-kube-rbac-proxy:4.18
-        args:
-        - "--secure-listen-address=0.0.0.0:8443"
-        - "--upstream=http://127.0.0.1:8080/"
-        - "--logtostderr=true"
-        - "--v=10"
-        - "--http2-disable=true"
-        ports:
+          protocol: TCP
         - containerPort: 8443
           protocol: TCP
           name: https
-        resources:
-          limits:
-            cpu: 500m
-            memory: 128Mi
-          requests:
-            cpu: 5m
-            memory: 64Mi
-        securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-              - "ALL"            
+        volumeMounts:
+        - mountPath: /secrets/certs/webhook-server
+          name: webhook-certs
+          readOnly: true
+        - mountPath: /secrets/certs/metrics
+          name: metrics-certs
+          readOnly: true          
       serviceAccountName: siteconfig-controller-manager
       terminationGracePeriodSeconds: 10
       volumes:
-      - name: cert
+      - name: webhook-certs
         secret:
           defaultMode: 420
           secretName: siteconfig-webhook-server-cert
+      - name: metrics-certs
+        secret:
+          defaultMode: 420
+          secretName: siteconfig-metrics-server-cert
