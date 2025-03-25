@@ -8,6 +8,8 @@ The default CPU architecture for all nodes in a cluster can be set using the `cp
 
 If no value is provided here then it will be assumed to be `x86_64`.
 
+As Image Based Installer only supports SNO, the architecture should instead be set using [Overriding Architecture for Individual Nodes](#overriding-architecture-for-individual-nodes).
+
 ```yaml
 ...
 spec:
@@ -49,3 +51,7 @@ extraAnnotations:
 ```
 
 For more details, refer to the upstream documentation: <https://github.com/openshift/assisted-service/tree/master/docs/hive-integration#ironic-agent-image>.
+
+## Configuring ARM Nodes for Image Based Installer
+
+Installing ARM nodes with the Image Based Installer is currently unsupported.
