@@ -144,11 +144,6 @@ spec:
   externallyProvisioned: true
 {{ if .SpecialVars.CurrentNode.CPUArchitecture }}
   architecture: "{{ .SpecialVars.CurrentNode.CPUArchitecture }}"
-{{ else if and
-    (.Spec.CPUArchitecture)
-    (ne .Spec.CPUArchitecture "multi")
-}}
-  architecture: "{{ .Spec.CPUArchitecture }}"
 {{ end }}
 {{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:
