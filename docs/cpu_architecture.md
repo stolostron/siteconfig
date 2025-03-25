@@ -2,9 +2,9 @@
 
 There are two places where the CPU architecture can be defined.
 
-## Using the ClusterInstance CRD Field
+## Setting a Default Architecture for the Cluster
 
-The default architecture for all the nodes in the cluster can be defined once in the ClusterInstance field `cpuArchitecture`. This is provided to allow easily configuring multiple nodes. It is also valid to use the value `multi` here to show that a mixed architecture deployment is intended.
+The default CPU architecture for all nodes in a cluster can be set using the `cpuArchitecture` field in the ClusterInstance resource. This is provided to allow easily configuring multiple nodes. If a mixed-architecture deployment is required, the value `multi` can be used.
 
 If no value is provided here then it will be assumed to be `x86_64`.
 
@@ -24,11 +24,11 @@ spec:
         ...
 ```
 
-## Using the NodeSpec Struct Field
+## Overriding Architecture for Individual Nodes
 
-Each node defined in the Nodes list can have its `cpuArchitecture` explicitly defined.
+Each node in the `nodes` list can specify its `cpuArchitecture` field to override the default set at the cluster level.
 
-If no value is provided here then it will be assumed to be `x86_64` unless a default is provided in the ClusterInstance.
+If no value is provided, the node inherits the cluster-level default (if specified). Otherwise, it defaults to `x86_64`.
 
 ```yaml
 ...
@@ -38,9 +38,9 @@ nodes:
       ...
 ```
 
-## ARM Specific Configuration using Assisted Installer
+## Configuring ARM Nodes for Assisted Installer
 
-Installing ARM nodes with Assisted Installer currently requires setting an annotation to ensure the Ironic agent has the correct image. This annotation can be added using the `extraAnnotations` field. This field is valid on both the NodeSpec and ClusterInstance CRD but should only be set for ARM nodes.
+Installing ARM nodes with Assisted Installer currently requires setting an annotation to ensure the Ironic agent has the correct image. This annotation is specified using the `extraAnnotations` field, which is supported at both the cluster and node levels. However, it should only be applied to ARM nodes.
 
 ```yaml
 extraAnnotations:
@@ -48,4 +48,4 @@ extraAnnotations:
         infraenv.agent-install.openshift.io/ironic-agent-image-override: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:placeholder
 ```
 
-The upstream documentation has more information on this: <https://github.com/openshift/assisted-service/tree/master/docs/hive-integration#ironic-agent-image>.
+For more details, refer to the upstream documentation: <https://github.com/openshift/assisted-service/tree/master/docs/hive-integration#ironic-agent-image>.
