@@ -1,34 +1,28 @@
 # Safeguarding ConfigMaps and Secrets During Cluster Reinstalls with SiteConfig Operator
 
-## Table of Contents
+<details>
+  <summary>Table of Contents</summary>
 
 1. [Introduction](#introduction)
 2. [Key Features](#key-features)
-   - [Backup](#backup)
-   - [Restore](#restore)
-   - [Selective Resource Management](#selective-resource-management)
 3. [Preservation Modes](#preservation-modes)
-   - [None](#none)
-   - [All](#all)
-   - [ClusterIdentity](#clusteridentity)
+   - [None](#1-none)
+   - [All](#2-all)
+   - [ClusterIdentity](#3-clusteridentity)
 4. [Backup Workflow](#backup-workflow)
    - [Backup ConfigMaps and Secrets](#backup-configmaps-and-secrets)
 5. [Restoration Workflow](#restoration-workflow)
    - [Restore ConfigMaps and Secrets](#restore-configmaps-and-secrets)
-     - [ConfigMaps](#configmaps)
-     - [Secrets](#secrets)
 6. [Example Usage](#example-usage)
    - [Preserving a ConfigMap](#preserving-a-configmap)
 
----
+</details>
 
 ## Introduction
 
-The **preservation** feature within the **SiteConfig Operator** provides a mechanism to back up and restore important
+The **preservation** feature within the **SiteConfig operator** provides a mechanism to back up and restore important
 Kubernetes resources such as **ConfigMaps** and **Secrets** that reside in the same namespace as the
 **ClusterInstance** Custom Resource (CR). This functionality ensures cluster data integrity during reinstallations.
-
----
 
 ## Key Features
 
@@ -37,23 +31,22 @@ Kubernetes resources such as **ConfigMaps** and **Secrets** that reside in the s
 3. **Selective Resource Management**: Employs **Preservation Modes** to determine which resources are backed up and
    restored.
 
----
 
 ## Preservation Modes
 
-The SiteConfig Operator allows users to control data preservation through three distinct modes:
+The SiteConfig operator allows users to control data preservation through three distinct modes:
 
 ### 1. **None**
 - **Behavior**: No ConfigMaps or Secrets are preserved.
 - **Usage**: Select this mode if data preservation is unnecessary for the cluster during reinstallation.
 
----
 
 ### 2. **All**
 - **Behavior**:
   - All ConfigMaps and Secrets labeled with `siteconfig.open-cluster-management.io/preserve` (any value) in the same
-    namespace as the ClusterInstance CR are backed up.
+    namespace as the `ClusterInstance` CR are backed up.
   - The original CRs of these resources are stored as immutable Kubernetes secrets.
+  - If the SiteConfig operator does not find any labeled resources, the operator proceeds with the reinstallation without data preservation.
 
 **Label Requirement**: Add the label `siteconfig.open-cluster-management.io/preserve` with any value.
 
@@ -62,13 +55,13 @@ The SiteConfig Operator allows users to control data preservation through three 
 siteconfig.open-cluster-management.io/preserve: ""
 ```
 
----
 
 ### 3. **ClusterIdentity**
 - **Behavior**:
   - Only ConfigMaps and Secrets labeled with `siteconfig.open-cluster-management.io/preserve: "cluster-identity"` in
-    the same namespace as the ClusterInstance CR are backed up.
+    the same namespace as the `ClusterInstance` CR are backed up.
   - The original CRs of these resources are stored as immutable Kubernetes secrets.
+  - If the SiteConfig operator does not find any labeled resources, the operator stops the reinstallation process and displays an error message.
 
 **Label Requirement**: Add the label `siteconfig.open-cluster-management.io/preserve` with the value `cluster-identity`.
 
@@ -77,13 +70,12 @@ siteconfig.open-cluster-management.io/preserve: ""
 siteconfig.open-cluster-management.io/preserve: "cluster-identity"
 ```
 
----
 
 ## Backup Workflow
 
 ### Backup ConfigMaps and Secrets
 
-The SiteConfig Operator ensures the preservation of ConfigMaps and Secrets by performing the following steps:
+The SiteConfig operator ensures the preservation of ConfigMaps and Secrets by performing the following steps:
 - **Sanitizing Metadata**: Information (such as creation timestamp, UID, and owner references) is removed from
   the resource metadata.
 - **Serialization**: The resource's data is serialized into YAML format, ensuring that all relevant configuration
@@ -94,7 +86,6 @@ The SiteConfig Operator ensures the preservation of ConfigMaps and Secrets by pe
 The backup data is encoded in base64 within the Secret, preserving both the original resource data and metadata in a
 format that can be easily restored later.
 
----
 
 ## Restoration Workflow
 
@@ -107,13 +98,12 @@ Restoring a previously backed-up resource involves the following steps:
 - **Restoration**: The resource is either created or updated within the cluster to match the original state, with a
   `restoredAt` timestamp added for reference.
 
----
 
 ## Example Usage
 
 ### Preserving a ConfigMap
 
-Given the following ClusterInstance definition:
+Given the following `ClusterInstance` definition:
 
 ```yaml
 apiVersion: siteconfig.open-cluster-management.io/v1alpha1
@@ -127,7 +117,7 @@ spec:
     preservationMode: "All"
 ```
 
-#### Original ConfigMap Resource
+#### Original `ConfigMap` Resource
 
 This is the original resource that will be preserved:
 
@@ -147,7 +137,7 @@ data:
 ```
 
 
-#### Example Preserved ConfigMap Resource
+#### Example Preserved `ConfigMap` Resource
 
 The preserved resource, stored as an immutable Kubernetes Secret:
 
@@ -170,7 +160,7 @@ data:
   original-resource: YXBpVmVyc2lvbjogdjEKa2luZDogQ29uZmlnTWFwCm1ldGFkYXRhOgogIG5hbWU6IGV4YW1wbGUtMQogIG5hbWVzcGFjZTogZGVmYXVsdAogIGxhYmVsczoKICAgIHNpdGVjb25maWcub3Blbi1jbHVzdGVyLW1hbmFnZW1lbnQuaW8vcHJlc2VydmU6ICIiCiAgYW5ub3RhdGlvbnM6CiAgICBleGFtcGxlLWFubm90YXRpb246ICJvcmlnaW5hbC1jb25maWdtYXAiCmRhdGE6CiAga2V5MTogInZhbHVlMSIKICBrZXkyOiAidmFsdWUyIg==
 ```
 
-#### Example Restored ConfigMap Resource
+#### Example Restored `ConfigMap` Resource
 
 Once the resource is restored, it will appear as follows, with a new annotation indicating the restoration time:
 
