@@ -1108,7 +1108,7 @@ metadata:
                 },
                 "templateRefs": [
                   {
-                    "name": "aci-node-crs-v1",
+                    "name": "ai-node-templates-v1",
                     "namespace": "siteconfig-operator"
                   }
                 ]
@@ -1128,7 +1128,7 @@ metadata:
             "sshPublicKey": "ssh-rsa ",
             "templateRefs": [
               {
-                "name": "aci-cluster-crs-v1",
+                "name": "ai-cluster-templates-v1",
                 "namespace": "siteconfig-operator"
               }
             ]
