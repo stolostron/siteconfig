@@ -143,5 +143,5 @@ require (
 
 replace (
 	github.com/openshift/assisted-service/api => github.com/openshift/assisted-service/api v0.0.0-20250318215944-c498e121260d // release-ocm-2.13
-	github.com/openshift/assisted-service/models => github.com/openshift/assisted-service/models v0.0.0-20250320150550-d2b3fd315aef // release-ocm-2.13
+	github.com/openshift/assisted-service/models => github.com/openshift/assisted-service/models v0.0.0-20250410153519-abd01432ec2c // release-ocm-2.13
 )
