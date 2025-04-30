@@ -1,14 +1,16 @@
-# Configuring CPU Architecture
+# Configuring CPU architecture
 
-There are two places where the CPU architecture can be defined.
+You can define the CPU architecture for your nodes with the SiteConfig operator on cluster and node levels.
 
-## Setting a Default Architecture for the Cluster
+**Note:** Installing ARM nodes with the Image Based Installer is currently not supported.
 
-The default CPU architecture for all nodes in a cluster can be set using the `cpuArchitecture` field in the ClusterInstance resource. This is provided to allow easily configuring multiple nodes. If a mixed-architecture deployment is required, the value `multi` can be used.
+## Configuring CPU architecture on cluster level
 
-If no value is provided here then it will be assumed to be `x86_64`.
+You can set the CPU architecture for all nodes in a cluster by using the `spec.cpuArchitecture` field in the `ClusterInstance` resource. This allows easy configuration of multiple nodes. The following values are supported for the `spec.cpuArchitecture` field:
 
-As Image Based Installer only supports SNO, the architecture should instead be set using [Overriding Architecture for Individual Nodes](#overriding-architecture-for-individual-nodes).
+- `x86_64` for a x86-64 deployment
+- `aarch64` for an ARM64 deployment
+- `multi` for a mixed-architecture deployment
 
 ```yaml
 ...
@@ -26,23 +28,27 @@ spec:
         ...
 ```
 
-## Overriding Architecture for Individual Nodes
+If no value is provided, the SiteConfig operator sets the default `x86_64` value.
 
-Each node in the `nodes` list can specify its `cpuArchitecture` field to override the default set at the cluster level.
+## Overriding architecture on node level
 
-If no value is provided, the node inherits the cluster-level default (if specified). Otherwise, it defaults to `x86_64`.
+For each node in the `nodes` list, you can specify the node's `cpuArchitecture` field to override the cluster-level value. If no value is provided, the node inherits the cluster-level value, if specified. Otherwise, it defaults to the `x86_64` value.
+
+When deploying single-node OpenShift clusters with the Image Based Installer Operator, you must override the default CPU architecture for individual nodes.
 
 ```yaml
 ...
-nodes:
-    - hostname: example-node
-      cpuArchitecture: aarch64
-      ...
+spec:
+...
+    nodes:
+        - hostname: example-node
+          cpuArchitecture: x86_64
+          ...
 ```
 
-## Configuring ARM Nodes for Assisted Installer
+## Configuring ARM nodes for Assisted Installer
 
-Installing ARM nodes with Assisted Installer currently requires setting an annotation to ensure the Ironic agent has the correct image. This annotation is specified using the `extraAnnotations` field, which is supported at both the cluster and node levels. However, it should only be applied to ARM nodes.
+To install ARM nodes with the Assisted Installer, you must set an annotation to ensure the Ironic agent has the correct image. The annotation is specified using the `extraAnnotations` field in the `ClusterInstance` resource, which is supported on both cluster and node levels. You must only apply the annotation to ARM nodes.
 
 ```yaml
 extraAnnotations:
@@ -50,8 +56,4 @@ extraAnnotations:
         infraenv.agent-install.openshift.io/ironic-agent-image-override: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:placeholder
 ```
 
-For more details, refer to the upstream documentation: <https://github.com/openshift/assisted-service/tree/master/docs/hive-integration#ironic-agent-image>.
-
-## Configuring ARM Nodes for Image Based Installer
-
-Installing ARM nodes with the Image Based Installer is currently unsupported.
+For more information, see the upstream documentation: <https://github.com/openshift/assisted-service/tree/master/docs/hive-integration#ironic-agent-image>.
