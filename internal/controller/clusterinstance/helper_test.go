@@ -146,10 +146,15 @@ func Test_buildClusterData(t *testing.T) {
 					NetworkType:            NetworkType,
 					InstallConfigOverrides: InstallConfigOverrides,
 					CPUPartitioning:        CPUPartitioning,
+					ClusterType:            v1alpha1.ClusterTypeSNO,
 					Nodes: []v1alpha1.NodeSpec{
 						{
 							HostName: "node1",
 							Role:     "master",
+						},
+						{
+							HostName: "node2",
+							Role:     "worker",
 						},
 					},
 				},
@@ -160,10 +165,15 @@ func Test_buildClusterData(t *testing.T) {
 					NetworkType:            NetworkType,
 					InstallConfigOverrides: InstallConfigOverrides,
 					CPUPartitioning:        CPUPartitioning,
+					ClusterType:            v1alpha1.ClusterTypeSNO,
 					Nodes: []v1alpha1.NodeSpec{
 						{
 							HostName: "node1",
 							Role:     "master",
+						},
+						{
+							HostName: "node2",
+							Role:     "worker",
 						},
 					},
 				},
