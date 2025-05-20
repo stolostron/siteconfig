@@ -149,6 +149,13 @@ func buildClusterData(clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.
 		}
 	}
 
+	if clusterInstance.Spec.ClusterType == v1alpha1.ClusterTypeSNO {
+		// Set the number of workers to 0 for SNO (Single Node OpenShift) clusters.
+		// This is required due to immutability constraints enforced by the Assisted Installer,
+		// specifically by AgentClusterInstall when attempting to expand an SNO cluster.
+		workerAgents = 0
+	}
+
 	data = &ClusterData{
 		Spec: clusterInstance.Spec,
 		SpecialVars: SpecialVars{
