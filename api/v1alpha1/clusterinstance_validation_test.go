@@ -24,6 +24,8 @@ import (
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	aiv1beta1 "github.com/openshift/assisted-service/api/v1beta1"
 )
 
 var _ = Describe("ValidateClusterInstance", func() {
@@ -133,6 +135,12 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 					BootMode:           "UEFI",
 					InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
 					TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+					NodeNetwork: &aiv1beta1.NMStateConfigSpec{
+						Interfaces: []*aiv1beta1.Interface{
+							{Name: "eno1", MacAddress: "00:00:5E:00:53:00"},
+							{Name: "bond99", MacAddress: "00:00:5E:00:53:01"},
+						},
+					},
 				}},
 			},
 		}
@@ -168,6 +176,17 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 				"foo": "bar",
 			}
 			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil for changes to nodes.nodeNetwork.macAddress when reinstall is triggered", func() {
+			newClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "reinstall-1",
+			}
+			newClusterInstance.Spec.Nodes[0].NodeNetwork.Interfaces[0].MacAddress = "this-is-allowed"
+			reinstallRequested := isReinstallRequested(newClusterInstance)
+			Expect(reinstallRequested).To(BeTrue())
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, reinstallRequested)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
