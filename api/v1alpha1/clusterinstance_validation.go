@@ -108,7 +108,7 @@ func validatePostProvisioningChanges(
 			"/reinstall",
 			"/nodes/*/bmcAddress",
 			"/nodes/*/bootMACAddress",
-			"/nodes/*/nodeNetwork/interfaces/macAddress",
+			"/nodes/*/nodeNetwork/interfaces/*/macAddress",
 			"/nodes/*/rootDeviceHints",
 		}...)
 	}
