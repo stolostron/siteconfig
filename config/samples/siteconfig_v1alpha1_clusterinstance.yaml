@@ -41,13 +41,13 @@ spec:
         thumbprint: "1234567890"
   clusterType: SNO
   templateRefs:
-    - name: aci-cluster-crs-v1
+    - name: ai-cluster-templates-v1
       namespace: siteconfig-operator
   nodes:
     - hostName: "node1"
       role: "master"
       templateRefs:
-        - name: aci-node-crs-v1
+        - name: ai-node-templates-v1
           namespace: siteconfig-operator
       ironicInspect: ""
       bmcAddress: "idrac-virtualmedia+https://203.0.113.100/redfish/v1/Systems/System.Embedded.1"
