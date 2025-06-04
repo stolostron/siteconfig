@@ -1,4 +1,4 @@
-# Configure SiteConfig Operator
+# Configuring SiteConfig Operator
 
 This guide provides instructions for configuring the SiteConfig Operator.
 The SiteConfig Operator relies on a ConfigMap to define key parameters that influence its behavior,
