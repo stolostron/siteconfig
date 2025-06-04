@@ -121,10 +121,10 @@ var _ = Describe("initConfigMapTemplates", func() {
 		err := initConfigMapTemplates(ctx, c, testNamespace, testLogger)
 		Expect(err).ToNot(HaveOccurred())
 
-		// Verify that the existing ConfigMap is not over-written
+		// Verify that the existing ConfigMap is over-written
 		aiNodeCM := &corev1.ConfigMap{}
 		Expect(c.Get(ctx, key, aiNodeCM)).To(Succeed())
-		Expect(aiNodeCM.Data).To(Equal(data))
+		Expect(aiNodeCM.Data).ToNot(Equal(data))
 	})
 
 	It("creates a default SiteConfig Operator configuration ConfigMap on initialization if not created previously", func() {
@@ -189,5 +189,55 @@ var _ = Describe("initConfigMapTemplates", func() {
 		_, err := createConfigurationStore(ctx, c, testNamespace, testLogger)
 		// Given that a configuration CM has not been created, the initConfig is expected to be the default configuration
 		Expect(err).To(HaveOccurred())
+	})
+})
+
+var _ = Describe("deleteConfigMap", func() {
+	var (
+		c             client.Client
+		ctx           = context.Background()
+		testLogger    = zap.NewNop().Named("Test")
+		testNamespace = getSiteConfigNamespace(testLogger)
+	)
+
+	BeforeEach(func() {
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme).
+			Build()
+
+		siteConfigNS := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: testNamespace,
+			},
+		}
+		Expect(c.Create(ctx, siteConfigNS)).To(Succeed())
+	})
+
+	It("should delete the ConfigMap if it exists", func() {
+
+		// create test ConfigMap
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test",
+				Namespace: testNamespace,
+			},
+			Data: map[string]string{
+				"foo": "bar",
+			},
+		}
+		key := client.ObjectKeyFromObject(cm)
+		Expect(c.Create(ctx, cm)).To(Succeed())
+
+		Expect(c.Get(ctx, key, cm)).To(Succeed())
+
+		// Delete the ConfigMap
+		Expect(deleteConfigMap(ctx, c, key.Namespace, key.Name, testLogger)).To(BeNil())
+
+		// Verify that the ConfigMap is deleted
+		Expect(c.Get(ctx, key, cm)).ToNot(Succeed())
+	})
+
+	It("should return nil if the ConfigMap does not exist", func() {
+		Expect(deleteConfigMap(ctx, c, testNamespace, "foobar", testLogger)).To(BeNil())
 	})
 })
