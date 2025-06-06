@@ -400,18 +400,10 @@ var _ = Describe("handleFinalizer", func() {
 		clusterNamespace = TestClusterInstanceNamespace
 	)
 
-	ensureDeletionInProgressStatus := func(manifests []v1alpha1.ManifestReference) bool {
-		Expect(len(manifests)).To(BeNumerically(">", 0))
-		for _, m := range manifests {
-			Expect(m.Status).To(Equal(v1alpha1.ManifestDeletionInProgress))
-		}
-		return true
-	}
-
 	var triggerAndVerifyFinalizerHandling = func(
 		r *ClusterInstanceReconciler,
 		clusterInstanceKey types.NamespacedName,
-		expectedNumManifestsToBeDeleted int,
+		expectedManifestsRendered [][]v1alpha1.ManifestReference,
 	) {
 		// Trigger deletion of ClusterInstance.
 		clusterInstance := &v1alpha1.ClusterInstance{}
@@ -421,17 +413,25 @@ var _ = Describe("handleFinalizer", func() {
 		// Fetch the ClusterInstance to get the DeletionTimestamp.
 		Expect(r.Client.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
 
-		// First call of r.handleFinalizer should trigger deletion of rendered manifests.
+		for _, expected := range expectedManifestsRendered {
+			// Call r.handleFinalizer should trigger deletion of rendered manifests.
+			res, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(requeueForDeletion()))
+			Expect(r.Client.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
+
+			for index, manifest := range clusterInstance.Status.ManifestsRendered {
+				expManifest := expected[index]
+				Expect(*manifest.APIGroup).To(Equal(*expManifest.APIGroup))
+				Expect(manifest.Kind).To(Equal(expManifest.Kind))
+				Expect(manifest.Name).To(Equal(expManifest.Name))
+				Expect(manifest.Status).To(Equal(expManifest.Status))
+			}
+
+		}
+
+		// Final call of r.handleFinalizer should result in the deletion of all the rendered objects and ClusterInstance
 		res, err := r.handleFinalizer(ctx, testLogger, clusterInstance)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res).To(Equal(requeueForDeletion()))
-		Expect(r.Client.Get(ctx, clusterInstanceKey, clusterInstance)).To(Succeed())
-
-		Expect(len(clusterInstance.Status.ManifestsRendered)).To(Equal(expectedNumManifestsToBeDeleted))
-		Expect(clusterInstance.Status.ManifestsRendered).To(Satisfy(ensureDeletionInProgressStatus))
-
-		// Second call of r.handleFinalizer should result in the deletion of all the rendered objects.
-		res, err = r.handleFinalizer(ctx, testLogger, clusterInstance)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(Equal(doNotRequeue()))
 
@@ -617,8 +617,66 @@ var _ = Describe("handleFinalizer", func() {
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
 
 		clusterInstanceKey := client.ObjectKeyFromObject(clusterInstance)
-		expectedNumManifestsToBeDeleted := 3 // ClusterDeployment, BareMetalHost, ManagedCluster
-		triggerAndVerifyFinalizerHandling(r, clusterInstanceKey, expectedNumManifestsToBeDeleted)
+		expectedManifests := [][]v1alpha1.ManifestReference{
+			// Process sync-wave 3 (sync-wave 4 will be result in the 2 unowned ConfigMaps being removed from the status.ManifestsRendered)
+			{
+				{
+					APIGroup:  ptr.To(ClusterDeploymentApiVersion),
+					Kind:      ClusterDeploymentKind,
+					Name:      manifestName,
+					Namespace: clusterNamespace,
+					SyncWave:  1,
+					Status:    v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup:  ptr.To(BareMetalHostApiVersion),
+					Kind:      BareMetalHostKind,
+					Name:      manifestName,
+					Namespace: clusterNamespace,
+					SyncWave:  2,
+					Status:    v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup: ptr.To(ManagedClusterApiVersion),
+					Kind:     ManagedClusterKind,
+					Name:     manifestName,
+					SyncWave: 3,
+					Status:   v1alpha1.ManifestDeletionInProgress,
+				},
+			},
+			// Process sync-wave 2
+			{
+				{
+					APIGroup:  ptr.To(ClusterDeploymentApiVersion),
+					Kind:      ClusterDeploymentKind,
+					Name:      manifestName,
+					Namespace: clusterNamespace,
+					SyncWave:  1,
+					Status:    v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup:  ptr.To(BareMetalHostApiVersion),
+					Kind:      BareMetalHostKind,
+					Name:      manifestName,
+					Namespace: clusterNamespace,
+					SyncWave:  2,
+					Status:    v1alpha1.ManifestDeletionInProgress,
+				},
+			},
+			// Process sync-wave 1
+			{
+				{
+					APIGroup:  ptr.To(ClusterDeploymentApiVersion),
+					Kind:      ClusterDeploymentKind,
+					Name:      manifestName,
+					Namespace: clusterNamespace,
+					SyncWave:  1,
+					Status:    v1alpha1.ManifestDeletionInProgress,
+				},
+			},
+		}
+
+		triggerAndVerifyFinalizerHandling(r, clusterInstanceKey, expectedManifests)
 
 		// Verify ClusterDeployment, BareMetalHost, ManagedCluster manifests are deleted
 		Expect(c.Get(ctx, key, cd)).ToNot(Succeed())
@@ -630,7 +688,8 @@ var _ = Describe("handleFinalizer", func() {
 		Expect(c.Get(ctx, key, cm)).To(Succeed())
 	})
 
-	It("does not fail to handle the finalizer when attempting to delete a missing manifest", func() {
+	It("does not fail to handle the finalizer when attempting to delete a non-existent manifest", func() {
+
 		manifestName := TestClusterInstanceName
 		clusterInstance := &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
@@ -707,8 +766,54 @@ var _ = Describe("handleFinalizer", func() {
 		Expect(c.Get(ctx, key, bmh)).ToNot(Succeed())
 
 		clusterInstanceKey := client.ObjectKeyFromObject(clusterInstance)
-		expectedNumManifestsToBeDeleted := 2 // ClusterDeployment, ManagedCluster
-		triggerAndVerifyFinalizerHandling(r, clusterInstanceKey, expectedNumManifestsToBeDeleted)
+		expectedManifests := [][]v1alpha1.ManifestReference{
+			// Process sync-wave 3
+			{
+				{
+					APIGroup:  ptr.To(ClusterDeploymentApiVersion),
+					Kind:      ClusterDeploymentKind,
+					Name:      manifestName,
+					Namespace: TestClusterInstanceNamespace,
+					SyncWave:  1,
+					Status:    v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup:  ptr.To(BareMetalHostApiVersion),
+					Kind:      BareMetalHostKind,
+					Name:      manifestName,
+					Namespace: TestClusterInstanceNamespace,
+					SyncWave:  2,
+					Status:    v1alpha1.ManifestRenderedSuccess,
+				},
+				{
+					APIGroup: ptr.To(ManagedClusterApiVersion),
+					Kind:     ManagedClusterKind,
+					Name:     manifestName,
+					SyncWave: 3,
+					Status:   v1alpha1.ManifestDeletionInProgress,
+				},
+			},
+			// Process sync-wave 2 and 1 since sync-wave 2 has the BMH which does not exist - it will be treated as deleted
+			{
+				{
+					APIGroup:  ptr.To(ClusterDeploymentApiVersion),
+					Kind:      ClusterDeploymentKind,
+					Name:      manifestName,
+					Namespace: TestClusterInstanceNamespace,
+					SyncWave:  1,
+					Status:    v1alpha1.ManifestDeletionInProgress,
+				},
+				{
+					APIGroup:  ptr.To(BareMetalHostApiVersion),
+					Kind:      BareMetalHostKind,
+					Name:      manifestName,
+					Namespace: TestClusterInstanceNamespace,
+					SyncWave:  2,
+					Status:    v1alpha1.ManifestDeletionInProgress,
+				},
+			},
+		}
+		triggerAndVerifyFinalizerHandling(r, clusterInstanceKey, expectedManifests)
 
 		// Ensure that rendered manifests are deleted
 		Expect(c.Get(ctx, key, cd)).ToNot(Succeed())
