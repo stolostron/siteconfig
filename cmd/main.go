@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -281,6 +282,26 @@ func getSiteConfigNamespace(log *zap.Logger) string {
 	return namespace
 }
 
+// deleteConfigMap deletes a ConfigMap by namespace and name.
+// The function returns nil if the ConfigMap is successfully deleted or does not exist.
+func deleteConfigMap(ctx context.Context, c client.Client, namespace, name string, log *zap.Logger) error {
+	cm := &corev1.ConfigMap{}
+	key := types.NamespacedName{Namespace: namespace, Name: name}
+	if err := c.Get(ctx, key, cm); err == nil {
+		log.Info("ConfigMap found, attempting to delete it", zap.String("key", key.String()))
+		if err := retry.RetryOnConflictOrRetriable(k8sretry.DefaultBackoff, func() error {
+			if err := client.IgnoreAlreadyExists(c.Delete(ctx, cm)); err != nil {
+				return fmt.Errorf("failed to delete ConfigMap %s/%s: %w", namespace, name, err)
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf(
+				"failed to delete ConfigMap %s/%s, error: %w", namespace, name, err)
+		}
+	}
+	return nil
+}
+
 // initConfigMapTemplates initializes default ConfigMaps consisting of the Assisted Installer and Image-based Installer
 // installation templates in the specified namespace.
 func initConfigMapTemplates(ctx context.Context, c client.Client, namespace string, log *zap.Logger) error {
@@ -299,6 +320,11 @@ func initConfigMapTemplates(ctx context.Context, c client.Client, namespace stri
 			},
 			Immutable: &immutable,
 			Data:      v,
+		}
+
+		if err := deleteConfigMap(ctx, c, namespace, k, log); err != nil {
+			return fmt.Errorf("failed to delete default reference installation template ConfigMap %s/%s, error: %w",
+				namespace, k, err)
 		}
 
 		if err := retry.RetryOnConflictOrRetriable(k8sretry.DefaultBackoff, func() error {
