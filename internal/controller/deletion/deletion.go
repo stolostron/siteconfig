@@ -111,6 +111,7 @@ func (d *DeletionHandler) DeleteObjects(
 	}()
 
 	for _, syncWave := range objectSyncWaveMap.GetDescendingSyncWaves() {
+		log.Sugar().Debugf("Processing syncwave '%d' for deletion", syncWave)
 		syncWaveGroupDeleted := true
 
 		for _, object := range objectSyncWaveMap.GetObjectsForSyncWave(syncWave) {
@@ -221,6 +222,9 @@ func objectsForClusterInstance(clusterInstance *v1alpha1.ClusterInstance) []ci.R
 			"metadata": map[string]interface{}{
 				"name":      manifest.Name,
 				"namespace": manifest.Namespace,
+				"annotations": map[string]string{
+					ci.WaveAnnotation: fmt.Sprintf("%d", manifest.SyncWave),
+				},
 			},
 		}); err == nil {
 			objects = append(objects, object)

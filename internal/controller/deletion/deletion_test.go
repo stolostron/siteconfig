@@ -718,12 +718,42 @@ var _ = Describe("Helper Functions", func() {
 	})
 
 	Describe("objectsForClusterInstance", func() {
-		It("should correctly return the list of objects for the ClusterInstance", func() {
+
+		It("should return an empty list if ManifestsRendered is empty", func() {
+			clusterInstance.Status.ManifestsRendered = nil
 			objects := objectsForClusterInstance(clusterInstance)
-			Expect(objects).To(HaveLen(1))
-			Expect(objects[0].GetName()).To(Equal(Name))
-			Expect(objects[0].GetNamespace()).To(Equal(Namespace))
-			Expect(objects[0].GetGroupVersionKind()).To(Equal(gvk))
+			Expect(objects).To(BeEmpty())
+		})
+
+		It("should correctly return the list of objects for the ClusterInstance", func() {
+			clusterInstance.Status.ManifestsRendered = []v1alpha1.ManifestReference{
+				{
+					APIGroup:  ptr.To("v1"),
+					Kind:      "ConfigMap",
+					Name:      "cm1",
+					Namespace: "test",
+					SyncWave:  1,
+				},
+				{
+					APIGroup:  ptr.To("apps/v1"),
+					Kind:      "Deployment",
+					Name:      "deploy1",
+					Namespace: "test",
+					SyncWave:  3,
+				},
+			}
+			objects := objectsForClusterInstance(clusterInstance)
+			Expect(objects).To(HaveLen(2))
+
+			Expect(objects[0].GetName()).To(Equal("cm1"))
+			Expect(objects[0].GetNamespace()).To(Equal("test"))
+			Expect(objects[0].GetKind()).To(Equal("ConfigMap"))
+			Expect(objects[0].GetAnnotations()).To(HaveKeyWithValue(ci.WaveAnnotation, "1"))
+
+			Expect(objects[1].GetName()).To(Equal("deploy1"))
+			Expect(objects[1].GetNamespace()).To(Equal("test"))
+			Expect(objects[1].GetKind()).To(Equal("Deployment"))
+			Expect(objects[1].GetAnnotations()).To(HaveKeyWithValue(ci.WaveAnnotation, "3"))
 		})
 	})
 
