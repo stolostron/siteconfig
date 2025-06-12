@@ -4,10 +4,21 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/stolostron/siteconfig.svg)](https://pkg.go.dev/github.com/stolostron/siteconfig)
 [![License Apache](https://img.shields.io/github/license/stolostron/siteconfig)](https://opensource.org/licenses/Apache-2.0)
 
-Provide site deployment to Single and Multi Node OpenShift clusters to complete installation
+Provide site deployment to Single and Multi Node OpenShift clusters to complete installation.
 
 ## Description
 The siteconfig-controller enables users to deploy clusters using either the Assisted Installer or Image Based Installer flows through the ClusterInstance API.
+
+<summary>Table of Contents</summary>
+
+1. [Getting started](#getting-started)
+2. [Configuring SiteConfig Operator](https://github.com/stolostron/siteconfig/blob/main/docs/configure_siteconfig.md)
+3. [Configuring CPU architecture](https://github.com/stolostron/siteconfig/blob/main/docs/cpu_architecture.md)
+4. [Mirroring images for disconnected environments](https://github.com/stolostron/siteconfig/blob/main/docs/image_mirroring.md)
+5. [Cluster reinstallation using the SiteConfig operator](https://github.com/stolostron/siteconfig/blob/main/docs/reinstallation/README.md)
+    - [Safeguarding ConfigMaps and Secrets During Cluster Reinstalls with SiteConfig Operator](https://github.com/stolostron/siteconfig/blob/main/docs/reinstallation/preservation.md)
+    - [Cluster reinstallation status conditions](https://github.com/stolostron/siteconfig/blob/main/docs/reinstallation/status_conditions.md)
+6. [Troubleshooting Guide](https://github.com/stolostron/siteconfig/blob/main/docs/troubleshooting.md)
 
 ## Makefile targets
 
