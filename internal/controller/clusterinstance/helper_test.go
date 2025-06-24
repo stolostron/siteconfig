@@ -17,13 +17,17 @@ limitations under the License.
 package clusterinstance
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
 
+	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/scheme"
+	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func Test_getInstallConfigOverrides(t *testing.T) {
@@ -131,6 +135,7 @@ func Test_buildClusterData(t *testing.T) {
 
 	testcases := []struct {
 		clusterInstance *v1alpha1.ClusterInstance
+		clusterImageSet *hivev1.ClusterImageSet
 		node            *v1alpha1.NodeSpec
 		expected        ClusterData
 		error           error
@@ -147,6 +152,7 @@ func Test_buildClusterData(t *testing.T) {
 					InstallConfigOverrides: InstallConfigOverrides,
 					CPUPartitioning:        CPUPartitioning,
 					ClusterType:            v1alpha1.ClusterTypeSNO,
+					ClusterImageSetNameRef: "test-clusterimageset",
 					Nodes: []v1alpha1.NodeSpec{
 						{
 							HostName: "node1",
@@ -159,6 +165,15 @@ func Test_buildClusterData(t *testing.T) {
 					},
 				},
 			},
+			clusterImageSet: &hivev1.ClusterImageSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-clusterimageset",
+					Namespace: "",
+				},
+				Spec: hivev1.ClusterImageSetSpec{
+					ReleaseImage: "test-image",
+				},
+			},
 			node: nil,
 			expected: ClusterData{
 				Spec: v1alpha1.ClusterInstanceSpec{
@@ -166,6 +181,7 @@ func Test_buildClusterData(t *testing.T) {
 					InstallConfigOverrides: InstallConfigOverrides,
 					CPUPartitioning:        CPUPartitioning,
 					ClusterType:            v1alpha1.ClusterTypeSNO,
+					ClusterImageSetNameRef: "test-clusterimageset",
 					Nodes: []v1alpha1.NodeSpec{
 						{
 							HostName: "node1",
@@ -182,6 +198,7 @@ func Test_buildClusterData(t *testing.T) {
 					InstallConfigOverrides: expectedInstallConfigOverrides,
 					ControlPlaneAgents:     1,
 					WorkerAgents:           0,
+					ReleaseImage:           "test-image",
 				},
 			},
 			error: nil,
@@ -198,6 +215,7 @@ func Test_buildClusterData(t *testing.T) {
 					NetworkType:            NetworkType,
 					InstallConfigOverrides: InstallConfigOverrides,
 					CPUPartitioning:        CPUPartitioning,
+					ClusterImageSetNameRef: "test-clusterimageset",
 					Nodes: []v1alpha1.NodeSpec{
 						{
 							HostName: "node1",
@@ -214,6 +232,15 @@ func Test_buildClusterData(t *testing.T) {
 					},
 				},
 			},
+			clusterImageSet: &hivev1.ClusterImageSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-clusterimageset",
+					Namespace: "",
+				},
+				Spec: hivev1.ClusterImageSetSpec{
+					ReleaseImage: "test-image",
+				},
+			},
 			node: &v1alpha1.NodeSpec{
 				HostName: "node1",
 				Role:     "master",
@@ -223,6 +250,7 @@ func Test_buildClusterData(t *testing.T) {
 					NetworkType:            NetworkType,
 					InstallConfigOverrides: InstallConfigOverrides,
 					CPUPartitioning:        CPUPartitioning,
+					ClusterImageSetNameRef: "test-clusterimageset",
 					Nodes: []v1alpha1.NodeSpec{
 						{
 							HostName: "node1",
@@ -246,21 +274,73 @@ func Test_buildClusterData(t *testing.T) {
 					InstallConfigOverrides: expectedInstallConfigOverrides,
 					ControlPlaneAgents:     2,
 					WorkerAgents:           1,
+					ReleaseImage:           "test-image",
 				},
 			},
 			error: nil,
 			name:  "3 node (2 master, 1 worker) ClusterInstance with nodeId set to first node",
 		},
+		{
+			clusterInstance: &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cluster",
+					Namespace: "test-cluster",
+				},
+				Spec: v1alpha1.ClusterInstanceSpec{
+					NetworkType:            NetworkType,
+					InstallConfigOverrides: InstallConfigOverrides,
+					CPUPartitioning:        CPUPartitioning,
+					ClusterType:            v1alpha1.ClusterTypeSNO,
+					ClusterImageSetNameRef: "foobar",
+					Nodes: []v1alpha1.NodeSpec{
+						{
+							HostName: "node1",
+							Role:     "master",
+						},
+						{
+							HostName: "node2",
+							Role:     "worker",
+						},
+					},
+				},
+			},
+			clusterImageSet: &hivev1.ClusterImageSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-clusterimageset",
+					Namespace: "",
+				},
+				Spec: hivev1.ClusterImageSetSpec{
+					ReleaseImage: "test-image",
+				},
+			},
+			node:     nil,
+			expected: ClusterData{},
+			error:    fmt.Errorf("failed to get ClusterImageSet foobar: clusterimagesets.hive.openshift.io \"foobar\" not found"),
+			name:     "ClusterInstance with invalid ClusterImageSetNameRef",
+		},
 	}
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Create fake client with ClusterImageSet
+			testScheme := scheme.Scheme
+			schemeErr := hivev1.AddToScheme(testScheme)
+			assert.NoError(t, schemeErr)
+			c := fakeclient.NewClientBuilder().
+				WithScheme(testScheme).
+				WithObjects(tc.clusterImageSet).
+				Build()
+			ctx := context.Background()
 
-			actual, err := buildClusterData(tc.clusterInstance, tc.node)
-			if err != nil {
-				assert.Equal(t, tc.error, err, "The expected and actual value should be the same.")
+			actual, err := buildClusterData(ctx, c, tc.clusterInstance, tc.node)
+			if tc.error != nil {
+				assert.Error(t, err, "Expected an error but got none")
+				assert.Equal(t, tc.error.Error(), err.Error(), "The expected and actual error message should be the same.")
+			} else {
+				assert.NoError(t, err, "Expected no error but got one")
+				assert.NotNil(t, actual, "Expected data but got nil")
+				assert.Equal(t, tc.expected, *actual, "The expected and actual value should be the same.")
 			}
-			assert.Equal(t, tc.expected, *actual, "The expected and actual value should be the same.")
 
 		})
 	}
