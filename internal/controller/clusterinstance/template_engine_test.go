@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	aiv1beta1 "github.com/openshift/assisted-service/api/v1beta1"
+	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
@@ -51,6 +52,7 @@ func isEqualRenderedObject(got, expected []RenderedObject) bool {
 func TestTemplateEngineRender(t *testing.T) {
 
 	NetConfig := GetMockNetConfig()
+	TestClusterImageSet := GetMockClusterImageSet("openshift-test", "test-image")
 	TestClusterInstance := &v1alpha1.ClusterInstance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "site-sno-du-1",
@@ -104,7 +106,7 @@ func TestTemplateEngineRender(t *testing.T) {
 		},
 	}
 
-	TestData, _ := buildClusterData(TestClusterInstance, &TestClusterInstance.Spec.Nodes[0])
+	TestData, _ := buildClusterData(TestClusterInstance, &TestClusterInstance.Spec.Nodes[0], TestClusterImageSet)
 
 	type args struct {
 		templateType string
@@ -258,6 +260,34 @@ metadata:
 			},
 			wantErr: false,
 		},
+
+		{
+			name: "Test with a valid NodePool-like template",
+			args: args{
+				templateType: "NodePool",
+				templateStr:  GetMockNodePoolTemplate(),
+				data:         TestData,
+			},
+			want: map[string]interface{}{
+				"apiVersion": "hypershift.openshift.io/v1beta1",
+				"kind":       "NodePool",
+				"metadata": map[string]interface{}{
+					"annotations": map[string]interface{}{
+						"siteconfig.open-cluster-management.io/sync-wave": "2",
+					},
+					"name":      "site-sno-du-1",
+					"namespace": "site-sno-du-1",
+				},
+				"spec": map[string]interface{}{
+					"clusterName": "site-sno-du-1",
+					"replicas":    1,
+					"release": map[string]interface{}{
+						"image": "test-image",
+					},
+				},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -283,6 +313,7 @@ var _ = Describe("renderTemplates", func() {
 		testLogger          = zap.NewNop().Named("Test")
 		tmplEngine          = NewTemplateEngine()
 		TestClusterInstance *v1alpha1.ClusterInstance
+		TestClusterImageSet *hivev1.ClusterImageSet
 	)
 
 	BeforeEach(func() {
@@ -301,14 +332,16 @@ var _ = Describe("renderTemplates", func() {
 				Nodes: []v1alpha1.NodeSpec{{
 					HostName: "node1",
 				}},
+				ClusterImageSetNameRef: "openshift-test",
 			},
 		}
+		TestClusterImageSet = GetMockClusterImageSet("openshift-test", "test-image")
 	})
 
 	It("fails when the template reference cannot be retrieved", func() {
 		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{{Name: "does-not-exist", Namespace: "test"}}
 
-		_, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
+		_, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, TestClusterImageSet, nil)
 		Expect(err).To(HaveOccurred())
 	})
 
@@ -326,7 +359,7 @@ var _ = Describe("renderTemplates", func() {
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
 		TestClusterInstance.Spec.InstallConfigOverrides = "{foobar}"
-		_, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
+		_, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, TestClusterImageSet, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("invalid json parameter set at installConfigOverride")))
 	})
@@ -344,7 +377,7 @@ var _ = Describe("renderTemplates", func() {
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
 
-		_, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
+		_, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, TestClusterImageSet, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ContainSubstring("field doesNotExist")))
 	})
@@ -366,7 +399,7 @@ var _ = Describe("renderTemplates", func() {
 
 		TestClusterInstance.Spec.SuppressedManifests = []string{"TestA", "TestC"}
 
-		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
+		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, TestClusterImageSet, nil)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(len(got)).To(Equal(2))
@@ -428,7 +461,7 @@ var _ = Describe("renderTemplates", func() {
 
 		node.SuppressedManifests = []string{"TestA", "TestC"}
 
-		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, node)
+		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, TestClusterImageSet, node)
 		Expect(err).ToNot(HaveOccurred())
 
 		expected := []RenderedObject{
@@ -495,7 +528,7 @@ var _ = Describe("renderTemplates", func() {
 				"extra-labels-l2": "test",
 			},
 		}
-		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
+		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, TestClusterImageSet, nil)
 		Expect(err).ToNot(HaveOccurred())
 
 		expected := []RenderedObject{
@@ -554,7 +587,7 @@ var _ = Describe("renderTemplates", func() {
 				"extra-labels-l2": "test",
 			},
 		}
-		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, node)
+		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, TestClusterImageSet, node)
 		Expect(err).ToNot(HaveOccurred())
 
 		expected := []RenderedObject{
@@ -614,7 +647,7 @@ var _ = Describe("renderTemplates", func() {
 				"extra-node-labels-l2": "test",
 			},
 		}
-		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, node)
+		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, TestClusterImageSet, node)
 		Expect(err).ToNot(HaveOccurred())
 
 		expected := []RenderedObject{
@@ -656,6 +689,7 @@ var _ = Describe("ProcessTemplates", func() {
 		tmplEngine          = NewTemplateEngine()
 		testLogger          = zap.NewNop().Named("Test")
 		TestClusterInstance v1alpha1.ClusterInstance
+		TestClusterImageSet *hivev1.ClusterImageSet
 	)
 
 	BeforeEach(func() {
@@ -674,8 +708,10 @@ var _ = Describe("ProcessTemplates", func() {
 				Nodes: []v1alpha1.NodeSpec{{
 					HostName: "node1",
 				}},
+				ClusterImageSetNameRef: "openshift-test",
 			},
 		}
+		TestClusterImageSet = GetMockClusterImageSet("openshift-test", "test-image")
 	})
 
 	It("fails to process cluster-level templates due to an erroneous cluster template", func() {
@@ -688,6 +724,7 @@ var _ = Describe("ProcessTemplates", func() {
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
+		Expect(c.Create(ctx, TestClusterImageSet)).To(Succeed())
 
 		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "cluster-level", Namespace: "test"},
@@ -707,6 +744,7 @@ var _ = Describe("ProcessTemplates", func() {
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
+		Expect(c.Create(ctx, TestClusterImageSet)).To(Succeed())
 
 		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "cluster-level", Namespace: "test"},
@@ -731,6 +769,14 @@ var _ = Describe("ProcessTemplates", func() {
 		Expect(err).To(MatchError(ContainSubstring("can't evaluate field")))
 	})
 
+	It("fails to build cluster data due to a missing clusterimageset", func() {
+		// Sabotage clusterInstance with incorrect clusterImageSetNameRef
+		TestClusterInstance.Spec.ClusterImageSetNameRef = "foobar"
+		_, err := tmplEngine.ProcessTemplates(ctx, c, testLogger, TestClusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(ContainSubstring("failed to get ClusterImageSet foobar")))
+	})
+
 	It("successfully processes cluster and node level templates with manifest suppression", func() {
 
 		// Define and create cluster-level template refs
@@ -742,6 +788,7 @@ var _ = Describe("ProcessTemplates", func() {
 			},
 		}
 		Expect(c.Create(ctx, clusterTemplates)).To(Succeed())
+		Expect(c.Create(ctx, TestClusterImageSet)).To(Succeed())
 
 		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
 			{Name: "cluster-level", Namespace: "test"},
