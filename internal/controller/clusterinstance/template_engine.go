@@ -23,6 +23,7 @@ import (
 	"text/template"
 	"unicode"
 
+	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
@@ -55,8 +56,17 @@ func (te *TemplateEngine) ProcessTemplates(
 	var renderedObjects RenderedObjectCollection
 	log.Info("Started processing cluster-level install templates")
 
+	// Copy ClusterImageSet from ClusterInstance
+	clusterImageSet := hivev1.ClusterImageSet{}
+	key := types.NamespacedName{Name: clusterInstance.Spec.ClusterImageSetNameRef, Namespace: ""}
+	if err := c.Get(ctx, key, &clusterImageSet); err != nil {
+		log.Error("Encountered error while processing cluster image set reference", zap.Error(err))
+		return renderedObjects,
+			fmt.Errorf("failed to get ClusterImageSet %s: %w", clusterInstance.Spec.ClusterImageSetNameRef, err)
+	}
+
 	// Render cluster-level install templates
-	clusterObjects, err := te.renderTemplates(ctx, c, log, &clusterInstance, nil)
+	clusterObjects, err := te.renderTemplates(ctx, c, log, &clusterInstance, &clusterImageSet, nil)
 	if err != nil {
 		log.Error("Encountered error while processing cluster-level install templates", zap.Error(err))
 		return renderedObjects, err
@@ -74,7 +84,7 @@ func (te *TemplateEngine) ProcessTemplates(
 		nodeCopy := node
 
 		// Render node-level templates
-		nodeObjects, err := te.renderTemplates(ctx, c, log, &clusterInstance, &nodeCopy)
+		nodeObjects, err := te.renderTemplates(ctx, c, log, &clusterInstance, &clusterImageSet, &nodeCopy)
 		if err != nil {
 			log.Sugar().Errorf(
 				"Encountered error while processing node-level install templates [node: %d of %d], err: %v",
@@ -97,6 +107,7 @@ func (te *TemplateEngine) renderTemplates(
 	c client.Client,
 	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
+	clusterImageSet *hivev1.ClusterImageSet,
 	node *v1alpha1.NodeSpec,
 ) ([]RenderedObject, error) {
 
@@ -134,6 +145,7 @@ func (te *TemplateEngine) renderTemplates(
 			object, err := te.renderManifestFromTemplate(
 				log,
 				clusterInstance,
+				clusterImageSet,
 				node,
 				templateRef.Name,
 				templateKey,
@@ -180,6 +192,7 @@ func appendAnnotationsAndLabels(
 func (te *TemplateEngine) renderManifestFromTemplate(
 	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
+	clusterImageSet *hivev1.ClusterImageSet,
 	node *v1alpha1.NodeSpec,
 	templateRefName, templateKey, template string,
 ) (RenderedObject, error) {
@@ -188,7 +201,7 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 
 	log = log.Named("renderManifestFromTemplate")
 
-	clusterData, err := buildClusterData(clusterInstance, node)
+	clusterData, err := buildClusterData(clusterInstance, node, clusterImageSet)
 	if err != nil {
 		log.Error("Failed to build ClusterInstance data", zap.Error(err))
 		return object, err
