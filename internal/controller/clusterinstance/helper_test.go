@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"testing"
 
+	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -131,6 +132,7 @@ func Test_buildClusterData(t *testing.T) {
 
 	testcases := []struct {
 		clusterInstance *v1alpha1.ClusterInstance
+		clusterImageSet *hivev1.ClusterImageSet
 		node            *v1alpha1.NodeSpec
 		expected        ClusterData
 		error           error
@@ -159,6 +161,15 @@ func Test_buildClusterData(t *testing.T) {
 					},
 				},
 			},
+			clusterImageSet: &hivev1.ClusterImageSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-clusterimageset",
+					Namespace: "",
+				},
+				Spec: hivev1.ClusterImageSetSpec{
+					ReleaseImage: "test-image",
+				},
+			},
 			node: nil,
 			expected: ClusterData{
 				Spec: v1alpha1.ClusterInstanceSpec{
@@ -182,6 +193,7 @@ func Test_buildClusterData(t *testing.T) {
 					InstallConfigOverrides: expectedInstallConfigOverrides,
 					ControlPlaneAgents:     1,
 					WorkerAgents:           0,
+					ReleaseImage:           "test-image",
 				},
 			},
 			error: nil,
@@ -212,6 +224,15 @@ func Test_buildClusterData(t *testing.T) {
 							Role:     "worker",
 						},
 					},
+				},
+			},
+			clusterImageSet: &hivev1.ClusterImageSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-clusterimageset",
+					Namespace: "",
+				},
+				Spec: hivev1.ClusterImageSetSpec{
+					ReleaseImage: "test-image",
 				},
 			},
 			node: &v1alpha1.NodeSpec{
@@ -246,6 +267,7 @@ func Test_buildClusterData(t *testing.T) {
 					InstallConfigOverrides: expectedInstallConfigOverrides,
 					ControlPlaneAgents:     2,
 					WorkerAgents:           1,
+					ReleaseImage:           "test-image",
 				},
 			},
 			error: nil,
@@ -256,7 +278,7 @@ func Test_buildClusterData(t *testing.T) {
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 
-			actual, err := buildClusterData(tc.clusterInstance, tc.node)
+			actual, err := buildClusterData(tc.clusterInstance, tc.node, tc.clusterImageSet)
 			if err != nil {
 				assert.Equal(t, tc.error, err, "The expected and actual value should be the same.")
 			}
