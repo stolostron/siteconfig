@@ -155,17 +155,27 @@ ci-test-unit:
 		./...
 
 .PHONY: ci-job
-ci-job: common-deps-update generate fmt vet golangci-lint unittest shellcheck bashate bundle-check
+ci-job: common-deps-update vendor-patch generate fmt vet golangci-lint unittest shellcheck bashate bundle-check
 
 ##@ Build
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+	go build -ldflags="-X 'main.buildTime=$$(date)'" -o bin/manager cmd/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
+
+.PHONY: vendor
+vendor: ## Update vendor directory
+	go mod tidy
+	go mod vendor
+	./hack/patch-vendor.sh
+
+.PHONY: vendor-patch
+vendor-patch: ## Apply patches to vendor files for webhook compatibility
+	./hack/patch-vendor.sh
 
 .PHONY: docker-build
 docker-build: unittest ## Build docker image with the manager.
