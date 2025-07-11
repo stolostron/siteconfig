@@ -155,17 +155,27 @@ ci-test-unit:
 		./...
 
 .PHONY: ci-job
-ci-job: common-deps-update generate fmt vet golangci-lint unittest shellcheck bashate bundle-check
+ci-job: common-deps-update vendor-patch generate fmt vet golangci-lint unittest shellcheck bashate bundle-check
 
 ##@ Build
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+	go build -ldflags="-X 'main.buildTime=$$(date)'" -o bin/manager cmd/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
+
+.PHONY: vendor
+vendor: ## Update vendor directory
+	go mod tidy
+	go mod vendor
+	./hack/patch-vendor.sh
+
+.PHONY: vendor-patch
+vendor-patch: ## Apply patches to vendor files for webhook compatibility
+	./hack/patch-vendor.sh
 
 .PHONY: docker-build
 docker-build: unittest ## Build docker image with the manager.
@@ -244,7 +254,7 @@ $(KUSTOMIZE): $(LOCALBIN)
 		echo "$(LOCALBIN)/kustomize version is not expected $(KUSTOMIZE_VERSION). Removing it before installing."; \
 		rm -rf $(LOCALBIN)/kustomize; \
 	fi
-	test -s $(LOCALBIN)/kustomize || { curl -Ss $(KUSTOMIZE_INSTALL_SCRIPT) | bash -s -- $(subst v,,$(KUSTOMIZE_VERSION)) $(LOCALBIN); }
+	test -s $(LOCALBIN)/kustomize || { curl -Ss --retry 5 --retry-delay 90 $(KUSTOMIZE_INSTALL_SCRIPT) | bash -s -- $(subst v,,$(KUSTOMIZE_VERSION)) $(LOCALBIN); }
 
 PHONY: controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
