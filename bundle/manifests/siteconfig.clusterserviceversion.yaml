@@ -1263,6 +1263,24 @@ spec:
           - hypershift.openshift.io
           resources:
           - hostedclusters
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - hypershift.openshift.io
+          resources:
+          - hostedclusters/status
+          verbs:
+          - get
+          - watch
+        - apiGroups:
+          - hypershift.openshift.io
+          resources:
           - nodepools
           verbs:
           - create

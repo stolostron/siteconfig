@@ -20,6 +20,7 @@ import (
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	aiv1beta1 "github.com/openshift/assisted-service/api/v1beta1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
+	hypershiftv1beta1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -581,6 +582,18 @@ type ClusterInstanceStatus struct {
 	// List of hive status conditions associated with the ClusterDeployment resource.
 	// +optional
 	DeploymentConditions []hivev1.ClusterDeploymentCondition `json:"deploymentConditions,omitempty"`
+
+	// Reference to the associated HostedCluster resource for HCP clusters.
+	// +optional
+	HostedClusterRef *corev1.LocalObjectReference `json:"hostedClusterRef,omitempty"`
+
+	// HostedCluster status for HCP clusters - vendored from hypershift API.
+	// +optional
+	HostedClusterStatus *hypershiftv1beta1.HostedClusterStatus `json:"hostedClusterStatus,omitempty"`
+
+	// List of references to associated NodePool resources for HCP clusters.
+	// +optional
+	NodePoolRefs []corev1.LocalObjectReference `json:"nodePoolRefs,omitempty"`
 
 	// List of manifests that have been rendered along with their status.
 	// +optional

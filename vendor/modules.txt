@@ -315,6 +315,11 @@ github.com/openshift/hive/apis/hive/v1/nutanix
 github.com/openshift/hive/apis/hive/v1/openstack
 github.com/openshift/hive/apis/hive/v1/vsphere
 github.com/openshift/hive/apis/scheme
+# github.com/openshift/hypershift/api v0.0.0-20251023051326-e7286c1a2dab
+## explicit; go 1.24.0
+github.com/openshift/hypershift/api/hypershift/v1beta1
+github.com/openshift/hypershift/api/ibmcapi
+github.com/openshift/hypershift/api/util/ipnet
 # github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 ## explicit
 github.com/pmezard/go-difflib/difflib

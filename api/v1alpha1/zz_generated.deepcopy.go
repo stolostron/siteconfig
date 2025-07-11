@@ -24,6 +24,7 @@ import (
 	metal3_iov1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	"github.com/openshift/assisted-service/api/v1beta1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
+	hypershiftv1beta1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -253,6 +254,21 @@ func (in *ClusterInstanceStatus) DeepCopyInto(out *ClusterInstanceStatus) {
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.HostedClusterRef != nil {
+		in, out := &in.HostedClusterRef, &out.HostedClusterRef
+		*out = new(v1.LocalObjectReference)
+		**out = **in
+	}
+	if in.HostedClusterStatus != nil {
+		in, out := &in.HostedClusterStatus, &out.HostedClusterStatus
+		*out = new(hypershiftv1beta1.HostedClusterStatus)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.NodePoolRefs != nil {
+		in, out := &in.NodePoolRefs, &out.NodePoolRefs
+		*out = make([]v1.LocalObjectReference, len(*in))
+		copy(*out, *in)
 	}
 	if in.ManifestsRendered != nil {
 		in, out := &in.ManifestsRendered, &out.ManifestsRendered
