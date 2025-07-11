@@ -275,13 +275,17 @@ func validateControlPlaneAgentCount(clusterInstance *ClusterInstance) error {
 		}
 	}
 
-	if controlPlaneCount < 1 {
+	if controlPlaneCount < 1 && clusterInstance.Spec.ClusterType != ClusterTypeHostedControlPlane {
 		return fmt.Errorf("at least 1 control-plane agent is required")
 	}
 
 	// Ensure that SNO (Single Node OpenShift) clusters have exactly 1 control-plane node.
 	if clusterInstance.Spec.ClusterType == ClusterTypeSNO && controlPlaneCount != 1 {
 		return fmt.Errorf("single node OpenShift cluster-type must have exactly 1 control-plane agent")
+	}
+
+	if controlPlaneCount > 0 && clusterInstance.Spec.ClusterType == ClusterTypeHostedControlPlane {
+		return fmt.Errorf("hosted control plane clusters must not have control-plane agents")
 	}
 
 	return nil // Validation succeeded
