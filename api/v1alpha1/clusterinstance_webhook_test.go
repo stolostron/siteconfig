@@ -213,7 +213,8 @@ var _ = Describe("ValidateUpdate", func() {
 			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-should-not-change"
 			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("detected unauthorized changes in immutable fields: /nodes/0/bootMACAddress"))
+			Expect(err.Error()).To(ContainSubstring("detected unauthorized node modifications"))
+			Expect(err.Error()).To(ContainSubstring("unauthorized change to bootMACAddress"))
 		})
 
 		It("should allow BootMACAddress changes when reinstall is requested", func() {
