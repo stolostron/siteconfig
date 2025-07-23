@@ -132,6 +132,8 @@ func (te *TemplateEngine) renderTemplates(
 		for templateKey, template := range templatesConfigMap.Data {
 
 			object, err := te.renderManifestFromTemplate(
+				ctx,
+				c,
 				log,
 				clusterInstance,
 				node,
@@ -178,6 +180,8 @@ func appendAnnotationsAndLabels(
 }
 
 func (te *TemplateEngine) renderManifestFromTemplate(
+	ctx context.Context,
+	c client.Client,
 	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 	node *v1alpha1.NodeSpec,
@@ -188,7 +192,7 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 
 	log = log.Named("renderManifestFromTemplate")
 
-	clusterData, err := buildClusterData(clusterInstance, node)
+	clusterData, err := buildClusterData(ctx, c, clusterInstance, node)
 	if err != nil {
 		log.Error("Failed to build ClusterInstance data", zap.Error(err))
 		return object, err

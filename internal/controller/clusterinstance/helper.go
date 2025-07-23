@@ -17,16 +17,19 @@ limitations under the License.
 package clusterinstance
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"text/template"
 
 	sprig "github.com/go-task/slim-sprig"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	k8syaml "sigs.k8s.io/yaml"
-
+	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	k8syaml "sigs.k8s.io/yaml"
 )
 
 const (
@@ -36,9 +39,9 @@ const (
 )
 
 type SpecialVars struct {
-	CurrentNode                      v1alpha1.NodeSpec
-	InstallConfigOverrides           string
-	ControlPlaneAgents, WorkerAgents int
+	CurrentNode                          v1alpha1.NodeSpec
+	InstallConfigOverrides, ReleaseImage string
+	ControlPlaneAgents, WorkerAgents     int
 }
 
 // ClusterData is a special object that provides an interface to the ClusterInstance spec fields for use in rendering
@@ -124,7 +127,11 @@ func getInstallConfigOverrides(clusterInstance *v1alpha1.ClusterInstance) (strin
 }
 
 // buildClusterData returns a Cluster object that is consumed for rendering templates
-func buildClusterData(clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.NodeSpec,
+func buildClusterData(
+	ctx context.Context,
+	c client.Client,
+	clusterInstance *v1alpha1.ClusterInstance,
+	node *v1alpha1.NodeSpec,
 ) (data *ClusterData, err error) {
 
 	// Prepare specialVars
@@ -157,6 +164,16 @@ func buildClusterData(clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.
 		workerAgents = 0
 	}
 
+	// Look up the ClusterImageSet to get the release image
+	clusterImageSet := &hivev1.ClusterImageSet{}
+	key := types.NamespacedName{Name: clusterInstance.Spec.ClusterImageSetNameRef, Namespace: ""}
+	if err := c.Get(ctx, key, clusterImageSet); err != nil {
+		return nil, fmt.Errorf("failed to get ClusterImageSet %s: %w", clusterInstance.Spec.ClusterImageSetNameRef, err)
+	}
+
+	// Pull the release string from the ClusterImageSet
+	releaseImage := clusterImageSet.Spec.ReleaseImage
+
 	data = &ClusterData{
 		Spec: clusterInstance.Spec,
 		SpecialVars: SpecialVars{
@@ -164,6 +181,7 @@ func buildClusterData(clusterInstance *v1alpha1.ClusterInstance, node *v1alpha1.
 			InstallConfigOverrides: installConfigOverrides,
 			ControlPlaneAgents:     controlPlaneAgents,
 			WorkerAgents:           workerAgents,
+			ReleaseImage:           releaseImage,
 		},
 	}
 
