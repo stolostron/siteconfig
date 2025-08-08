@@ -77,6 +77,14 @@ var _ = Describe("ValidateClusterInstance", func() {
 		Expect(err.Error()).To(ContainSubstring("at least 1 control-plane agent is required"))
 	})
 
+	It("should return an error if a HCP cluster has any control-plane nodes", func() {
+		clusterInstance.Spec.Nodes[0].Role = "master" // A control-plane node
+		clusterInstance.Spec.ClusterType = ClusterTypeHostedControlPlane
+		err := ValidateClusterInstance(clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("hosted control plane clusters must not have control-plane agents"))
+	})
+
 	It("should return an error if SNO cluster has more than one control-plane node", func() {
 		clusterInstance.Spec.Nodes = append(clusterInstance.Spec.Nodes, NodeSpec{
 			HostName: "node2",
