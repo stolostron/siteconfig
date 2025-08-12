@@ -548,6 +548,38 @@ var _ = Describe("validateControlPlaneAgentCount", func() {
 		expectErr := validateControlPlaneAgentCount(clusterInstance)
 		Expect(expectErr).To(BeNil())
 	})
+
+	It("should pass for HighlyAvailableArbiter cluster with arbiter nodes", func() {
+		clusterInstance.Spec.ClusterType = ClusterTypeHighlyAvailableArbiter
+		clusterInstance.Spec.Nodes = append(clusterInstance.Spec.Nodes, NodeSpec{HostName: "master-1", Role: "master"})
+		clusterInstance.Spec.Nodes = append(clusterInstance.Spec.Nodes, NodeSpec{HostName: "arbiter-1", Role: "arbiter"})
+		expectErr := validateControlPlaneAgentCount(clusterInstance)
+		Expect(expectErr).To(BeNil())
+	})
+
+	It("should fail for HighlyAvailableArbiter cluster without arbiter nodes", func() {
+		clusterInstance.Spec.ClusterType = ClusterTypeHighlyAvailableArbiter
+		clusterInstance.Spec.Nodes = append(clusterInstance.Spec.Nodes, NodeSpec{HostName: "master-1", Role: "master"})
+		expectErr := validateControlPlaneAgentCount(clusterInstance)
+		Expect(expectErr).To(HaveOccurred())
+		Expect(expectErr.Error()).To(ContainSubstring("HighlyAvailableArbiter cluster-type must have at least 1 arbiter agent"))
+	})
+
+	It("should fail for SNO cluster with arbiter nodes", func() {
+		clusterInstance.Spec.ClusterType = ClusterTypeSNO
+		clusterInstance.Spec.Nodes = append(clusterInstance.Spec.Nodes, NodeSpec{HostName: "arbiter-1", Role: "arbiter"})
+		expectErr := validateControlPlaneAgentCount(clusterInstance)
+		Expect(expectErr).To(HaveOccurred())
+		Expect(expectErr.Error()).To(ContainSubstring("arbiter agents can only be used with HighlyAvailableArbiter cluster-type"))
+	})
+
+	It("should fail for HighlyAvailable cluster with arbiter nodes", func() {
+		clusterInstance.Spec.ClusterType = ClusterTypeHighlyAvailable
+		clusterInstance.Spec.Nodes = append(clusterInstance.Spec.Nodes, NodeSpec{HostName: "arbiter-1", Role: "arbiter"})
+		expectErr := validateControlPlaneAgentCount(clusterInstance)
+		Expect(expectErr).To(HaveOccurred())
+		Expect(expectErr.Error()).To(ContainSubstring("arbiter agents can only be used with HighlyAvailableArbiter cluster-type"))
+	})
 })
 
 var _ = Describe("validateReinstallRequest", func() {

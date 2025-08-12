@@ -122,6 +122,7 @@ spec:
                 enum:
                 - SNO
                 - HighlyAvailable
+                - HighlyAvailableArbiter
                 type: string
               cpuArchitecture:
                 default: x86_64
@@ -429,6 +430,7 @@ spec:
                       enum:
                       - master
                       - worker
+                      - arbiter
                       type: string
                     rootDeviceHints:
                       description: |-
