@@ -206,7 +206,7 @@ type NodeSpec struct {
 	// +optional
 	IgnitionConfigOverride string `json:"ignitionConfigOverride,omitempty"`
 
-	// +kubebuilder:validation:Enum=master;worker
+	// +kubebuilder:validation:Enum=master;worker;arbiter
 	// +kubebuilder:default:=master
 	// +optional
 	Role string `json:"role,omitempty"`
@@ -245,8 +245,9 @@ type NodeSpec struct {
 type ClusterType string
 
 const (
-	ClusterTypeSNO             ClusterType = "SNO"
-	ClusterTypeHighlyAvailable ClusterType = "HighlyAvailable"
+	ClusterTypeSNO                    ClusterType = "SNO"
+	ClusterTypeHighlyAvailable        ClusterType = "HighlyAvailable"
+	ClusterTypeHighlyAvailableArbiter ClusterType = "HighlyAvailableArbiter"
 )
 
 // PreservationMode represents the modes of data preservation for a ClusterInstance during reinstallation.
@@ -418,7 +419,7 @@ type ClusterInstanceSpec struct {
 	// +optional
 	CPUArchitecture CPUArchitecture `json:"cpuArchitecture,omitempty"`
 
-	// +kubebuilder:validation:Enum=SNO;HighlyAvailable
+	// +kubebuilder:validation:Enum=SNO;HighlyAvailable;HighlyAvailableArbiter
 	// +optional
 	ClusterType ClusterType `json:"clusterType,omitempty"`
 

@@ -198,6 +198,7 @@ func Test_buildClusterData(t *testing.T) {
 					InstallConfigOverrides: expectedInstallConfigOverrides,
 					ControlPlaneAgents:     1,
 					WorkerAgents:           0,
+					ArbiterAgents:          0,
 					ReleaseImage:           "test-image",
 				},
 			},
@@ -274,11 +275,104 @@ func Test_buildClusterData(t *testing.T) {
 					InstallConfigOverrides: expectedInstallConfigOverrides,
 					ControlPlaneAgents:     2,
 					WorkerAgents:           1,
+					ArbiterAgents:          0,
 					ReleaseImage:           "test-image",
 				},
 			},
 			error: nil,
 			name:  "3 node (2 master, 1 worker) ClusterInstance with nodeId set to first node",
+		},
+		{
+			clusterInstance: &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cluster",
+					Namespace: "test-cluster",
+				},
+				Spec: v1alpha1.ClusterInstanceSpec{
+					NetworkType:            NetworkType,
+					InstallConfigOverrides: InstallConfigOverrides,
+					CPUPartitioning:        CPUPartitioning,
+					ClusterImageSetNameRef: "test-clusterimageset",
+					Nodes: []v1alpha1.NodeSpec{
+						{
+							HostName: "node1",
+							Role:     "master",
+						},
+						{
+							HostName: "node2",
+							Role:     "master",
+						},
+						{
+							HostName: "node3",
+							Role:     "arbiter",
+						},
+						{
+							HostName: "node4",
+							Role:     "worker",
+						},
+						{
+							HostName: "node5",
+							Role:     "arbiter",
+						},
+					},
+				},
+			},
+			clusterImageSet: &hivev1.ClusterImageSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-clusterimageset",
+					Namespace: "",
+				},
+				Spec: hivev1.ClusterImageSetSpec{
+					ReleaseImage: "test-image",
+				},
+			},
+			node: &v1alpha1.NodeSpec{
+				HostName: "node3",
+				Role:     "arbiter",
+			},
+			expected: ClusterData{
+				Spec: v1alpha1.ClusterInstanceSpec{
+					NetworkType:            NetworkType,
+					InstallConfigOverrides: InstallConfigOverrides,
+					CPUPartitioning:        CPUPartitioning,
+					ClusterImageSetNameRef: "test-clusterimageset",
+					Nodes: []v1alpha1.NodeSpec{
+						{
+							HostName: "node1",
+							Role:     "master",
+						},
+						{
+							HostName: "node2",
+							Role:     "master",
+						},
+						{
+							HostName: "node3",
+							Role:     "arbiter",
+						},
+						{
+							HostName: "node4",
+							Role:     "worker",
+						},
+						{
+							HostName: "node5",
+							Role:     "arbiter",
+						},
+					},
+				},
+				SpecialVars: SpecialVars{
+					CurrentNode: v1alpha1.NodeSpec{
+						HostName: "node3",
+						Role:     "arbiter",
+					},
+					InstallConfigOverrides: expectedInstallConfigOverrides,
+					ControlPlaneAgents:     2,
+					WorkerAgents:           1,
+					ArbiterAgents:          2,
+					ReleaseImage:           "test-image",
+				},
+			},
+			error: nil,
+			name:  "5 node (2 master, 1 worker, 2 arbiter) ClusterInstance with nodeId set to arbiter node",
 		},
 		{
 			clusterInstance: &v1alpha1.ClusterInstance{
