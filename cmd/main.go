@@ -59,6 +59,7 @@ import (
 	"github.com/stolostron/siteconfig/internal/controller/reinstall"
 	"github.com/stolostron/siteconfig/internal/controller/retry"
 	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
+	hcp_templates "github.com/stolostron/siteconfig/internal/templates/hosted-cluster"
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 	//+kubebuilder:scaffold:imports
 )
@@ -305,11 +306,13 @@ func deleteConfigMap(ctx context.Context, c client.Client, namespace, name strin
 // initConfigMapTemplates initializes default ConfigMaps consisting of the Assisted Installer and Image-based Installer
 // installation templates in the specified namespace.
 func initConfigMapTemplates(ctx context.Context, c client.Client, namespace string, log *zap.Logger) error {
-	templates := make(map[string]map[string]string, 4)
+	templates := make(map[string]map[string]string, 6)
 	templates[ai_templates.ClusterLevelInstallTemplates] = ai_templates.GetClusterTemplates()
 	templates[ai_templates.NodeLevelInstallTemplates] = ai_templates.GetNodeTemplates()
 	templates[ibi_templates.ClusterLevelInstallTemplates] = ibi_templates.GetClusterTemplates()
 	templates[ibi_templates.NodeLevelInstallTemplates] = ibi_templates.GetNodeTemplates()
+	templates[hcp_templates.ClusterLevelInstallTemplates] = hcp_templates.GetClusterTemplates()
+	templates[hcp_templates.NodeLevelInstallTemplates] = hcp_templates.GetNodeTemplates()
 
 	for k, v := range templates {
 		immutable := true
