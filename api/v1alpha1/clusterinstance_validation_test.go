@@ -126,22 +126,56 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 				InstallConfigOverrides: "{\"capabilities\":{\"baselineCapabilitySet\": \"None\", \"additionalEnabledCapabilities\": [ \"marketplace\", \"NodeTuning\" ] }}",
 				ExtraManifestsRefs:     []corev1.LocalObjectReference{{Name: "foobar1"}, {Name: "foobar2"}},
 				TemplateRefs:           []TemplateRef{{Name: "cluster-v1", Namespace: "site-sno-du-1"}},
-				Nodes: []NodeSpec{{
-					BmcAddress:         "idrac-virtualmedia+https://198.51.100.0/redfish/v1/Systems/System.Embedded.1",
-					BmcCredentialsName: BmcCredentialsName{Name: "bmc-secret"},
-					BootMACAddress:     "00:00:5E:00:53:00",
-					HostName:           "node1",
-					Role:               "master",
-					BootMode:           "UEFI",
-					InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
-					TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
-					NodeNetwork: &aiv1beta1.NMStateConfigSpec{
-						Interfaces: []*aiv1beta1.Interface{
-							{Name: "eno1", MacAddress: "00:00:5E:00:53:00"},
-							{Name: "bond99", MacAddress: "00:00:5E:00:53:01"},
+				Nodes: []NodeSpec{
+					{
+						BmcAddress:         "idrac-virtualmedia+https://198.51.100.0/redfish/v1/Systems/System.Embedded.1",
+						BmcCredentialsName: BmcCredentialsName{Name: "bmc-secret"},
+						BootMACAddress:     "00:00:5E:00:53:00",
+						HostName:           "master-node1",
+						Role:               "master",
+						BootMode:           "UEFI",
+						InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
+						TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+						NodeNetwork: &aiv1beta1.NMStateConfigSpec{
+							Interfaces: []*aiv1beta1.Interface{
+								{Name: "eno1", MacAddress: "00:00:5E:00:53:00"},
+								{Name: "bond99", MacAddress: "00:00:5E:00:53:01"},
+							},
 						},
 					},
-				}},
+					{
+						BmcAddress:         "idrac-virtualmedia+https://198.51.100.1/redfish/v1/Systems/System.Embedded.1",
+						BmcCredentialsName: BmcCredentialsName{Name: "bmc-secret"},
+						BootMACAddress:     "00:00:5E:00:53:01",
+						HostName:           "worker-node1",
+						Role:               "worker",
+						BootMode:           "UEFI",
+						InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
+						TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+						NodeNetwork: &aiv1beta1.NMStateConfigSpec{
+							Interfaces: []*aiv1beta1.Interface{
+								{Name: "eno1", MacAddress: "00:00:5E:00:53:00"},
+								{Name: "bond99", MacAddress: "00:00:5E:00:53:01"},
+							},
+						},
+					},
+					{
+						BmcAddress:         "idrac-virtualmedia+https://198.51.100.2/redfish/v1/Systems/System.Embedded.1",
+						BmcCredentialsName: BmcCredentialsName{Name: "bmc-secret"},
+						BootMACAddress:     "00:00:5E:00:53:02",
+						HostName:           "worker-node2",
+						Role:               "worker",
+						BootMode:           "UEFI",
+						InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
+						TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+						NodeNetwork: &aiv1beta1.NMStateConfigSpec{
+							Interfaces: []*aiv1beta1.Interface{
+								{Name: "eno1", MacAddress: "00:00:5E:00:53:00"},
+								{Name: "bond99", MacAddress: "00:00:5E:00:53:01"},
+							},
+						},
+					},
+				},
 			},
 		}
 
@@ -159,6 +193,220 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 			newClusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{
 				"BareMetalHost": {
 					"foo": "bar",
+				},
+			}
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil for node deletion", func() {
+			nodes := newClusterInstance.Spec.Nodes
+			index := 1
+			nodes = append(nodes[0:index], nodes[index+1:]...)
+			newClusterInstance.Spec.Nodes = nodes
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil for node deletion from beginning", func() {
+			// Remove the first node (index 0)
+			newClusterInstance.Spec.Nodes = newClusterInstance.Spec.Nodes[1:]
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil for node deletion from end", func() {
+			// Remove the last node
+			newClusterInstance.Spec.Nodes = newClusterInstance.Spec.Nodes[:len(newClusterInstance.Spec.Nodes)-1]
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil for node addition at beginning", func() {
+			// Create a new node to add at the beginning
+			newNode := NodeSpec{
+				BmcAddress:         "idrac-virtualmedia+https://198.51.100.99/redfish/v1/Systems/System.Embedded.1",
+				BmcCredentialsName: BmcCredentialsName{Name: "bmc-secret"},
+				BootMACAddress:     "00:00:5E:00:53:99",
+				HostName:           "new-worker-node",
+				Role:               "worker",
+				BootMode:           "UEFI",
+				InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
+				TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+				NodeNetwork: &aiv1beta1.NMStateConfigSpec{
+					Interfaces: []*aiv1beta1.Interface{
+						{Name: "eno1", MacAddress: "00:00:5E:00:53:99"},
+					},
+				},
+			}
+			// Insert at the beginning
+			newClusterInstance.Spec.Nodes = append([]NodeSpec{newNode}, newClusterInstance.Spec.Nodes...)
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil for node addition in middle", func() {
+			// Create a new node to add in the middle
+			newNode := NodeSpec{
+				BmcAddress:         "idrac-virtualmedia+https://198.51.100.98/redfish/v1/Systems/System.Embedded.1",
+				BmcCredentialsName: BmcCredentialsName{Name: "bmc-secret"},
+				BootMACAddress:     "00:00:5E:00:53:98",
+				HostName:           "middle-worker-node",
+				Role:               "worker",
+				BootMode:           "UEFI",
+				InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
+				TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+				NodeNetwork: &aiv1beta1.NMStateConfigSpec{
+					Interfaces: []*aiv1beta1.Interface{
+						{Name: "eno1", MacAddress: "00:00:5E:00:53:98"},
+					},
+				},
+			}
+			// Insert in the middle (after first node)
+			nodes := newClusterInstance.Spec.Nodes
+			insertIndex := 1
+			newNodes := make([]NodeSpec, 0, len(nodes)+1)
+			newNodes = append(newNodes, nodes[:insertIndex]...)
+			newNodes = append(newNodes, newNode)
+			newNodes = append(newNodes, nodes[insertIndex:]...)
+			newClusterInstance.Spec.Nodes = newNodes
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil for node reordering (same nodes, different order)", func() {
+			// Reverse the order of nodes - this should be considered "no change"
+			// since it's the same set of nodes just reordered
+			nodes := make([]NodeSpec, len(newClusterInstance.Spec.Nodes))
+			copy(nodes, newClusterInstance.Spec.Nodes)
+
+			// Reverse the order
+			for i, j := 0, len(nodes)-1; i < j; i, j = i+1, j-1 {
+				nodes[i], nodes[j] = nodes[j], nodes[i]
+			}
+
+			newClusterInstance.Spec.Nodes = nodes
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil for node replacement (same count)", func() {
+			// Replace all nodes with completely new ones (same count)
+			newClusterInstance.Spec.Nodes = []NodeSpec{
+				{
+					BmcAddress:         "idrac-virtualmedia+https://198.51.100.99/redfish/v1/Systems/System.Embedded.1",
+					BmcCredentialsName: BmcCredentialsName{Name: "bmc-secret"},
+					BootMACAddress:     "00:00:5E:00:53:99",
+					HostName:           "replacement-worker-1",
+					Role:               "worker",
+					BootMode:           "UEFI",
+					InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
+					TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+					NodeNetwork: &aiv1beta1.NMStateConfigSpec{
+						Interfaces: []*aiv1beta1.Interface{
+							{Name: "eno1", MacAddress: "00:00:5E:00:53:99"},
+						},
+					},
+				},
+				{
+					BmcAddress:         "idrac-virtualmedia+https://198.51.100.98/redfish/v1/Systems/System.Embedded.1",
+					BmcCredentialsName: BmcCredentialsName{Name: "bmc-secret"},
+					BootMACAddress:     "00:00:5E:00:53:98",
+					HostName:           "replacement-worker-2",
+					Role:               "worker",
+					BootMode:           "UEFI",
+					InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
+					TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+					NodeNetwork: &aiv1beta1.NMStateConfigSpec{
+						Interfaces: []*aiv1beta1.Interface{
+							{Name: "eno1", MacAddress: "00:00:5E:00:53:98"},
+						},
+					},
+				},
+				{
+					BmcAddress:         "idrac-virtualmedia+https://198.51.100.97/redfish/v1/Systems/System.Embedded.1",
+					BmcCredentialsName: BmcCredentialsName{Name: "bmc-secret"},
+					BootMACAddress:     "00:00:5E:00:53:97",
+					HostName:           "replacement-worker-3",
+					Role:               "worker",
+					BootMode:           "UEFI",
+					InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
+					TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+					NodeNetwork: &aiv1beta1.NMStateConfigSpec{
+						Interfaces: []*aiv1beta1.Interface{
+							{Name: "eno1", MacAddress: "00:00:5E:00:53:97"},
+						},
+					},
+				},
+			}
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil for mixed operation: remove 1, add 2 (net +1)", func() {
+			// Remove the first node and add two new nodes (net scale-out)
+			originalNodes := oldClusterInstance.Spec.Nodes
+			newClusterInstance.Spec.Nodes = []NodeSpec{
+				// Keep the second and third nodes (remove first)
+				originalNodes[1],
+				originalNodes[2],
+				// Add two new nodes
+				{
+					BmcAddress:         "idrac-virtualmedia+https://198.51.100.96/redfish/v1/Systems/System.Embedded.1",
+					BmcCredentialsName: BmcCredentialsName{Name: "bmc-secret"},
+					BootMACAddress:     "00:00:5E:00:53:96",
+					HostName:           "new-worker-1",
+					Role:               "worker",
+					BootMode:           "UEFI",
+					InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
+					TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+					NodeNetwork: &aiv1beta1.NMStateConfigSpec{
+						Interfaces: []*aiv1beta1.Interface{
+							{Name: "eno1", MacAddress: "00:00:5E:00:53:96"},
+						},
+					},
+				},
+				{
+					BmcAddress:         "idrac-virtualmedia+https://198.51.100.95/redfish/v1/Systems/System.Embedded.1",
+					BmcCredentialsName: BmcCredentialsName{Name: "bmc-secret"},
+					BootMACAddress:     "00:00:5E:00:53:95",
+					HostName:           "new-worker-2",
+					Role:               "worker",
+					BootMode:           "UEFI",
+					InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
+					TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+					NodeNetwork: &aiv1beta1.NMStateConfigSpec{
+						Interfaces: []*aiv1beta1.Interface{
+							{Name: "eno1", MacAddress: "00:00:5E:00:53:95"},
+						},
+					},
+				},
+			}
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil for mixed operation: remove 2, add 1 (net -1)", func() {
+			// Remove the first two nodes and add one new node (net scale-in)
+			originalNodes := oldClusterInstance.Spec.Nodes
+			newClusterInstance.Spec.Nodes = []NodeSpec{
+				// Keep only the third node (remove first two)
+				originalNodes[2],
+				// Add one new node
+				{
+					BmcAddress:         "idrac-virtualmedia+https://198.51.100.94/redfish/v1/Systems/System.Embedded.1",
+					BmcCredentialsName: BmcCredentialsName{Name: "bmc-secret"},
+					BootMACAddress:     "00:00:5E:00:53:94",
+					HostName:           "replacement-worker",
+					Role:               "worker",
+					BootMode:           "UEFI",
+					InstallerArgs:      "[\"--append-karg\", \"nameserver=198.51.100.0\", \"-n\"]",
+					TemplateRefs:       []TemplateRef{{Name: "node-template", Namespace: "site-sno-du-1"}},
+					NodeNetwork: &aiv1beta1.NMStateConfigSpec{
+						Interfaces: []*aiv1beta1.Interface{
+							{Name: "eno1", MacAddress: "00:00:5E:00:53:94"},
+						},
+					},
 				},
 			}
 			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
@@ -218,14 +466,16 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 			newClusterInstance.Spec.Nodes[0].BmcAddress = "this-should-not-change"
 			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("detected unauthorized changes in immutable fields: /nodes/0/bmcAddress"))
+			Expect(err.Error()).To(ContainSubstring("detected unauthorized node modifications"))
+			Expect(err.Error()).To(ContainSubstring("unauthorized change to bmcAddress"))
 		})
 
 		It("should return error for BootMACAddress changes", func() {
 			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-should-not-change"
 			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("detected unauthorized changes in immutable fields: /nodes/0/bootMACAddress"))
+			Expect(err.Error()).To(ContainSubstring("detected unauthorized node modifications"))
+			Expect(err.Error()).To(ContainSubstring("unauthorized change to bootMACAddress"))
 		})
 	})
 
