@@ -3,12 +3,6 @@
 filters:
   ".*":
     reviewers:
-    - sakhoury
-    - carbonin
-    - eranco74
-    - imiller0
+      - reviewers
     approvers:
-    - sakhoury
-    - carbonin
-    - eranco74
-    - imiller0
+      - approvers

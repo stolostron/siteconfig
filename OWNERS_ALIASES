@@ -1,0 +1,23 @@
+# See the OWNERS docs at https://go.k8s.io/owners
+
+aliases:
+  reviewers:
+    - sakhoury
+    - carbonin
+    - eranco74
+    - imiller0 
+    - fontivan
+    - cwilkers
+    - tliu2021
+    - sudomakeinstall2
+    - sabbir-47
+    - irinamihai
+    - Missxiaoguo
+  approvers:
+    - sakhoury
+    - carbonin
+    - eranco74
+    - imiller0 
+    - fontivan
+    - cwilkers
+    - sabbir-47
