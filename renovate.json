@@ -1,0 +1,79 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "automergeStrategy": "rebase",
+    "automergeType": "pr",
+    "prConcurrentLimit": 0,
+    "commitMessagePrefix": "NO-ISSUE: ",
+    "labels": ["lgtm", "approved"],
+    "gomod": {
+        "enabled": true,
+        "commitMessageTopic": "Go module {{depName}}"
+    },
+    "packageRules": [
+        {
+            "description": "Auto-merge patch updates for Go dependencies",
+            "matchManagers": ["gomod"],
+            "matchUpdateTypes": ["patch"],
+            "addLabels": ["dependencies", "go-mod"],
+            "autoApprove": true,
+            "automerge": true,
+            "schedule": ["at any time"]
+        },
+        {
+            "description": "Auto-approve minor updates for Go dependencies",
+            "matchManagers": ["gomod"],
+            "matchUpdateTypes": ["minor"],
+            "addLabels": ["dependencies", "go-mod"],
+            "autoApprove": true,
+            "automerge": false,
+            "schedule": ["at any time"]
+        },
+        {
+            "description": "Manual review for major Go dependency updates",
+            "matchManagers": ["gomod"],
+            "matchUpdateTypes": ["major"],
+            "addLabels": ["dependencies", "go-mod", "major-update"],
+            "autoApprove": false,
+            "automerge": false,
+            "schedule": ["at any time"]
+        },
+        {
+            "description": "Group Kubernetes dependencies",
+            "matchManagers": ["gomod"],
+            "groupName": "kubernetes dependencies",
+            "addLabels": ["dependencies", "kubernetes"],
+            "autoApprove": true,
+            "automerge": false,
+            "matchPackageNames": ["/^k8s\\.io//", "/^sigs\\.k8s\\.io//"]
+        },
+        {
+            "description": "Group OpenShift dependencies",
+            "matchManagers": ["gomod"],
+            "groupName": "openshift dependencies",
+            "addLabels": ["dependencies", "openshift"],
+            "autoApprove": true,
+            "automerge": false,
+            "matchPackageNames": [
+                "/^github\\.com/openshift//",
+                "/^github\\.com/openshift-kni//"
+            ]
+        },
+        {
+            "description": "Auto-merge security updates",
+            "matchManagers": ["gomod"],
+            "matchDepTypes": ["require"],
+            "vulnerabilityAlerts": {
+                "addLabels": ["security"],
+                "autoApprove": true,
+                "automerge": true
+            }
+        }
+    ],
+    "vulnerabilityAlerts": {
+        "enabled": true
+    },
+    "osvVulnerabilityAlerts": true,
+    "schedule": [
+        "before 6am on Monday"
+    ]
+}
