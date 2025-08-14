@@ -170,6 +170,10 @@ run: manifests generate fmt vet ## Run a controller from your host.
 docker-build: unittest ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} -f Dockerfile .
 
+.PHONY: docker-buildx
+docker-buildx: unittest
+	$(CONTAINER_TOOL) buildx build --platform linux/amd64 -t ${IMG} -f Dockerfile .
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}

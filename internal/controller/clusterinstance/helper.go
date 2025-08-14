@@ -286,11 +286,74 @@ func appendToManifestMetadata(
 			// It's a new data-item, adding
 			if data == nil {
 				data = make(map[string]interface{})
+				metadata[field] = data
 			}
 			data[key] = value
 		}
 	}
 	return manifest
+}
+
+// GetLastAppliedSpec extracts the last applied ClusterInstanceSpec from the annotation
+func GetLastAppliedSpec(clusterInstance *v1alpha1.ClusterInstance) (*v1alpha1.ClusterInstanceSpec, error) {
+	lastSpecJSON, exists := clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation]
+	if !exists {
+		return nil, fmt.Errorf("last applied spec annotation not found")
+	}
+
+	lastAppliedSpec := &v1alpha1.ClusterInstanceSpec{}
+	if err := json.Unmarshal([]byte(lastSpecJSON), lastAppliedSpec); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal last applied spec: %w", err)
+	}
+
+	return lastAppliedSpec, nil
+}
+
+// GetLastAppliedExtraAnnotations retrieves extra annotations for a specific kind from the last applied spec
+func GetLastAppliedExtraAnnotations(lastAppliedSpec *v1alpha1.ClusterInstanceSpec,
+	lastAppliedNode *v1alpha1.NodeSpec, kind string) map[string]string {
+	if lastAppliedSpec == nil {
+		return nil
+	}
+
+	if lastAppliedNode == nil {
+		// Use cluster-level annotations
+		annotations, _ := lastAppliedSpec.ExtraAnnotationSearch(kind)
+		return annotations
+	} else {
+		// Use node-level annotations with fallback to cluster-level
+		annotations, _ := lastAppliedNode.ExtraAnnotationSearch(kind, lastAppliedSpec)
+		return annotations
+	}
+}
+
+// GetLastAppliedExtraLabels retrieves extra labels for a specific kind from the last applied spec
+func GetLastAppliedExtraLabels(lastAppliedSpec *v1alpha1.ClusterInstanceSpec,
+	lastAppliedNode *v1alpha1.NodeSpec, kind string) map[string]string {
+	if lastAppliedSpec == nil {
+		return nil
+	}
+
+	if lastAppliedNode == nil {
+		// Use cluster-level labels
+		labels, _ := lastAppliedSpec.ExtraLabelSearch(kind)
+		return labels
+	} else {
+		// Use node-level labels with fallback to cluster-level
+		labels, _ := lastAppliedNode.ExtraLabelSearch(kind, lastAppliedSpec)
+		return labels
+	}
+}
+
+// GetDeletedKeys returns keys that were in oldMap but are not in newMap
+func GetDeletedKeys(oldMap, newMap map[string]string) []string {
+	var deletedKeys []string
+	for key := range oldMap {
+		if _, exists := newMap[key]; !exists {
+			deletedKeys = append(deletedKeys, key)
+		}
+	}
+	return deletedKeys
 }
 
 func appendManifestAnnotations(extraAnnotations map[string]string, manifest map[string]interface{},

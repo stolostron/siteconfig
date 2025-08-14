@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -561,6 +562,131 @@ func mergeMaps[k comparable, v any](src, dst map[k]v) map[k]v {
 	return dst
 }
 
+// mergeMetadata merges metadata (labels and annotations) from the rendered object
+// into the live object while handling ClusterInstance-managed metadata deletions.
+//
+// The function performs a three-way merge using:
+// - Current ClusterInstance spec (desired state)
+// - Last applied ClusterInstance spec (stored in annotation)
+// - Live object metadata (current cluster state)
+//
+// This ensures that:
+// - ClusterInstance-managed metadata is properly added, updated, and deleted
+// - Metadata managed by other controllers is preserved unchanged
+// - Only metadata for the specific object kind is considered
+//
+// If no last applied spec exists, it performs a simple merge without deletions (initial creation).
+func mergeMetadata(
+	clusterInstance *v1alpha1.ClusterInstance,
+	renderedObj *unstructured.Unstructured,
+	updatedLiveObj *unstructured.Unstructured,
+	log *zap.Logger,
+) *unstructured.Unstructured {
+	// Extract last applied spec from ClusterInstance annotation
+	lastAppliedSpec, err := ci.GetLastAppliedSpec(clusterInstance)
+	if err != nil {
+		log.Debug("Could not get last applied spec, treating as initial creation", zap.Error(err))
+		// For initial creation, just apply the rendered metadata
+		renderedAnnotations := renderedObj.GetAnnotations()
+		renderedLabels := renderedObj.GetLabels()
+
+		// Only merge and set if there are annotations/labels to merge
+		if len(renderedAnnotations) > 0 {
+			liveAnnotations := updatedLiveObj.GetAnnotations()
+			if liveAnnotations == nil {
+				liveAnnotations = make(map[string]string)
+			}
+			mergedAnnotations := mergeMaps(renderedAnnotations, liveAnnotations)
+			updatedLiveObj.SetAnnotations(mergedAnnotations)
+		}
+
+		if len(renderedLabels) > 0 {
+			liveLabels := updatedLiveObj.GetLabels()
+			if liveLabels == nil {
+				liveLabels = make(map[string]string)
+			}
+			mergedLabels := mergeMaps(renderedLabels, liveLabels)
+			updatedLiveObj.SetLabels(mergedLabels)
+		}
+
+		return updatedLiveObj
+	}
+
+	// Get the object kind to determine which labels/annotations to compare
+	kind := renderedObj.GetKind()
+
+	// Get last applied annotations and labels for this object kind
+	lastAppliedAnnotations := ci.GetLastAppliedExtraAnnotations(lastAppliedSpec, nil, kind)
+	lastAppliedLabels := ci.GetLastAppliedExtraLabels(lastAppliedSpec, nil, kind)
+
+	// Get current annotations and labels from ClusterInstance spec
+	currentAnnotations, _ := clusterInstance.Spec.ExtraAnnotationSearch(kind)
+	currentLabels, _ := clusterInstance.Spec.ExtraLabelSearch(kind)
+
+	// Ensure maps are not nil for comparison
+	if currentAnnotations == nil {
+		currentAnnotations = make(map[string]string)
+	}
+	if currentLabels == nil {
+		currentLabels = make(map[string]string)
+	}
+	if lastAppliedAnnotations == nil {
+		lastAppliedAnnotations = make(map[string]string)
+	}
+	if lastAppliedLabels == nil {
+		lastAppliedLabels = make(map[string]string)
+	}
+
+	// Compute deleted keys: keys that were in last applied but not in current
+	deletedAnnotationKeys := ci.GetDeletedKeys(lastAppliedAnnotations, currentAnnotations)
+	deletedLabelKeys := ci.GetDeletedKeys(lastAppliedLabels, currentLabels)
+
+	liveAnnotations := updatedLiveObj.GetAnnotations()
+	liveLabels := updatedLiveObj.GetLabels()
+
+	if liveAnnotations == nil {
+		liveAnnotations = make(map[string]string)
+	}
+	if liveLabels == nil {
+		liveLabels = make(map[string]string)
+	}
+
+	// Remove deleted ClusterInstance-managed keys from live object
+	finalAnnotations := make(map[string]string)
+	finalLabels := make(map[string]string)
+
+	// Copy live annotations/labels, excluding deleted ones
+	for k, v := range liveAnnotations {
+		if !slices.Contains(deletedAnnotationKeys, k) {
+			finalAnnotations[k] = v
+		}
+	}
+
+	for k, v := range liveLabels {
+		if !slices.Contains(deletedLabelKeys, k) {
+			finalLabels[k] = v
+		}
+	}
+
+	// Add/update ClusterInstance-managed keys from rendered object
+	renderedAnnotations := renderedObj.GetAnnotations()
+	renderedLabels := renderedObj.GetLabels()
+
+	for k, v := range renderedAnnotations {
+		finalAnnotations[k] = v
+	}
+
+	for k, v := range renderedLabels {
+		finalLabels[k] = v
+	}
+
+	// Apply the final metadata
+	updatedLiveObj.SetAnnotations(finalAnnotations)
+	updatedLiveObj.SetLabels(finalLabels)
+
+	return updatedLiveObj
+}
+
 func updateLiveObject(renderedObj, updatedLiveObj *unstructured.Unstructured,
 	log *zap.Logger) (controllerutil.OperationResult, error) {
 	fieldSets := map[string][]string{
@@ -609,6 +735,7 @@ func createOrPatch(
 	ctx context.Context,
 	c client.Client,
 	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
 	renderedObj unstructured.Unstructured,
 ) (controllerutil.OperationResult, error) {
 
@@ -640,9 +767,8 @@ func createOrPatch(
 	// copy to avoid unnecessary patching later.
 	unstructured.RemoveNestedField(updatedLiveObj.Object, "status")
 
-	// Merge metadata.annotations and metadata.labels
-	updatedLiveObj.SetAnnotations(mergeMaps(renderedObj.GetAnnotations(), updatedLiveObj.GetAnnotations()))
-	updatedLiveObj.SetLabels(mergeMaps(renderedObj.GetLabels(), updatedLiveObj.GetLabels()))
+	// Handle ClusterInstance-managed metadata with deletion support
+	updatedLiveObj = mergeMetadata(clusterInstance, &renderedObj, updatedLiveObj, log)
 
 	if result, err := updateLiveObject(&renderedObj, updatedLiveObj, log); err != nil {
 		return result, err
@@ -685,7 +811,7 @@ func (r *ClusterInstanceReconciler) executeRenderedManifests(
 
 		status := v1alpha1.ManifestRenderedFailure
 		message := ""
-		if result, err := createOrPatch(ctx, c, log, object.GetObject()); err != nil {
+		if result, err := createOrPatch(ctx, c, log, clusterInstance, object.GetObject()); err != nil {
 			errs = append(errs, err)
 			ok = false
 			message = err.Error()

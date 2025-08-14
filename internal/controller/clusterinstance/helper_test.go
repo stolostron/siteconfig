@@ -18,10 +18,13 @@ package clusterinstance
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"testing"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
@@ -781,3 +784,259 @@ func Test_mergeJSONCommonKey(t *testing.T) {
 		})
 	}
 }
+
+var _ = Describe("GetDeletedKeys", func() {
+	It("should return empty slice when no deletions", func() {
+		oldMap := map[string]string{"key1": "value1", "key2": "value2"}
+		newMap := map[string]string{"key1": "value1", "key2": "value2"}
+		result := GetDeletedKeys(oldMap, newMap)
+		Expect(result).To(BeEmpty())
+	})
+
+	It("should detect one deletion", func() {
+		oldMap := map[string]string{"key1": "value1", "key2": "value2"}
+		newMap := map[string]string{"key1": "value1"}
+		result := GetDeletedKeys(oldMap, newMap)
+		Expect(result).To(ConsistOf("key2"))
+	})
+
+	It("should detect multiple deletions", func() {
+		oldMap := map[string]string{"key1": "value1", "key2": "value2", "key3": "value3"}
+		newMap := map[string]string{"key1": "value1"}
+		result := GetDeletedKeys(oldMap, newMap)
+		Expect(result).To(ConsistOf("key2", "key3"))
+	})
+
+	It("should detect all deletions", func() {
+		oldMap := map[string]string{"key1": "value1", "key2": "value2"}
+		newMap := map[string]string{}
+		result := GetDeletedKeys(oldMap, newMap)
+		Expect(result).To(ConsistOf("key1", "key2"))
+	})
+
+	It("should return empty slice when only additions occur", func() {
+		oldMap := map[string]string{"key1": "value1"}
+		newMap := map[string]string{"key1": "value1", "key2": "value2"}
+		result := GetDeletedKeys(oldMap, newMap)
+		Expect(result).To(BeEmpty())
+	})
+
+	It("should handle nil old map", func() {
+		var oldMap map[string]string
+		newMap := map[string]string{"key1": "value1"}
+		result := GetDeletedKeys(oldMap, newMap)
+		Expect(result).To(BeEmpty())
+	})
+
+	It("should handle nil new map", func() {
+		oldMap := map[string]string{"key1": "value1", "key2": "value2"}
+		var newMap map[string]string
+		result := GetDeletedKeys(oldMap, newMap)
+		Expect(result).To(ConsistOf("key1", "key2"))
+	})
+})
+
+var _ = Describe("GetLastAppliedExtraAnnotations", func() {
+	var (
+		lastAppliedSpec *v1alpha1.ClusterInstanceSpec
+		lastAppliedNode *v1alpha1.NodeSpec
+	)
+
+	BeforeEach(func() {
+		lastAppliedSpec = &v1alpha1.ClusterInstanceSpec{
+			ExtraAnnotations: map[string]map[string]string{
+				"ManagedCluster": {
+					"cluster-anno": "cluster-value",
+				},
+			},
+		}
+
+		lastAppliedNode = &v1alpha1.NodeSpec{
+			ExtraAnnotations: map[string]map[string]string{
+				"BareMetalHost": {
+					"node-anno": "node-value",
+				},
+			},
+		}
+	})
+
+	It("should return cluster-level annotations", func() {
+		result := GetLastAppliedExtraAnnotations(lastAppliedSpec, nil, "ManagedCluster")
+		expected := map[string]string{"cluster-anno": "cluster-value"}
+		Expect(result).To(Equal(expected))
+	})
+
+	It("should return node-level annotations", func() {
+		result := GetLastAppliedExtraAnnotations(lastAppliedSpec, lastAppliedNode, "BareMetalHost")
+		expected := map[string]string{"node-anno": "node-value"}
+		Expect(result).To(Equal(expected))
+	})
+
+	It("should fallback to cluster-level when node doesn't have the kind", func() {
+		result := GetLastAppliedExtraAnnotations(lastAppliedSpec, lastAppliedNode, "ManagedCluster")
+		expected := map[string]string{"cluster-anno": "cluster-value"}
+		Expect(result).To(Equal(expected))
+	})
+
+	It("should return nil when spec is nil", func() {
+		result := GetLastAppliedExtraAnnotations(nil, nil, "ManagedCluster")
+		Expect(result).To(BeNil())
+	})
+
+	It("should return nil when no annotations exist for kind", func() {
+		result := GetLastAppliedExtraAnnotations(lastAppliedSpec, nil, "NonExistentKind")
+		Expect(result).To(BeNil())
+	})
+})
+
+var _ = Describe("GetLastAppliedExtraLabels", func() {
+	var (
+		lastAppliedSpec *v1alpha1.ClusterInstanceSpec
+		lastAppliedNode *v1alpha1.NodeSpec
+	)
+
+	BeforeEach(func() {
+		lastAppliedSpec = &v1alpha1.ClusterInstanceSpec{
+			ExtraLabels: map[string]map[string]string{
+				"ManagedCluster": {
+					"cluster-label": "cluster-value",
+				},
+			},
+		}
+
+		lastAppliedNode = &v1alpha1.NodeSpec{
+			ExtraLabels: map[string]map[string]string{
+				"BareMetalHost": {
+					"node-label": "node-value",
+				},
+			},
+		}
+	})
+
+	It("should return cluster-level labels", func() {
+		result := GetLastAppliedExtraLabels(lastAppliedSpec, nil, "ManagedCluster")
+		expected := map[string]string{"cluster-label": "cluster-value"}
+		Expect(result).To(Equal(expected))
+	})
+
+	It("should return node-level labels", func() {
+		result := GetLastAppliedExtraLabels(lastAppliedSpec, lastAppliedNode, "BareMetalHost")
+		expected := map[string]string{"node-label": "node-value"}
+		Expect(result).To(Equal(expected))
+	})
+
+	It("should fallback to cluster-level when node doesn't have the kind", func() {
+		result := GetLastAppliedExtraLabels(lastAppliedSpec, lastAppliedNode, "ManagedCluster")
+		expected := map[string]string{"cluster-label": "cluster-value"}
+		Expect(result).To(Equal(expected))
+	})
+
+	It("should return nil when spec is nil", func() {
+		result := GetLastAppliedExtraLabels(nil, nil, "ManagedCluster")
+		Expect(result).To(BeNil())
+	})
+
+	It("should return nil when no labels exist for kind", func() {
+		result := GetLastAppliedExtraLabels(lastAppliedSpec, nil, "NonExistentKind")
+		Expect(result).To(BeNil())
+	})
+})
+
+var _ = Describe("GetLastAppliedSpec", func() {
+	var clusterInstance *v1alpha1.ClusterInstance
+
+	BeforeEach(func() {
+		clusterInstance = &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "test-cluster",
+				Namespace:   "test-namespace",
+				Annotations: make(map[string]string),
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				ClusterName: "test-cluster",
+			},
+		}
+	})
+
+	It("should extract valid last applied spec from annotation", func() {
+		lastAppliedSpec := &v1alpha1.ClusterInstanceSpec{
+			ClusterName: "old-cluster-name",
+			ExtraLabels: map[string]map[string]string{
+				"ManagedCluster": {
+					"test-label": "test-value",
+				},
+			},
+		}
+
+		lastSpecJSON, err := json.Marshal(lastAppliedSpec)
+		Expect(err).ToNot(HaveOccurred())
+		clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation] = string(lastSpecJSON)
+
+		result, err := GetLastAppliedSpec(clusterInstance)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result).ToNot(BeNil())
+		Expect(result.ClusterName).To(Equal("old-cluster-name"))
+		Expect(result.ExtraLabels).To(HaveKey("ManagedCluster"))
+		Expect(result.ExtraLabels["ManagedCluster"]).To(HaveKeyWithValue("test-label", "test-value"))
+	})
+
+	It("should return error when annotation is missing", func() {
+		result, err := GetLastAppliedSpec(clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("last applied spec annotation not found"))
+		Expect(result).To(BeNil())
+	})
+
+	It("should return error when annotation contains invalid JSON", func() {
+		clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation] = "invalid-json"
+
+		result, err := GetLastAppliedSpec(clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to unmarshal last applied spec"))
+		Expect(result).To(BeNil())
+	})
+
+	It("should return error when annotation is empty", func() {
+		clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation] = ""
+
+		result, err := GetLastAppliedSpec(clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to unmarshal last applied spec"))
+		Expect(result).To(BeNil())
+	})
+
+	It("should handle complex spec with all fields", func() {
+		lastAppliedSpec := &v1alpha1.ClusterInstanceSpec{
+			ClusterName: "complex-cluster",
+			ExtraLabels: map[string]map[string]string{
+				"ManagedCluster": {
+					"label1": "value1",
+					"label2": "value2",
+				},
+				"BareMetalHost": {
+					"bmh-label": "bmh-value",
+				},
+			},
+			ExtraAnnotations: map[string]map[string]string{
+				"ManagedCluster": {
+					"anno1": "value1",
+				},
+			},
+		}
+
+		lastSpecJSON, err := json.Marshal(lastAppliedSpec)
+		Expect(err).ToNot(HaveOccurred())
+		clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation] = string(lastSpecJSON)
+
+		result, err := GetLastAppliedSpec(clusterInstance)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result).ToNot(BeNil())
+		Expect(result.ClusterName).To(Equal("complex-cluster"))
+		Expect(result.ExtraLabels).To(HaveLen(2))
+		Expect(result.ExtraAnnotations).To(HaveLen(1))
+		Expect(result.ExtraLabels["ManagedCluster"]).To(HaveKeyWithValue("label1", "value1"))
+		Expect(result.ExtraLabels["ManagedCluster"]).To(HaveKeyWithValue("label2", "value2"))
+		Expect(result.ExtraLabels["BareMetalHost"]).To(HaveKeyWithValue("bmh-label", "bmh-value"))
+		Expect(result.ExtraAnnotations["ManagedCluster"]).To(HaveKeyWithValue("anno1", "value1"))
+	})
+})
