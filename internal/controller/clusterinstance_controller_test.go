@@ -2271,10 +2271,11 @@ var _ = Describe("executeRenderedManifests", func() {
 
 var _ = Describe("createOrPatch", func() {
 	var (
-		c          client.Client
-		ctx        = context.Background()
-		testLogger = zap.NewNop().Named("Test")
-		object     unstructured.Unstructured
+		c               client.Client
+		ctx             = context.Background()
+		testLogger      = zap.NewNop().Named("Test")
+		object          unstructured.Unstructured
+		clusterInstance *v1alpha1.ClusterInstance
 	)
 
 	BeforeEach(func() {
@@ -2282,6 +2283,17 @@ var _ = Describe("createOrPatch", func() {
 			WithScheme(scheme.Scheme).
 			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
 			Build()
+
+		clusterInstance = &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        TestClusterInstanceName,
+				Namespace:   TestClusterInstanceNamespace,
+				Annotations: make(map[string]string),
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				ClusterName: TestClusterInstanceName,
+			},
+		}
 
 		object = unstructured.Unstructured{
 			Object: map[string]interface{}{
@@ -2299,7 +2311,7 @@ var _ = Describe("createOrPatch", func() {
 	})
 
 	It("succeeds in creating a manifest", func() {
-		result, err := createOrPatch(ctx, c, testLogger, object)
+		result, err := createOrPatch(ctx, c, testLogger, clusterInstance, object)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultCreated))
 	})
@@ -2318,7 +2330,7 @@ var _ = Describe("createOrPatch", func() {
 			},
 		}).Build()
 
-		result, err := createOrPatch(ctx, testClient, testLogger, object)
+		result, err := createOrPatch(ctx, testClient, testLogger, clusterInstance, object)
 		Expect(err).To(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultNone))
 		Expect(called).To(BeTrue())
@@ -2353,7 +2365,7 @@ var _ = Describe("createOrPatch", func() {
 		updatedObject.SetLabels(map[string]string{
 			"ownedBy": "foo",
 		})
-		result, err := createOrPatch(ctx, c, testLogger, updatedObject)
+		result, err := createOrPatch(ctx, c, testLogger, clusterInstance, updatedObject)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultUpdated))
 	})
@@ -2379,7 +2391,7 @@ var _ = Describe("createOrPatch", func() {
 		updatedObject := object.DeepCopy()
 		updatedObject.SetAnnotations(updatedAnnotations)
 
-		result, err := createOrPatch(ctx, c, testLogger, *updatedObject)
+		result, err := createOrPatch(ctx, c, testLogger, clusterInstance, *updatedObject)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultUpdated))
 
@@ -2396,7 +2408,7 @@ var _ = Describe("createOrPatch", func() {
 
 		updatedObject := object.DeepCopy()
 
-		result, err := createOrPatch(ctx, c, testLogger, *updatedObject)
+		result, err := createOrPatch(ctx, c, testLogger, clusterInstance, *updatedObject)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultNone))
 	})
@@ -2426,7 +2438,7 @@ var _ = Describe("createOrPatch", func() {
 			},
 		}
 
-		result, err := createOrPatch(ctx, c, testLogger, updatedObject)
+		result, err := createOrPatch(ctx, c, testLogger, clusterInstance, updatedObject)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultNone))
 	})
@@ -2487,7 +2499,7 @@ var _ = Describe("createOrPatch", func() {
 			"ownedBy": "foo",
 		})
 
-		result, err := createOrPatch(ctx, c, testLogger, updatedObject)
+		result, err := createOrPatch(ctx, c, testLogger, clusterInstance, updatedObject)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultUpdated))
 
@@ -2571,7 +2583,7 @@ var _ = Describe("createOrPatch", func() {
 			"updatedBy": "admin",
 		})
 
-		result, err := createOrPatch(ctx, c, testLogger, updatedObject)
+		result, err := createOrPatch(ctx, c, testLogger, clusterInstance, updatedObject)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultUpdated))
 
@@ -2662,7 +2674,7 @@ var _ = Describe("createOrPatch", func() {
 			"env": "test",
 		})
 
-		result, err := createOrPatch(ctx, c, testLogger, updatedObject)
+		result, err := createOrPatch(ctx, c, testLogger, clusterInstance, updatedObject)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(Equal(controllerutil.OperationResultUpdated))
 
@@ -2922,5 +2934,358 @@ var _ = Describe("applyACMBackupLabelToInstallTemplates", func() {
 				installTemplateCM.Namespace, installTemplateCM.Name,
 			)
 		}
+	})
+})
+
+var _ = Describe("mergeMetadata", func() {
+	var (
+		clusterInstance *v1alpha1.ClusterInstance
+		renderedObj     *unstructured.Unstructured
+		liveObj         *unstructured.Unstructured
+		logger          *zap.Logger
+	)
+
+	BeforeEach(func() {
+		logger = zap.NewNop()
+
+		clusterInstance = &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "test-cluster",
+				Namespace:   "test-namespace",
+				Annotations: make(map[string]string),
+			},
+			Spec: v1alpha1.ClusterInstanceSpec{
+				ClusterName: "test-cluster",
+			},
+		}
+
+		renderedObj = &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "cluster.open-cluster-management.io/v1",
+				"kind":       "ManagedCluster",
+				"metadata": map[string]interface{}{
+					"name": "test-cluster",
+				},
+			},
+		}
+
+		liveObj = &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "cluster.open-cluster-management.io/v1",
+				"kind":       "ManagedCluster",
+				"metadata": map[string]interface{}{
+					"name": "test-cluster",
+				},
+			},
+		}
+	})
+
+	Context("when no last applied spec exists", func() {
+		It("should apply rendered metadata without deletions", func() {
+			renderedObj.SetAnnotations(map[string]string{
+				"new-anno": "new-value",
+			})
+			renderedObj.SetLabels(map[string]string{
+				"new-label": "new-value",
+			})
+
+			liveObj.SetAnnotations(map[string]string{
+				"existing-anno": "existing-value",
+			})
+			liveObj.SetLabels(map[string]string{
+				"existing-label": "existing-value",
+			})
+
+			result := mergeMetadata(clusterInstance, renderedObj, liveObj, logger)
+
+			expectedAnnotations := map[string]string{
+				"existing-anno": "existing-value",
+				"new-anno":      "new-value",
+			}
+			expectedLabels := map[string]string{
+				"existing-label": "existing-value",
+				"new-label":      "new-value",
+			}
+
+			Expect(result.GetAnnotations()).To(Equal(expectedAnnotations))
+			Expect(result.GetLabels()).To(Equal(expectedLabels))
+		})
+
+		It("should not modify object when rendered object has no metadata", func() {
+			// Rendered object has no annotations or labels
+			renderedObj.SetAnnotations(nil)
+			renderedObj.SetLabels(nil)
+
+			liveObj.SetAnnotations(map[string]string{
+				"existing-anno": "existing-value",
+			})
+			liveObj.SetLabels(map[string]string{
+				"existing-label": "existing-value",
+			})
+
+			result := mergeMetadata(clusterInstance, renderedObj, liveObj, logger)
+
+			// Should preserve existing metadata unchanged
+			expectedAnnotations := map[string]string{
+				"existing-anno": "existing-value",
+			}
+			expectedLabels := map[string]string{
+				"existing-label": "existing-value",
+			}
+
+			Expect(result.GetAnnotations()).To(Equal(expectedAnnotations))
+			Expect(result.GetLabels()).To(Equal(expectedLabels))
+		})
+	})
+
+	Context("when last applied spec exists", func() {
+		BeforeEach(func() {
+			// Set up current spec with labels/annotations
+			clusterInstance.Spec.ExtraLabels = map[string]map[string]string{
+				"ManagedCluster": {
+					"current-label": "current-value",
+				},
+			}
+			clusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{
+				"ManagedCluster": {
+					"current-anno": "current-value",
+				},
+			}
+
+			// Set up rendered object with current labels/annotations
+			renderedObj.SetAnnotations(map[string]string{
+				"current-anno": "current-value",
+			})
+			renderedObj.SetLabels(map[string]string{
+				"current-label": "current-value",
+			})
+		})
+
+		It("should remove deleted ClusterInstance-managed labels and annotations", func() {
+			// Set up last applied spec with labels/annotations that should be deleted
+			lastAppliedSpec := &v1alpha1.ClusterInstanceSpec{
+				ExtraLabels: map[string]map[string]string{
+					"ManagedCluster": {
+						"current-label": "current-value",
+						"deleted-label": "deleted-value",
+					},
+				},
+				ExtraAnnotations: map[string]map[string]string{
+					"ManagedCluster": {
+						"current-anno": "current-value",
+						"deleted-anno": "deleted-value",
+					},
+				},
+			}
+
+			lastSpecJSON, err := json.Marshal(lastAppliedSpec)
+			Expect(err).ToNot(HaveOccurred())
+			clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation] = string(lastSpecJSON)
+
+			// Set up live object with both current and deleted metadata
+			liveObj.SetAnnotations(map[string]string{
+				"current-anno": "current-value",
+				"deleted-anno": "deleted-value",
+				"other-anno":   "other-value", // Not managed by ClusterInstance
+			})
+			liveObj.SetLabels(map[string]string{
+				"current-label": "current-value",
+				"deleted-label": "deleted-value",
+				"other-label":   "other-value", // Not managed by ClusterInstance
+			})
+
+			result := mergeMetadata(clusterInstance, renderedObj, liveObj, logger)
+
+			// Should keep current ClusterInstance-managed and other annotations/labels
+			// Should remove deleted ClusterInstance-managed annotations/labels
+			expectedAnnotations := map[string]string{
+				"current-anno": "current-value",
+				"other-anno":   "other-value",
+			}
+			expectedLabels := map[string]string{
+				"current-label": "current-value",
+				"other-label":   "other-value",
+			}
+
+			Expect(result.GetAnnotations()).To(Equal(expectedAnnotations))
+			Expect(result.GetLabels()).To(Equal(expectedLabels))
+		})
+
+		It("should preserve labels/annotations not managed by ClusterInstance", func() {
+			// Set up last applied spec with no extra labels/annotations
+			lastAppliedSpec := &v1alpha1.ClusterInstanceSpec{}
+
+			lastSpecJSON, err := json.Marshal(lastAppliedSpec)
+			Expect(err).ToNot(HaveOccurred())
+			clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation] = string(lastSpecJSON)
+
+			// Set up live object with non-ClusterInstance annotations/labels
+			liveObj.SetAnnotations(map[string]string{
+				"external-controller-anno": "external-value",
+				"user-added-anno":          "user-value",
+			})
+			liveObj.SetLabels(map[string]string{
+				"external-controller-label": "external-value",
+				"user-added-label":          "user-value",
+			})
+
+			// Current spec has new annotations/labels
+			clusterInstance.Spec.ExtraLabels = map[string]map[string]string{
+				"ManagedCluster": {
+					"new-label": "new-value",
+				},
+			}
+			clusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{
+				"ManagedCluster": {
+					"new-anno": "new-value",
+				},
+			}
+
+			renderedObj.SetAnnotations(map[string]string{
+				"new-anno": "new-value",
+			})
+			renderedObj.SetLabels(map[string]string{
+				"new-label": "new-value",
+			})
+
+			result := mergeMetadata(clusterInstance, renderedObj, liveObj, logger)
+
+			// Should preserve external annotations/labels and add new ones
+			expectedAnnotations := map[string]string{
+				"external-controller-anno": "external-value",
+				"user-added-anno":          "user-value",
+				"new-anno":                 "new-value",
+			}
+			expectedLabels := map[string]string{
+				"external-controller-label": "external-value",
+				"user-added-label":          "user-value",
+				"new-label":                 "new-value",
+			}
+
+			Expect(result.GetAnnotations()).To(Equal(expectedAnnotations))
+			Expect(result.GetLabels()).To(Equal(expectedLabels))
+		})
+
+		It("should handle nil annotations and labels gracefully", func() {
+			// Set up last applied spec with labels/annotations
+			lastAppliedSpec := &v1alpha1.ClusterInstanceSpec{
+				ExtraLabels: map[string]map[string]string{
+					"ManagedCluster": {
+						"deleted-label": "deleted-value",
+					},
+				},
+			}
+
+			lastSpecJSON, err := json.Marshal(lastAppliedSpec)
+			Expect(err).ToNot(HaveOccurred())
+			clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation] = string(lastSpecJSON)
+
+			// Clear current spec
+			clusterInstance.Spec.ExtraLabels = nil
+			clusterInstance.Spec.ExtraAnnotations = nil
+
+			// Live object has nil metadata
+			liveObj.SetAnnotations(nil)
+			liveObj.SetLabels(nil)
+
+			// Rendered object has nil metadata
+			renderedObj.SetAnnotations(nil)
+			renderedObj.SetLabels(nil)
+
+			result := mergeMetadata(clusterInstance, renderedObj, liveObj, logger)
+
+			// Should result in empty but non-nil maps
+			Expect(result.GetAnnotations()).To(Equal(map[string]string{}))
+			Expect(result.GetLabels()).To(Equal(map[string]string{}))
+		})
+
+		It("should handle empty metadata maps", func() {
+			// Set up last applied spec with empty maps
+			lastAppliedSpec := &v1alpha1.ClusterInstanceSpec{
+				ExtraLabels:      map[string]map[string]string{},
+				ExtraAnnotations: map[string]map[string]string{},
+			}
+
+			lastSpecJSON, err := json.Marshal(lastAppliedSpec)
+			Expect(err).ToNot(HaveOccurred())
+			clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation] = string(lastSpecJSON)
+
+			// Set current spec with empty maps
+			clusterInstance.Spec.ExtraLabels = map[string]map[string]string{}
+			clusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{}
+
+			liveObj.SetAnnotations(map[string]string{
+				"existing-anno": "existing-value",
+			})
+			liveObj.SetLabels(map[string]string{
+				"existing-label": "existing-value",
+			})
+
+			renderedObj.SetAnnotations(map[string]string{})
+			renderedObj.SetLabels(map[string]string{})
+
+			result := mergeMetadata(clusterInstance, renderedObj, liveObj, logger)
+
+			// Should preserve existing annotations/labels since none are ClusterInstance-managed
+			expectedAnnotations := map[string]string{
+				"existing-anno": "existing-value",
+			}
+			expectedLabels := map[string]string{
+				"existing-label": "existing-value",
+			}
+
+			Expect(result.GetAnnotations()).To(Equal(expectedAnnotations))
+			Expect(result.GetLabels()).To(Equal(expectedLabels))
+		})
+	})
+
+	Context("when working with different object kinds", func() {
+		It("should only affect metadata for the specific object kind", func() {
+			// Set up last applied spec with labels for different kinds
+			lastAppliedSpec := &v1alpha1.ClusterInstanceSpec{
+				ExtraLabels: map[string]map[string]string{
+					"ManagedCluster": {
+						"mc-deleted-label": "mc-deleted-value",
+					},
+					"BareMetalHost": {
+						"bmh-deleted-label": "bmh-deleted-value",
+					},
+				},
+			}
+
+			lastSpecJSON, err := json.Marshal(lastAppliedSpec)
+			Expect(err).ToNot(HaveOccurred())
+			clusterInstance.Annotations[v1alpha1.LastClusterInstanceSpecAnnotation] = string(lastSpecJSON)
+
+			// Current spec only has ManagedCluster labels (BMH labels were deleted)
+			clusterInstance.Spec.ExtraLabels = map[string]map[string]string{
+				"ManagedCluster": {
+					"mc-current-label": "mc-current-value",
+				},
+			}
+
+			// Set up rendered object (ManagedCluster kind)
+			renderedObj.SetLabels(map[string]string{
+				"mc-current-label": "mc-current-value",
+			})
+
+			// Live object has labels from both kinds
+			liveObj.SetLabels(map[string]string{
+				"mc-deleted-label":  "mc-deleted-value",
+				"bmh-deleted-label": "bmh-deleted-value", // This should NOT be deleted since object is ManagedCluster
+				"external-label":    "external-value",
+			})
+
+			result := mergeMetadata(clusterInstance, renderedObj, liveObj, logger)
+
+			// Should only remove ManagedCluster-specific deleted labels
+			expectedLabels := map[string]string{
+				"bmh-deleted-label": "bmh-deleted-value", // Preserved - different kind
+				"external-label":    "external-value",    // Preserved - not ClusterInstance-managed
+				"mc-current-label":  "mc-current-value",  // Added from rendered object
+			}
+
+			Expect(result.GetLabels()).To(Equal(expectedLabels))
+		})
 	})
 })
