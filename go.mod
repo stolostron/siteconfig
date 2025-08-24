@@ -6,7 +6,7 @@ require (
 	github.com/go-logr/logr v1.4.2
 	github.com/onsi/ginkgo/v2 v2.22.2
 	github.com/onsi/gomega v1.36.2
-	github.com/openshift/hive/apis v0.0.0-20240306163002-9c5806a63531
+	github.com/openshift/hive/apis bd9fd44f4921
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.31.7
 	k8s.io/apiextensions-apiserver v0.31.3 // indirect
@@ -86,8 +86,8 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
-	github.com/openshift/api v0.0.0-20240521212423-414cf30d37be // indirect
-	github.com/openshift/assisted-service v1.0.10-0.20250810104629-4ef833fbd2b9 // indirect
+	github.com/openshift/api 3d5bf11af6e6 // indirect
+	github.com/openshift/assisted-service 5ad96ae324a1 // indirect
 	github.com/openshift/custom-resource-status v1.1.3-0.20220503160415-f2fdb4999d87 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
@@ -146,6 +146,6 @@ require (
 )
 
 replace (
-	github.com/openshift/assisted-service/api => github.com/openshift/assisted-service/api v0.0.0-20250808001126-3d6dbe3de42c // release-ocm-2.13
-	github.com/openshift/assisted-service/models => github.com/openshift/assisted-service/models v0.0.0-20250810104629-4ef833fbd2b9 // release-ocm-2.13
+	github.com/openshift/assisted-service/api => github.com/openshift/assisted-service/api 5ad96ae324a1 // release-ocm-2.13
+	github.com/openshift/assisted-service/models => github.com/openshift/assisted-service/models 5ad96ae324a1 // release-ocm-2.13
 )
