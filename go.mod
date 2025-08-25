@@ -23,7 +23,7 @@ require (
 require (
 	github.com/go-task/slim-sprig v2.20.0+incompatible
 	github.com/metal3-io/baremetal-operator/apis v0.9.1
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.0
 	github.com/wI2L/jsondiff v0.6.1
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20250718183923-645b1fa84792
