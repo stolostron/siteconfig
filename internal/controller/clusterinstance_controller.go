@@ -25,8 +25,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"golang.org/x/exp/maps"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,7 +33,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 
@@ -58,6 +55,9 @@ import (
 )
 
 const clusterInstanceFinalizer = "clusterinstance." + v1alpha1.Group + "/finalizer"
+
+// ClusterInstanceFieldManager is the field manager name used for Server-Side Apply operations
+const ClusterInstanceFieldManager = "siteconfig-controller"
 
 // Disaster recovery constants
 const (
@@ -545,125 +545,47 @@ func (r *ClusterInstanceReconciler) renderManifests(
 	return renderedObjects, err
 }
 
-// mergeMaps is a generic function to merge two maps.
-// Copy copies all key/value pairs in src adding them to dst.
-// When a key in src is already present in dst,
-// the value in dst will be overwritten by the value associated
-// with the key in src.
-func mergeMaps[k comparable, v any](src, dst map[k]v) map[k]v {
-	if len(src) == 0 {
-		return dst
-	}
-	if len(dst) == 0 {
-		return src
-	}
-	maps.Copy(dst, src)
-	return dst
-}
-
-func updateLiveObject(renderedObj, updatedLiveObj *unstructured.Unstructured,
-	log *zap.Logger) (controllerutil.OperationResult, error) {
-	fieldSets := map[string][]string{
-		"ConfigMap": {"data", "binaryData"},
-		"Secret":    {"data", "stringData"},
-	}
-
-	// Handle non-spec fields
-	for _, field := range fieldSets[renderedObj.GetKind()] {
-		if updatedData, hasField := renderedObj.Object[field].(map[string]interface{}); hasField {
-			if liveData, ok := updatedLiveObj.Object[field].(map[string]interface{}); ok {
-				updatedData = mergeMaps(updatedData, liveData)
-			}
-			updatedLiveObj.Object[field] = updatedData
-		}
-	}
-
-	if spec, hasSpec := renderedObj.Object["spec"].(map[string]interface{}); hasSpec {
-		// Replace updatedLiveObj.spec fields with those in renderedObj.spec
-		for _, key := range sets.NewString(maps.Keys(spec)...).List() {
-			nestedField := []string{"spec", key}
-			nestedValue, ok, err := unstructured.NestedFieldCopy(renderedObj.Object, nestedField...)
-			if err != nil {
-				return controllerutil.OperationResultNone, fmt.Errorf(
-					"failed to copy nested field %v from renderedObj: %w", nestedField, err)
-			}
-			if !ok {
-				// This situation should never occur, as it implies that a field present in the rendered object spec
-				// keys is somehow missing from the actual rendered object spec.
-				log.Sugar().Warnf("missing field %s in rendered installation object %s",
-					key, renderedObj.GroupVersionKind())
-				continue
-			}
-			if err := unstructured.SetNestedField(updatedLiveObj.Object, nestedValue, nestedField...); err != nil {
-				return controllerutil.OperationResultNone, fmt.Errorf(
-					"failed to set nested field %v in updatedLiveObj: %w", nestedField, err)
-			}
-		}
-	}
-
-	return controllerutil.OperationResultUpdated, nil
-}
-
-// createOrPatch ensures that the object is created or updated as needed.
-func createOrPatch(
+// applyObject uses Server-Side Apply to create or update objects with field management.
+// This approach leverages Kubernetes' managedFields to track field ownership and enables automatic
+// deletion of fields that are no longer present in the applied configuration.
+func applyObject(
 	ctx context.Context,
 	c client.Client,
 	log *zap.Logger,
 	renderedObj unstructured.Unstructured,
 ) (controllerutil.OperationResult, error) {
 
-	liveObj := &unstructured.Unstructured{}
-	liveObj.SetGroupVersionKind(renderedObj.GroupVersionKind())
-	if err := c.Get(ctx, client.ObjectKeyFromObject(&renderedObj), liveObj); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return controllerutil.OperationResultNone, fmt.Errorf("failed to get object: %w", err)
-		}
-
-		if err := c.Create(ctx, &renderedObj); err != nil {
-			return controllerutil.OperationResultNone, fmt.Errorf("failed to create rendered object: %w", err)
-		}
-		return controllerutil.OperationResultCreated, nil
-	}
-
 	// Update logger with object context.
-	log = log.Named("createOrPatch").With(
-		zap.String("name", liveObj.GetName()),
-		zap.String("namespace", liveObj.GetNamespace()),
-		zap.String("kind", liveObj.GetKind()),
+	log = log.Named("applyObject").With(
+		zap.String("name", renderedObj.GetName()),
+		zap.String("namespace", renderedObj.GetNamespace()),
+		zap.String("kind", renderedObj.GetKind()),
 	)
 
-	// Object exists, update it
-	patch := client.MergeFrom(liveObj.DeepCopy())
-	updatedLiveObj := liveObj.DeepCopy()
+	// Create a safe copy of the rendered object for Server-Side Apply
+	// The rendered object already contains the correct ExtraLabels/ExtraAnnotations from template rendering
+	preparedObj := &unstructured.Unstructured{}
+	preparedObj.SetGroupVersionKind(renderedObj.GroupVersionKind())
+	preparedObj.SetName(renderedObj.GetName())
+	preparedObj.SetNamespace(renderedObj.GetNamespace())
 
-	// If the resource contains a status then remove it from the unstructured
-	// copy to avoid unnecessary patching later.
-	unstructured.RemoveNestedField(updatedLiveObj.Object, "status")
-
-	// Merge metadata.annotations and metadata.labels
-	updatedLiveObj.SetAnnotations(mergeMaps(renderedObj.GetAnnotations(), updatedLiveObj.GetAnnotations()))
-	updatedLiveObj.SetLabels(mergeMaps(renderedObj.GetLabels(), updatedLiveObj.GetLabels()))
-
-	if result, err := updateLiveObject(&renderedObj, updatedLiveObj, log); err != nil {
-		return result, err
+	// Perform a safe shallow copy of the object content
+	preparedObj.Object = make(map[string]interface{})
+	for k, v := range renderedObj.Object {
+		preparedObj.Object[k] = v
 	}
 
-	// Compute difference between the liveObject and updatedLiveObject without "status" fields
-	unstructured.RemoveNestedField(liveObj.Object, "status")
-	if !equality.Semantic.DeepEqual(liveObj, updatedLiveObj) {
-		log.Debug("Change detected in rendered object, updating it")
-
-		// Only issue a Patch if the before and after resources (minus status) differ
-		if err := c.Patch(ctx, updatedLiveObj, patch); err != nil {
-			log.Warn("Failed to update resource", zap.Error(err))
-			return controllerutil.OperationResultNone,
-				fmt.Errorf("failed to update resource during patch operation: %w", err)
-		}
-		return controllerutil.OperationResultUpdated, nil
+	// Apply using Server-Side Apply with field manager
+	log.Debug("Applying object using Server-Side Apply")
+	if err := c.Patch(ctx, preparedObj, client.Apply,
+		client.FieldOwner(ClusterInstanceFieldManager), client.ForceOwnership); err != nil {
+		return controllerutil.OperationResultNone, fmt.Errorf("failed to apply object using Server-Side Apply: %w", err)
 	}
 
-	log.Debug("No change detected in rendered object, skipping update")
-	return controllerutil.OperationResultNone, nil
+	// SSA handles create/update automatically, so we consider this an update operation
+	// (SSA is idempotent and doesn't distinguish between create/update at the API level)
+	log.Debug("Object applied using Server-Side Apply")
+	return controllerutil.OperationResultUpdated, nil
 }
 
 func (r *ClusterInstanceReconciler) executeRenderedManifests(
@@ -685,7 +607,7 @@ func (r *ClusterInstanceReconciler) executeRenderedManifests(
 
 		status := v1alpha1.ManifestRenderedFailure
 		message := ""
-		if result, err := createOrPatch(ctx, c, log, object.GetObject()); err != nil {
+		if result, err := applyObject(ctx, c, log, object.GetObject()); err != nil {
 			errs = append(errs, err)
 			ok = false
 			message = err.Error()

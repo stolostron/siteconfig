@@ -108,8 +108,9 @@ common-deps-update:	controller-gen kustomize
 	go mod tidy
 
 .PHONY: generate
-generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+generate: controller-gen mockgen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	PATH="$(LOCALBIN):$$PATH" go generate ./internal/controller/mocks
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -170,6 +171,10 @@ run: manifests generate fmt vet ## Run a controller from your host.
 docker-build: unittest ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} -f Dockerfile .
 
+.PHONY: docker-buildx
+docker-buildx: unittest
+	$(CONTAINER_TOOL) buildx build --platform linux/amd64 -t ${IMG} -f Dockerfile .
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
@@ -208,10 +213,12 @@ $(LOCALBIN):
 KUBECTL ?= kubectl
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
+MOCKGEN ?= $(LOCALBIN)/mockgen
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.4.3
 CONTROLLER_TOOLS_VERSION ?= v0.16.2
+MOCKGEN_VERSION ?= v0.6.0
 
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 
@@ -242,6 +249,10 @@ $(KUSTOMIZE): $(LOCALBIN)
 PHONY: controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
 	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION))
+
+.PHONY: mockgen
+mockgen: ## Download mockgen locally if necessary.
+	$(call go-get-tool,$(MOCKGEN),go.uber.org/mock/mockgen@$(MOCKGEN_VERSION))
 
 
 .PHONY: operator-sdk
