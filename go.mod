@@ -7,6 +7,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.22.2
 	github.com/onsi/gomega v1.36.2
 	github.com/openshift/hive/apis v0.0.0-20240306163002-9c5806a63531
+	github.com/openshift/hypershift/api v0.0.0-20250805145018-545851f4a059
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.31.7
 	k8s.io/apiextensions-apiserver v0.31.3 // indirect
