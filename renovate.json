@@ -2,9 +2,11 @@
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
     "automergeStrategy": "rebase",
     "automergeType": "pr",
-    "prConcurrentLimit": 0,
+    "prConcurrentLimit": 5,
+    "prHourlyLimit": 2,
     "commitMessagePrefix": "NO-ISSUE: ",
     "labels": ["lgtm", "approved"],
+    "ignorePaths": ["vendor/**"],
     "gomod": {
         "enabled": true,
         "commitMessageTopic": "Go module {{depName}}"
@@ -16,8 +18,7 @@
             "matchUpdateTypes": ["patch"],
             "addLabels": ["dependencies", "go-mod"],
             "autoApprove": true,
-            "automerge": true,
-            "schedule": ["at any time"]
+            "automerge": true
         },
         {
             "description": "Auto-approve minor updates for Go dependencies",
@@ -25,8 +26,7 @@
             "matchUpdateTypes": ["minor"],
             "addLabels": ["dependencies", "go-mod"],
             "autoApprove": true,
-            "automerge": false,
-            "schedule": ["at any time"]
+            "automerge": false
         },
         {
             "description": "Manual review for major Go dependency updates",
@@ -34,8 +34,7 @@
             "matchUpdateTypes": ["major"],
             "addLabels": ["dependencies", "go-mod", "major-update"],
             "autoApprove": false,
-            "automerge": false,
-            "schedule": ["at any time"]
+            "automerge": false
         },
         {
             "description": "Group Kubernetes dependencies",
@@ -59,6 +58,58 @@
             ]
         },
         {
+            "description": "Group Google API dependencies",
+            "matchManagers": ["gomod"],
+            "groupName": "google apis",
+            "addLabels": ["dependencies", "google-apis"],
+            "autoApprove": true,
+            "automerge": false,
+            "matchPackageNames": ["/^google\\.golang\\.org\\/genproto//", "/^google\\.golang\\.org\\/grpc//"]
+        },
+        {
+            "description": "Group golang.org/x dependencies",
+            "matchManagers": ["gomod"],
+            "groupName": "golang.org/x",
+            "addLabels": ["dependencies", "golang-x"],
+            "autoApprove": true,
+            "automerge": false,
+            "matchPackageNames": ["/^golang\\.org\\/x//"]
+        },
+        {
+            "description": "Group testing dependencies",
+            "matchManagers": ["gomod"],
+            "groupName": "testing dependencies",
+            "addLabels": ["dependencies", "testing"],
+            "autoApprove": true,
+            "automerge": false,
+            "matchPackageNames": ["/^github\\.com\\/onsi//", "/^github\\.com\\/stretchr\\/testify//", "/^go\\.uber\\.org\\/mock//"]
+        },
+        {
+            "description": "Group telemetry and observability dependencies",
+            "matchManagers": ["gomod"],
+            "groupName": "observability dependencies",
+            "addLabels": ["dependencies", "observability"],
+            "autoApprove": true,
+            "automerge": false,
+            "matchPackageNames": ["/^go\\.opentelemetry\\.io//", "/^github\\.com\\/prometheus//", "/^go\\.uber\\.org\\/zap//"]
+        },
+        {
+            "description": "Group utility and helper dependencies",
+            "matchManagers": ["gomod"],
+            "groupName": "utility dependencies",
+            "addLabels": ["dependencies", "utilities"],
+            "autoApprove": true,
+            "automerge": true,
+            "matchUpdateTypes": ["patch", "minor"],
+            "matchPackageNames": ["/^github\\.com\\/go-logr//", "/^gopkg\\.in\\/yaml//", "/^github\\.com\\/wI2L\\/jsondiff//"]
+        },
+        {
+            "description": "Disable updates for pseudo-versions and replace directives",
+            "matchManagers": ["gomod"],
+            "matchPackageNames": ["/^github\\.com\\/openshift\\/assisted-service//", "/^github\\.com\\/openshift\\/hive\\/apis//"],
+            "enabled": false
+        },
+        {
             "description": "Auto-merge security updates",
             "matchManagers": ["gomod"],
             "matchDepTypes": ["require"],
@@ -75,5 +126,7 @@
     "osvVulnerabilityAlerts": true,
     "schedule": [
         "before 6am on Monday"
-    ]
+    ],
+    "separateMinorPatch": false,
+    "rangeStrategy": "bump"
 }
