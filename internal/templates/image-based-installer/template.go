@@ -108,8 +108,13 @@ spec:
 {{ .Spec.ExtraManifestsRefs | toYaml | indent 4 }}
 {{ end }}
   bareMetalHostRef:
+{{ if .SpecialVars.CurrentNode.HostRef }}
+    name: "{{ .SpecialVars.CurrentNode.HostRef.Name }}"
+    namespace: "{{ .SpecialVars.CurrentNode.HostRef.Namespace }}"
+{{ else }}
     name: "{{ .SpecialVars.CurrentNode.HostName }}"
     namespace: "{{ .Spec.ClusterName }}"
+{{ end }}
 {{ if .Spec.MachineNetwork }}
   machineNetwork: "{{ (index .Spec.MachineNetwork 0).CIDR }}"
 {{ end }}
@@ -150,7 +155,11 @@ spec:
 {{ .SpecialVars.CurrentNode.RootDeviceHints | toYaml | indent 4 }}
 {{ end }}
 {{ if .SpecialVars.CurrentNode.NodeNetwork }}
+{{ if .SpecialVars.CurrentNode.HostRef }}
+  preprovisioningNetworkDataName: {{ .SpecialVars.CurrentNode.HostRef.Name }}
+{{ else }}
   preprovisioningNetworkDataName: {{ .SpecialVars.CurrentNode.HostName }}
+{{ end }}
 {{ end }}`
 
 // nolint:gosec
