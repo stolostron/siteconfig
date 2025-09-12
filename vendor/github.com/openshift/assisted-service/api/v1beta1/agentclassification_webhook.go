@@ -17,6 +17,7 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -47,10 +48,10 @@ func (r *AgentClassification) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 //+kubebuilder:webhook:path=/validate-agent-install-openshift-io-v1beta1-agentclassification,mutating=false,failurePolicy=fail,sideEffects=None,groups=agent-install.openshift.io,resources=agentclassifications,verbs=create;update,versions=v1beta1,name=vagentclassification.kb.io,admissionReviewVersions=v1
 
-var _ webhook.Validator = &AgentClassification{}
+var _ webhook.CustomValidator = &AgentClassification{}
 
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type
-func (r *AgentClassification) ValidateCreate() (admission.Warnings, error) {
+// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type
+func (r *AgentClassification) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	agentclassificationlog.Info("validate create", "name", r.Name)
 	f := field.NewPath("spec")
 	errs := validation.ValidateLabels(map[string]string{ClassificationLabelPrefix + r.Spec.LabelKey: r.Spec.LabelValue}, f)
@@ -73,8 +74,8 @@ func (r *AgentClassification) ValidateCreate() (admission.Warnings, error) {
 	return nil, nil
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
-func (r *AgentClassification) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
+// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type
+func (r *AgentClassification) ValidateUpdate(ctx context.Context, old, newObj runtime.Object) (admission.Warnings, error) {
 	agentclassificationlog.Info("validate update", "name", r.Name)
 
 	oldAgentClassification, ok := old.(*AgentClassification)
@@ -92,7 +93,7 @@ func (r *AgentClassification) ValidateUpdate(old runtime.Object) (admission.Warn
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type
-func (r *AgentClassification) ValidateDelete() (admission.Warnings, error) {
+// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type
+func (r *AgentClassification) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	return nil, nil
 }

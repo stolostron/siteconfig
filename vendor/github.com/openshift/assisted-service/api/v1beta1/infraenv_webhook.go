@@ -17,6 +17,7 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,10 +39,10 @@ func (r *InfraEnv) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 //+kubebuilder:webhook:path=/validate-agent-install-openshift-io-v1beta1-infraenv,mutating=false,failurePolicy=fail,sideEffects=None,groups=agent-install.openshift.io,resources=infraenvs,verbs=create;update,versions=v1beta1,name=vinfraenv.kb.io,admissionReviewVersions=v1
 
-var _ webhook.Validator = &InfraEnv{}
+var _ webhook.CustomValidator = &InfraEnv{}
 
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type
-func (r *InfraEnv) ValidateCreate() (admission.Warnings, error) {
+// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type
+func (r *InfraEnv) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	infraenvlog.Info("validate create", "name", r.Name)
 	if r.Spec.ClusterRef != nil && r.Spec.OSImageVersion != "" {
 		err := fmt.Errorf("Failed validation: Either Spec.ClusterRef or Spec.OSImageVersion should be specified (not both).")
@@ -52,8 +53,8 @@ func (r *InfraEnv) ValidateCreate() (admission.Warnings, error) {
 	return nil, nil
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
-func (r *InfraEnv) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
+// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type
+func (r *InfraEnv) ValidateUpdate(ctx context.Context, old, newObj runtime.Object) (admission.Warnings, error) {
 	infraenvlog.Info("validate update", "name", r.Name)
 	oldInfraEnv, ok := old.(*InfraEnv)
 	if !ok {
@@ -67,7 +68,7 @@ func (r *InfraEnv) ValidateUpdate(old runtime.Object) (admission.Warnings, error
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type
-func (r *InfraEnv) ValidateDelete() (admission.Warnings, error) {
+// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type
+func (r *InfraEnv) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	return nil, nil
 }
