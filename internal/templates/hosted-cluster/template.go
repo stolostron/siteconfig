@@ -47,10 +47,6 @@ spec:
   etcd:
     managed:
       storage:
-        persistentVolume:
-          size: 8Gi
-          storageClassName: lvms-local
-        restoreSnapshotURL: null
         type: PersistentVolume
     managementType: Managed
   fips: false
