@@ -726,9 +726,13 @@ func validateClusterInstanceJSONFields(clusterInstance *ClusterInstance) error {
 // validateControlPlaneAgentCount ensures that the number of control-plane nodes is valid.
 func validateControlPlaneAgentCount(clusterInstance *ClusterInstance) error {
 	controlPlaneCount := 0
+	arbiterCount := 0
 	for _, node := range clusterInstance.Spec.Nodes {
-		if node.Role == "master" {
+		switch node.Role {
+		case "master":
 			controlPlaneCount++
+		case "arbiter":
+			arbiterCount++
 		}
 	}
 
@@ -743,6 +747,16 @@ func validateControlPlaneAgentCount(clusterInstance *ClusterInstance) error {
 
 	if controlPlaneCount > 0 && clusterInstance.Spec.ClusterType == ClusterTypeHostedControlPlane {
 		return fmt.Errorf("hosted control plane clusters must not have control-plane agents")
+	}
+
+	// Ensure that HighlyAvailableArbiter clusters have at least 1 arbiter node and 2 master nodes.
+	if clusterInstance.Spec.ClusterType == ClusterTypeHighlyAvailableArbiter && (arbiterCount < 1 || controlPlaneCount < 2) {
+		return fmt.Errorf("HighlyAvailableArbiter cluster-type must have at least 1 arbiter agent and 2 master agents")
+	}
+
+	// Ensure that non-arbiter cluster types do not have arbiter nodes.
+	if clusterInstance.Spec.ClusterType != ClusterTypeHighlyAvailableArbiter && arbiterCount > 0 {
+		return fmt.Errorf("arbiter agents can only be used with HighlyAvailableArbiter cluster-type")
 	}
 
 	return nil // Validation succeeded
