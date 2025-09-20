@@ -32,6 +32,7 @@ ENV SUMMARY="SiteConfig Operator is a template-driven cluster provisioning solut
 provision clusters with all available installation methods."
 
 LABEL name="siteconfig" \
+      url="https://github.com/stolostron/siteconfig" \
       summary="${SUMMARY}" \
       description="${DESCRIPTION}" \
       com.redhat.component="siteconfig-operator" \
@@ -51,3 +52,4 @@ ENV USER_UID=65532
 USER ${USER_UID}
 
 ENTRYPOINT ["/usr/local/bin/siteconfig-manager"]
+LABEL url="https://github.com/stolostron/siteconfig"
