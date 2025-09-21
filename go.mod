@@ -1,6 +1,8 @@
 module github.com/stolostron/siteconfig
 
-go 1.21
+go 1.23
+
+toolchain go1.24.6
 
 require (
 	github.com/go-logr/logr v1.4.1 // indirect
@@ -87,7 +89,7 @@ require (
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/protobuf v1.33.0 // indirect
+	google.golang.org/protobuf v1.36.9 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gorm.io/gorm v1.24.5 // indirect
