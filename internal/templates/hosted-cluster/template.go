@@ -179,8 +179,10 @@ spec:
 {{ else }}
       nmstate-label: "{{ .SpecialVars.CurrentNode.HostName }}"
 {{ end }}
+{{ if .Spec.AdditionalNTPSources }}
   additionalNTPSources:
-{{ .Spec.AdditionalNTPSources | toYaml | indent 4 }}`
+{{ .Spec.AdditionalNTPSources | toYaml | indent 4 }}
+{{ end }}`
 
 const NodePool = `apiVersion: hypershift.openshift.io/v1beta1
 kind: NodePool
