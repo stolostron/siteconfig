@@ -181,8 +181,10 @@ spec:
 {{ else }}
       nmstate-label: "{{ .SpecialVars.CurrentNode.HostName }}"
 {{ end }}
+{{ if .Spec.AdditionalNTPSources }}
   additionalNTPSources:
-{{ .Spec.AdditionalNTPSources | toYaml | indent 4 }}`
+{{ .Spec.AdditionalNTPSources | toYaml | indent 4 }}
+{{ end }}`
 
 const NMStateConfig = `{{ if .SpecialVars.CurrentNode.NodeNetwork }}
 apiVersion: agent-install.openshift.io/v1beta1
