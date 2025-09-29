@@ -237,6 +237,7 @@ type NodeSpec struct {
 	// TemplateRefs is a list of references to node-level templates. A node-level template consists of a ConfigMap
 	// in which the keys of the data field represent the kind of the installation manifest(s).
 	// Node-level templates are instantiated once for each node in the ClusterInstance CR.
+	// +kubebuilder:default={{name:"ai-node-templates-v1",namespace:"open-cluster-management"}}
 	// +required
 	TemplateRefs []TemplateRef `json:"templateRefs"`
 }
@@ -426,6 +427,7 @@ type ClusterInstanceSpec struct {
 	// TemplateRefs is a list of references to cluster-level templates. A cluster-level template consists of a ConfigMap
 	// in which the keys of the data field represent the kind of the installation manifest(s).
 	// Cluster-level templates are instantiated once per cluster (ClusterInstance CR).
+	// +kubebuilder:default={{name:"ai-cluster-templates-v1",namespace:"open-cluster-management"}}
 	// +required
 	TemplateRefs []TemplateRef `json:"templateRefs"`
 

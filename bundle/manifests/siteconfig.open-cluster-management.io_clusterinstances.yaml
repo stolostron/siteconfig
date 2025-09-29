@@ -494,6 +494,9 @@ spec:
                         type: string
                       type: array
                     templateRefs:
+                      default:
+                      - name: ai-node-templates-v1
+                        namespace: open-cluster-management
                       description: |-
                         TemplateRefs is a list of references to node-level templates. A node-level template consists of a ConfigMap
                         in which the keys of the data field represent the kind of the installation manifest(s).
@@ -644,6 +647,9 @@ spec:
                   type: string
                 type: array
               templateRefs:
+                default:
+                - name: ai-cluster-templates-v1
+                  namespace: open-cluster-management
                 description: |-
                   TemplateRefs is a list of references to cluster-level templates. A cluster-level template consists of a ConfigMap
                   in which the keys of the data field represent the kind of the installation manifest(s).
