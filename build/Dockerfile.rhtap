@@ -31,7 +31,8 @@ ENV SUMMARY="SiteConfig Operator is a template-driven cluster provisioning solut
     DESCRIPTION="SiteConfig operator as a template-driven cluster provisioning solution, which allows you to \
 provision clusters with all available installation methods."
 
-LABEL name="siteconfig" \
+LABEL name="rhacm2/acm-siteconfig-rhel9" \
+      cpe="cpe:/a:redhat:acm:2.15::el9" \
       summary="${SUMMARY}" \
       description="${DESCRIPTION}" \
       com.redhat.component="siteconfig-operator" \
