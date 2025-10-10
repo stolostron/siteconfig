@@ -10,11 +10,11 @@ require (
 	github.com/onsi/gomega v1.36.2
 	github.com/openshift/hive/apis v0.0.0-20240306163002-9c5806a63531
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.31.4
+	k8s.io/api v0.31.7
 	k8s.io/apiextensions-apiserver v0.31.3 // indirect
-	k8s.io/apimachinery v0.31.4
-	k8s.io/client-go v0.31.4
-	sigs.k8s.io/controller-runtime v0.19.3
+	k8s.io/apimachinery v0.31.7
+	k8s.io/client-go v0.31.7
+	sigs.k8s.io/controller-runtime v0.19.7
 )
 
 require (
@@ -24,7 +24,7 @@ require (
 
 require (
 	github.com/go-task/slim-sprig v2.20.0+incompatible
-	github.com/metal3-io/baremetal-operator/apis v0.9.0
+	github.com/metal3-io/baremetal-operator/apis v0.9.1
 	github.com/stretchr/testify v1.10.0
 	github.com/wI2L/jsondiff v0.6.1
 	go.uber.org/zap v1.27.0
@@ -43,6 +43,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.0 // indirect
+	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/analysis v0.21.2 // indirect
@@ -97,12 +98,12 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.mongodb.org/mongo-driver v1.10.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.32.0 // indirect
-	golang.org/x/net v0.34.0 // indirect
+	golang.org/x/crypto v0.35.0 // indirect
+	golang.org/x/net v0.36.0 // indirect
 	golang.org/x/oauth2 v0.27.0 // indirect
-	golang.org/x/sys v0.29.0 // indirect
-	golang.org/x/term v0.28.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/term v0.29.0 // indirect
+	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.28.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
