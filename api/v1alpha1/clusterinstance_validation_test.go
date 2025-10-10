@@ -908,3 +908,410 @@ var _ = Describe("validateReinstallGeneration", func() {
 		Expect(err).ToNot(HaveOccurred())
 	})
 })
+
+var _ = Describe("GetAllowedPaths", func() {
+	Context("SpecChangeBlocked", func() {
+		It("should return empty slice", func() {
+			paths := SpecChangeBlocked.GetAllowedPaths()
+			Expect(paths).To(Equal([]string{}))
+			Expect(paths).To(HaveLen(0))
+		})
+	})
+
+	Context("SpecChangeUnrestricted", func() {
+		It("should return nil to indicate all paths allowed", func() {
+			paths := SpecChangeUnrestricted.GetAllowedPaths()
+			Expect(paths).To(BeNil())
+		})
+	})
+
+	Context("SpecChangeBaseOnly", func() {
+		It("should return cluster-level and node-level allowed paths", func() {
+			paths := SpecChangeBaseOnly.GetAllowedPaths()
+
+			Expect(paths).NotTo(BeNil())
+			Expect(paths).NotTo(BeEmpty())
+
+			// Should contain all cluster-level paths
+			Expect(paths).To(ContainElement("/extraAnnotations"))
+			Expect(paths).To(ContainElement("/extraLabels"))
+			Expect(paths).To(ContainElement("/suppressedManifests"))
+			Expect(paths).To(ContainElement("/pruneManifests"))
+			Expect(paths).To(ContainElement("/clusterImageSetNameRef"))
+			Expect(paths).To(ContainElement("/holdInstallation"))
+
+			// Should contain all node-level paths
+			Expect(paths).To(ContainElement("/nodes/*/extraAnnotations"))
+			Expect(paths).To(ContainElement("/nodes/*/extraLabels"))
+			Expect(paths).To(ContainElement("/nodes/*/suppressedManifests"))
+			Expect(paths).To(ContainElement("/nodes/*/pruneManifests"))
+
+			// Should NOT contain reinstall-specific paths
+			Expect(paths).NotTo(ContainElement("/reinstall"))
+			Expect(paths).NotTo(ContainElement("/nodes/*/bmcAddress"))
+			Expect(paths).NotTo(ContainElement("/nodes/*/bootMACAddress"))
+			Expect(paths).NotTo(ContainElement("/nodes/*/rootDeviceHints"))
+		})
+	})
+
+	Context("SpecChangeReinstall", func() {
+		It("should return base paths plus reinstall-specific paths", func() {
+			paths := SpecChangeReinstall.GetAllowedPaths()
+
+			Expect(paths).NotTo(BeNil())
+			Expect(paths).NotTo(BeEmpty())
+
+			// Should contain all cluster-level paths
+			Expect(paths).To(ContainElement("/extraAnnotations"))
+			Expect(paths).To(ContainElement("/extraLabels"))
+			Expect(paths).To(ContainElement("/suppressedManifests"))
+			Expect(paths).To(ContainElement("/pruneManifests"))
+			Expect(paths).To(ContainElement("/clusterImageSetNameRef"))
+			Expect(paths).To(ContainElement("/holdInstallation"))
+
+			// Should contain all node-level paths
+			Expect(paths).To(ContainElement("/nodes/*/extraAnnotations"))
+			Expect(paths).To(ContainElement("/nodes/*/extraLabels"))
+			Expect(paths).To(ContainElement("/nodes/*/suppressedManifests"))
+			Expect(paths).To(ContainElement("/nodes/*/pruneManifests"))
+
+			// Should contain reinstall cluster path
+			Expect(paths).To(ContainElement("/reinstall"))
+
+			// Should contain reinstall node paths
+			Expect(paths).To(ContainElement("/nodes/*/bmcAddress"))
+			Expect(paths).To(ContainElement("/nodes/*/bootMACAddress"))
+			Expect(paths).To(ContainElement("/nodes/*/nodeNetwork/interfaces/*/macAddress"))
+			Expect(paths).To(ContainElement("/nodes/*/rootDeviceHints"))
+		})
+
+		It("should be a superset of SpecChangeBaseOnly paths", func() {
+			basePaths := SpecChangeBaseOnly.GetAllowedPaths()
+			reinstallPaths := SpecChangeReinstall.GetAllowedPaths()
+
+			// Every base path should be in reinstall paths
+			for _, basePath := range basePaths {
+				Expect(reinstallPaths).To(ContainElement(basePath))
+			}
+		})
+	})
+
+	Context("Invalid/Unknown Permission Level", func() {
+		It("should return empty slice for invalid permission value", func() {
+			invalidPermission := SpecChangePermission(999)
+			paths := invalidPermission.GetAllowedPaths()
+
+			Expect(paths).To(Equal([]string{}))
+			Expect(paths).To(HaveLen(0))
+		})
+	})
+
+	Context("Path Content Verification", func() {
+		It("should not contain duplicate paths in SpecChangeBaseOnly", func() {
+			paths := SpecChangeBaseOnly.GetAllowedPaths()
+
+			seen := make(map[string]bool)
+			for _, path := range paths {
+				Expect(seen[path]).To(BeFalse(), "Path %s appears multiple times", path)
+				seen[path] = true
+			}
+		})
+
+		It("should not contain duplicate paths in SpecChangeReinstall", func() {
+			paths := SpecChangeReinstall.GetAllowedPaths()
+
+			seen := make(map[string]bool)
+			for _, path := range paths {
+				Expect(seen[path]).To(BeFalse(), "Path %s appears multiple times", path)
+				seen[path] = true
+			}
+		})
+
+		It("should have all paths start with forward slash", func() {
+			permissions := []SpecChangePermission{
+				SpecChangeBaseOnly,
+				SpecChangeReinstall,
+			}
+
+			for _, permission := range permissions {
+				paths := permission.GetAllowedPaths()
+				for _, path := range paths {
+					Expect(path).To(HavePrefix("/"), "Path %s should start with /", path)
+				}
+			}
+		})
+	})
+})
+
+var _ = Describe("determineSpecChangePermission", func() {
+	var (
+		oldClusterInstance *ClusterInstance
+		newClusterInstance *ClusterInstance
+	)
+
+	BeforeEach(func() {
+		oldClusterInstance = &ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-cluster",
+				Namespace: "test-namespace",
+			},
+			Spec: ClusterInstanceSpec{
+				ClusterName:      "test-cluster",
+				HoldInstallation: false,
+			},
+		}
+		newClusterInstance = oldClusterInstance.DeepCopy()
+	})
+
+	Context("When HoldInstallation is enabled (true)", func() {
+
+		BeforeEach(func() {
+			oldClusterInstance.Spec.HoldInstallation = true
+		})
+
+		Context("and provisioning has NOT completed", func() {
+
+			It("should return SpecChangeUnrestricted when no provisioning status exists", func() {
+				oldClusterInstance.Status.Conditions = nil
+
+				newClusterInstance = oldClusterInstance.DeepCopy()
+
+				result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+				Expect(result).To(Equal(SpecChangeUnrestricted), "Should return SpecChangeUnrestricted when OLD HoldInstallation=true and no provisioning status")
+			})
+
+			It("should return SpecChangeUnrestricted when provisioning status is Unknown", func() {
+				oldClusterInstance.Status.Conditions = []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionUnknown,
+						Reason: string(Unknown),
+					},
+				}
+
+				newClusterInstance = oldClusterInstance.DeepCopy()
+
+				result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+				Expect(result).To(Equal(SpecChangeUnrestricted), "Should return SpecChangeUnrestricted when OLD HoldInstallation=true and status is Unknown")
+			})
+
+			It("should return SpecChangeUnrestricted when provisioning is InProgress", func() {
+				oldClusterInstance.Status.Conditions = []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionFalse,
+						Reason: string(InProgress),
+					},
+				}
+
+				newClusterInstance = oldClusterInstance.DeepCopy()
+
+				result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+				Expect(result).To(Equal(SpecChangeUnrestricted), "Should return SpecChangeUnrestricted when OLD HoldInstallation=true and provisioning InProgress")
+			})
+
+			It("should return SpecChangeUnrestricted when provisioning has Failed", func() {
+				oldClusterInstance.Status.Conditions = []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionFalse,
+						Reason: string(Failed),
+					},
+				}
+
+				newClusterInstance = oldClusterInstance.DeepCopy()
+
+				result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+				Expect(result).To(Equal(SpecChangeUnrestricted), "Should return SpecChangeUnrestricted when OLD HoldInstallation=true and provisioning Failed")
+			})
+		})
+
+		Context("and provisioning HAS completed", func() {
+
+			It("should return SpecChangeBaseOnly when provisioning is Completed", func() {
+				newClusterInstance.Spec.HoldInstallation = true
+				newClusterInstance.Status.Conditions = []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionTrue,
+						Reason: string(Completed),
+					},
+				}
+
+				result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+				Expect(result).To(Equal(SpecChangeBaseOnly), "Should return SpecChangeBaseOnly when provisioning completed (HoldInstallation has no effect)")
+			})
+		})
+	})
+
+	Context("When HoldInstallation is disabled (false)", func() {
+
+		BeforeEach(func() {
+			oldClusterInstance.Spec.HoldInstallation = false
+		})
+
+		Context("and provisioning is in progress", func() {
+
+			It("should follow standard logic and NOT allow changes during InProgress", func() {
+				oldClusterInstance.Status.Conditions = []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionFalse,
+						Reason: string(InProgress),
+					},
+				}
+
+				newClusterInstance = oldClusterInstance.DeepCopy()
+				newClusterInstance.Spec.HoldInstallation = false
+
+				result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+				Expect(result).To(Equal(SpecChangeBlocked), "Should return SpecChangeBlocked when provisioning is in progress")
+			})
+
+			It("should return SpecChangeBaseOnly when provisioning is not in progress", func() {
+				oldClusterInstance.Status.Conditions = []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionTrue,
+						Reason: string(Completed),
+					},
+				}
+
+				newClusterInstance = oldClusterInstance.DeepCopy()
+				newClusterInstance.Spec.HoldInstallation = false
+
+				result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+				Expect(result).To(Equal(SpecChangeBaseOnly), "Should return SpecChangeBaseOnly when provisioning is completed and no special operations")
+			})
+		})
+
+		Context("and reinstall is in progress", func() {
+
+			It("should follow standard logic and NOT allow changes during reinstall", func() {
+				oldClusterInstance.Spec.Reinstall = &ReinstallSpec{
+					Generation: "test-1",
+				}
+				oldClusterInstance.Status.Reinstall = &ReinstallStatus{
+					InProgressGeneration: "test-1",
+					ObservedGeneration:   "test-0",
+					RequestEndTime:       metav1.Time{},
+				}
+
+				newClusterInstance = oldClusterInstance.DeepCopy()
+
+				result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+				Expect(result).To(Equal(SpecChangeBlocked), "Should return SpecChangeBlocked when reinstall is in progress")
+			})
+		})
+	})
+
+	Context("HoldInstallation toggle validation", func() {
+
+		// HoldInstallation can ONLY be set to true during CREATE
+		// During ValidateUpdate, it can ONLY change from true -> false, NEVER false -> true
+		// Even if provisioning hasn't started, false → true is not allowed in updates
+
+		It("should NOT allow toggling HoldInstallation from false to true in ANY update", func() {
+			oldClusterInstance.Spec.HoldInstallation = false
+			oldClusterInstance.Status.Conditions = []metav1.Condition{
+				{
+					Type:   string(ClusterProvisioned),
+					Status: metav1.ConditionFalse,
+					Reason: string(InProgress),
+				},
+			}
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.HoldInstallation = true
+
+			result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+			Expect(result).To(Equal(SpecChangeBlocked))
+		})
+
+		It("should NOT allow toggling HoldInstallation from false to true even with no provisioning status", func() {
+			oldClusterInstance.Spec.HoldInstallation = false
+			oldClusterInstance.Status.Conditions = nil
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.HoldInstallation = true
+
+			result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+			Expect(result).To(Equal(SpecChangeBlocked))
+		})
+
+		It("should NOT allow toggling HoldInstallation from false to true when provisioning completed", func() {
+			oldClusterInstance.Spec.HoldInstallation = false
+			oldClusterInstance.Status.Conditions = []metav1.Condition{
+				{
+					Type:   string(ClusterProvisioned),
+					Status: metav1.ConditionTrue,
+					Reason: string(Completed),
+				},
+			}
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.HoldInstallation = true
+
+			result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+			Expect(result).To(Equal(SpecChangeBaseOnly))
+		})
+
+		It("should allow disabling HoldInstallation from true to false", func() {
+			oldClusterInstance.Spec.HoldInstallation = true
+			oldClusterInstance.Status.Conditions = []metav1.Condition{
+				{
+					Type:   string(ClusterProvisioned),
+					Status: metav1.ConditionFalse,
+					Reason: string(InProgress),
+				},
+			}
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.HoldInstallation = false
+
+			result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+			Expect(result).To(Equal(SpecChangeUnrestricted))
+		})
+
+		It("should handle the case where HoldInstallation remains true throughout", func() {
+			oldClusterInstance.Spec.HoldInstallation = true
+			oldClusterInstance.Status.Conditions = []metav1.Condition{
+				{
+					Type:   string(ClusterProvisioned),
+					Status: metav1.ConditionFalse,
+					Reason: string(InProgress),
+				},
+			}
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.HoldInstallation = true
+
+			result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+			Expect(result).To(Equal(SpecChangeUnrestricted))
+		})
+	})
+
+	Context("Edge cases", func() {
+
+		It("should handle nil status conditions gracefully when HoldInstallation is false", func() {
+			oldClusterInstance.Spec.HoldInstallation = false
+			oldClusterInstance.Status.Conditions = nil
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+
+			result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+			Expect(result).To(Equal(SpecChangeBlocked))
+		})
+
+		It("should handle nil status conditions when attempting to enable HoldInstallation", func() {
+			oldClusterInstance.Spec.HoldInstallation = false
+			oldClusterInstance.Status.Conditions = nil
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.HoldInstallation = true
+
+			result := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+			Expect(result).To(Equal(SpecChangeBlocked))
+		})
+	})
+})
