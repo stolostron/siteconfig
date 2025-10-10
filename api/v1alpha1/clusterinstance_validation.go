@@ -50,6 +50,71 @@ const (
 	OperationTypeInvalid      OperationType = "invalid"      // Invalid operation with unauthorized changes
 )
 
+// SpecChangePermission defines what types of spec changes are allowed during updates
+type SpecChangePermission int
+
+// SpecChangePermission constants define the different levels of change permissions
+const (
+	// SpecChangeBlocked - No spec changes allowed (HoldInstallation disabled and provisioning / reinstall in progress)
+	SpecChangeBlocked SpecChangePermission = iota
+
+	// SpecChangeUnrestricted - All spec changes allowed (HoldInstallation enabled and provisioning not completed)
+	SpecChangeUnrestricted
+
+	// SpecChangeBaseOnly - Only base field changes allowed (post-provisioning, no special operations)
+	SpecChangeBaseOnly
+
+	// SpecChangeReinstall - Base + reinstall field changes allowed (reinstall requested)
+	SpecChangeReinstall
+)
+
+// String provides a human-readable description of the permission level
+func (p SpecChangePermission) String() string {
+	switch p {
+	case SpecChangeBlocked:
+		return "no changes allowed"
+	case SpecChangeUnrestricted:
+		return "all changes allowed"
+	case SpecChangeBaseOnly:
+		return "only base field changes allowed"
+	case SpecChangeReinstall:
+		return "base and reinstall field changes allowed"
+	default:
+		return "unknown permission"
+	}
+}
+
+// IsBlocked returns true if no spec changes are allowed
+func (p SpecChangePermission) IsBlocked() bool {
+	return p == SpecChangeBlocked
+}
+
+// AllowsAllChanges returns true if all spec changes are permitted
+func (p SpecChangePermission) AllowsAllChanges() bool {
+	return p == SpecChangeUnrestricted
+}
+
+// GetAllowedPaths returns the list of allowed JSON paths for this permission level.
+// Returns nil for SpecChangeUnrestricted (all paths allowed) or SpecChangeBlocked (no paths allowed).
+func (p SpecChangePermission) GetAllowedPaths() []string {
+	switch p {
+	case SpecChangeBlocked:
+		return []string{} // No changes allowed
+	case SpecChangeUnrestricted:
+		return nil // Special case: all changes allowed (validated elsewhere)
+	case SpecChangeBaseOnly:
+		paths := append([]string{}, ClusterLevelAllowedPaths...)
+		return append(paths, NodeLevelAllowedPaths...)
+	case SpecChangeReinstall:
+		paths := append([]string{}, ClusterLevelAllowedPaths...)
+		paths = append(paths, NodeLevelAllowedPaths...)
+		paths = append(paths, ReinstallClusterPaths...)
+		return append(paths, getReinstallNodePaths()...)
+	default:
+		return []string{}
+	}
+}
+
 // Permission constants for field changes
 var (
 	// Base permissible fields (always allowed)
@@ -75,6 +140,7 @@ var (
 		"/suppressedManifests",
 		"/pruneManifests",
 		"/clusterImageSetNameRef",
+		"/holdInstallation", // Allow toggling HoldInstallation (only true→false is valid, enforced in webhook)
 	}
 
 	// Node-level path patterns (always allowed)
@@ -684,6 +750,36 @@ func isReinstallInProgress(clusterInstance *ClusterInstance) bool {
 	// A reinstall is in progress if the InProgressGeneration matches the current spec's Generation
 	// and the request has not been marked as completed (RequestEndTime is still zero).
 	return reinstallStatus.InProgressGeneration == reinstallSpec.Generation && reinstallStatus.RequestEndTime.IsZero()
+}
+
+// determineSpecChangePermission analyzes the ClusterInstance state and returns what type of spec changes are allowed.
+func determineSpecChangePermission(oldClusterInstance, newClusterInstance *ClusterInstance) SpecChangePermission {
+	// If HoldInstallation WAS enabled and provisioning has NOT completed,
+	// then all changes (including disabling HoldInstallation) should be allowed.
+	if oldClusterInstance.Spec.HoldInstallation && !isProvisioningCompleted(newClusterInstance) {
+		return SpecChangeUnrestricted
+	}
+	// Note: If HoldInstallation was enabled but provisioning completed, HoldInstallation no longer has effect.
+	// Fall through to normal post-provisioning logic below.
+
+	// If provisioning or reinstall is actively in progress, then block all spec changes.
+	// This prevents configuration drift during active operations
+	if isProvisioningInProgress(newClusterInstance) || isReinstallInProgress(newClusterInstance) {
+		return SpecChangeBlocked
+	}
+
+	// If provisioning has completed, determine what changes are allowed based on context
+	if isProvisioningCompleted(newClusterInstance) {
+		// If reinstall is requested, allow base + reinstall field changes
+		if isReinstallRequested(newClusterInstance) {
+			return SpecChangeReinstall
+		}
+		// Normal post-provisioning state: allow only base field changes
+		return SpecChangeBaseOnly
+	}
+
+	// Default: if we cannot determine the state clearly, block changes for safety
+	return SpecChangeBlocked
 }
 
 // isValidJSON checks whether a given string is a valid JSON-formatted string.

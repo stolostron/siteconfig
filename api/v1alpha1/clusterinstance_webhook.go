@@ -32,6 +32,9 @@ import (
 // logger for this package
 var clusterInstanceLogger = logf.Log.WithName("clusterinstance-webhook")
 
+// Validation error message
+const validationFailedMsg = "validation failed"
+
 // clusterInstanceValidator handles validation for ClusterInstance resources.
 type clusterInstanceValidator struct{}
 
@@ -78,8 +81,8 @@ func (v *clusterInstanceValidator) ValidateCreate(ctx context.Context, obj runti
 	}
 
 	if err := ValidateClusterInstance(clusterInstance); err != nil {
-		log.Error(err, "Validation failed")
-		return nil, fmt.Errorf("validation failed: %w", err)
+		log.Error(err, validationFailedMsg)
+		return nil, fmt.Errorf("%s: %w", validationFailedMsg, err)
 	}
 
 	log.Info("Validations passed for create request")
@@ -111,20 +114,45 @@ func (v *clusterInstanceValidator) ValidateUpdate(ctx context.Context, oldObj, n
 		return nil, nil
 	}
 
-	// Prevent spec changes during provisioning or reinstall processes.
-	if isProvisioningInProgress(newClusterInstance) || isReinstallInProgress(newClusterInstance) {
+	// HoldInstallation can ONLY be set to true during CREATE, not UPDATE
+	// Block any attempt to change HoldInstallation from false to true
+	if !oldClusterInstance.Spec.HoldInstallation && newClusterInstance.Spec.HoldInstallation {
+		log.Error(nil, "HoldInstallation can only be set to true during creation")
+		return nil, errors.New("holdInstallation can only be set to true during creation, not during updates")
+	}
+
+	// Determine what type of spec changes are allowed based on current state
+	permission := determineSpecChangePermission(oldClusterInstance, newClusterInstance)
+	log.Info(fmt.Sprintf("Spec change permission level: %s", permission.String()))
+
+	// If changes are blocked, reject any spec modifications
+	if permission.IsBlocked() {
 		if hasSpecChanged(oldClusterInstance, newClusterInstance) {
-			log.Error(nil, "Spec update not allowed during provisioning or cluster reinstalls")
+			log.Error(nil, "Spec changes not allowed during provisioning or reinstall")
 			return nil, errors.New("spec update not allowed during provisioning or cluster reinstalls")
 		}
-		log.Info("Provisioning or Cluster Reinstall is in progress")
+		log.Info("Provisioning or Cluster Reinstall is in progress - no spec changes allowed")
 		return nil, nil
 	}
 
-	// Validate permissible changes after provisioning is completed.
+	// If all changes are allowed (HoldInstallation enabled), skip field-level validation
+	if permission.AllowsAllChanges() {
+		log.Info("HoldInstallation enabled - allowing all spec changes")
+		// Still need to run general ClusterInstance validation
+		if err := ValidateClusterInstance(newClusterInstance); err != nil {
+			log.Error(err, validationFailedMsg)
+			return nil, fmt.Errorf("%s: %w", validationFailedMsg, err)
+		}
+		log.Info("Validations passed for update request")
+		return nil, nil
+	}
+
+	// Partial changes allowed - validate specific fields based on permission level
 	if isProvisioningCompleted(newClusterInstance) {
-		reinstallRequested := isReinstallRequested(newClusterInstance)
+		reinstallRequested := (permission == SpecChangeReinstall)
+
 		if reinstallRequested {
+			// Additional validation for reinstall requests
 			if isReinstallInProgress(newClusterInstance) &&
 				newClusterInstance.Spec.Reinstall.Generation != oldClusterInstance.Spec.Reinstall.Generation {
 				log.Error(nil, "Reinstall Generation update not allowed during reinstall")
@@ -137,23 +165,21 @@ func (v *clusterInstanceValidator) ValidateUpdate(ctx context.Context, oldObj, n
 			}
 		}
 
-		// Validate allowed day-N changes.
+		// Validate allowed day-N changes based on permission level
 		err := validatePostProvisioningChanges(log, oldClusterInstance, newClusterInstance, reinstallRequested)
 		if err != nil {
 			log.Error(err, "Invalid spec changes detected")
 			return nil, fmt.Errorf("invalid spec changes detected: %w", err)
 		}
-
 	}
 
-	// Perform general validation on the updated ClusterInstance.
+	// Perform general validation on the updated ClusterInstance
 	if err := ValidateClusterInstance(newClusterInstance); err != nil {
-		log.Error(err, "Validation failed")
-		return nil, fmt.Errorf("validation failed: %w", err)
+		log.Error(err, validationFailedMsg)
+		return nil, fmt.Errorf("%s: %w", validationFailedMsg, err)
 	}
 
 	log.Info("Validations passed for update request")
-
 	return nil, nil
 }
 
