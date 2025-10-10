@@ -25,7 +25,7 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} GO111MODULE=on \
 
 #####################################################################################################
 # Build the controller image
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5-1739420147
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6-1758184547
 
 ENV SUMMARY="SiteConfig Operator is a template-driven cluster provisioning solution" \
     DESCRIPTION="SiteConfig operator as a template-driven cluster provisioning solution, which allows you to \
