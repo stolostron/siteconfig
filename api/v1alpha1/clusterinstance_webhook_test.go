@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
+	"github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -79,6 +80,20 @@ var _ = Describe("ValidateCreate", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(warnings).To(BeNil())
 	})
+
+	It("should succeed when HoldInstallation is set to true during CREATE", func() {
+		clusterInstance.Spec.HoldInstallation = true
+		warnings, err := v.ValidateCreate(context.Background(), clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(warnings).To(BeNil())
+	})
+
+	It("should succeed when HoldInstallation is set to false during CREATE", func() {
+		clusterInstance.Spec.HoldInstallation = false
+		warnings, err := v.ValidateCreate(context.Background(), clusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(warnings).To(BeNil())
+	})
 })
 
 var _ = Describe("ValidateUpdate", func() {
@@ -131,30 +146,83 @@ var _ = Describe("ValidateUpdate", func() {
 
 	})
 
-	It("should return en error for spec changes while provisioning is in-progress", func() {
-		oldClusterInstance.Status = ClusterInstanceStatus{
-			Conditions: []metav1.Condition{
-				{
-					Type:   string(ClusterProvisioned),
-					Status: metav1.ConditionFalse,
-					Reason: string(InProgress),
+	Context("Normal Provisioning Flow (HoldInstallation disabled)", func() {
+		BeforeEach(func() {
+			oldClusterInstance.Spec.HoldInstallation = false
+			oldObj = oldClusterInstance
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newObj = newClusterInstance
+		})
+
+		It("should block spec changes while provisioning is in-progress", func() {
+			oldClusterInstance.Status = ClusterInstanceStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionFalse,
+						Reason: string(InProgress),
+					},
 				},
-			},
-		}
-		oldObj = oldClusterInstance
+			}
+			oldObj = oldClusterInstance
 
-		newClusterInstance = oldClusterInstance.DeepCopy()
-		newObj = newClusterInstance
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{
+				"BareMetalHost": {
+					"foo": "bar",
+				},
+			}
+			newObj = newClusterInstance
 
-		newClusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{
-			"BareMetalHost": {
-				"foo": "bar",
-			},
-		}
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec update not allowed during provisioning"))
+		})
 
-		_, err := v.ValidateUpdate(ctx, oldObj, newObj)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("spec update not allowed during provisioning"))
+		It("should succeed when no spec changes are made while provisioning is in-progress", func() {
+			oldClusterInstance.Status = ClusterInstanceStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionFalse,
+						Reason: string(InProgress),
+					},
+				},
+			}
+			oldObj = oldClusterInstance
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newObj = newClusterInstance
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should block multiple spec changes while provisioning is in-progress", func() {
+			oldClusterInstance.Status = ClusterInstanceStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionFalse,
+						Reason: string(InProgress),
+					},
+				},
+			}
+			oldObj = oldClusterInstance
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.ClusterName = "new-name"
+			newClusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{
+				"BareMetalHost": {"key": "value"},
+			}
+			newClusterInstance.Spec.Nodes[0].HostName = "new-hostname"
+			newObj = newClusterInstance
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec update not allowed during provisioning"))
+		})
 	})
 
 	Context("Provisioning Completed", func() {
@@ -287,6 +355,277 @@ var _ = Describe("ValidateUpdate", func() {
 			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-is-allowed"
 			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
 			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("HoldInstallation Toggle Validation", func() {
+		BeforeEach(func() {
+			oldClusterInstance.Status = ClusterInstanceStatus{}
+			oldObj = oldClusterInstance
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newObj = newClusterInstance
+		})
+
+		It("should block HoldInstallation change from false to true", func() {
+			oldClusterInstance.Spec.HoldInstallation = false
+			newClusterInstance.Spec.HoldInstallation = true
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("holdInstallation can only be set to true during creation"))
+		})
+
+		It("should allow HoldInstallation change from true to false", func() {
+			oldClusterInstance.Spec.HoldInstallation = true
+			newClusterInstance.Spec.HoldInstallation = false
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should allow HoldInstallation to remain true", func() {
+			oldClusterInstance.Spec.HoldInstallation = true
+			newClusterInstance.Spec.HoldInstallation = true
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should allow HoldInstallation to remain false", func() {
+			oldClusterInstance.Spec.HoldInstallation = false
+			newClusterInstance.Spec.HoldInstallation = false
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should block HoldInstallation false to true even during provisioning", func() {
+			oldClusterInstance.Spec.HoldInstallation = false
+			oldClusterInstance.Status = ClusterInstanceStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionFalse,
+						Reason: string(InProgress),
+					},
+				},
+			}
+
+			newClusterInstance.Spec.HoldInstallation = true
+			newClusterInstance.Status = oldClusterInstance.Status
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("holdInstallation can only be set to true during creation"))
+		})
+
+		It("should block HoldInstallation false to true even after provisioning completed", func() {
+			oldClusterInstance.Spec.HoldInstallation = false
+			oldClusterInstance.Status = ClusterInstanceStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionTrue,
+						Reason: string(Completed),
+					},
+				},
+			}
+
+			newClusterInstance.Spec.HoldInstallation = true
+			newClusterInstance.Status = oldClusterInstance.Status
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("holdInstallation can only be set to true during creation"))
+		})
+	})
+
+	Context("HoldInstallation Permission - SpecChangeUnrestricted", func() {
+		BeforeEach(func() {
+			oldClusterInstance.Spec.HoldInstallation = true
+			oldClusterInstance.Status = ClusterInstanceStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionFalse,
+						Reason: string(InProgress),
+					},
+				},
+			}
+			oldObj = oldClusterInstance
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newObj = newClusterInstance
+		})
+
+		It("should allow all spec changes when HoldInstallation was true and provisioning not completed", func() {
+			// Make multiple changes that would normally be blocked
+			newClusterInstance.Spec.ClusterName = "new-cluster-name"
+			newClusterInstance.Spec.BaseDomain = "new-domain.com"
+			newClusterInstance.Spec.Nodes[0].HostName = "new-hostname"
+			newClusterInstance.Spec.Nodes[0].BmcAddress = "new-bmc-address"
+			newClusterInstance.Spec.Nodes[0].RootDeviceHints = &v1alpha1.RootDeviceHints{
+				SerialNumber: "new-serial-number",
+			}
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should allow disabling HoldInstallation along with other changes", func() {
+			newClusterInstance.Spec.HoldInstallation = false
+			newClusterInstance.Spec.ClusterName = "new-cluster-name"
+			newClusterInstance.Spec.BaseDomain = "new-domain.com"
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should allow changes when HoldInstallation is true and provisioning is Failed", func() {
+			newClusterInstance.Status.Conditions = []metav1.Condition{
+				{
+					Type:   string(ClusterProvisioned),
+					Status: metav1.ConditionFalse,
+					Reason: string(Failed),
+				},
+			}
+			newClusterInstance.Spec.Nodes[0].BmcAddress = "fixed-bmc-address"
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should allow changes when HoldInstallation is true and provisioning has Unknown status", func() {
+			newClusterInstance.Status.Conditions = []metav1.Condition{
+				{
+					Type:   string(ClusterProvisioned),
+					Status: metav1.ConditionUnknown,
+					Reason: string(Unknown),
+				},
+			}
+			newClusterInstance.Spec.ClusterName = "modified-cluster-name"
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should still validate ClusterInstance schema even with unrestricted permission", func() {
+			// Remove required field to trigger validation error
+			newClusterInstance.Spec.TemplateRefs = nil
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("validation failed"))
+		})
+	})
+
+	Context("HoldInstallation Permission - Provisioning Completed", func() {
+		BeforeEach(func() {
+			oldClusterInstance.Spec.HoldInstallation = true
+			oldClusterInstance.Status = ClusterInstanceStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionTrue,
+						Reason: string(Completed),
+					},
+				},
+			}
+			oldObj = oldClusterInstance
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newObj = newClusterInstance
+		})
+
+		It("should fall back to SpecChangeBaseOnly when HoldInstallation was true but provisioning completed", func() {
+			// Only base field changes should be allowed
+			newClusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{
+				"BareMetalHost": {"foo": "bar"},
+			}
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should block non-base field changes when provisioning completed even if HoldInstallation was true", func() {
+			// Try to change a field that requires reinstall
+			newClusterInstance.Spec.Nodes[0].BmcAddress = "should-not-change"
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("invalid spec changes detected"))
+		})
+
+		It("should allow base field changes after disabling HoldInstallation post-provisioning", func() {
+			newClusterInstance.Spec.HoldInstallation = false
+			newClusterInstance.Spec.ExtraLabels = map[string]map[string]string{
+				"ManagedCluster": {"new-label": "value"},
+			}
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("HoldInstallation with Reinstall Operations", func() {
+		BeforeEach(func() {
+			// Provisioning completed
+			oldClusterInstance.Status = ClusterInstanceStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   string(ClusterProvisioned),
+						Status: metav1.ConditionTrue,
+						Reason: string(Completed),
+					},
+				},
+			}
+			oldObj = oldClusterInstance
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newObj = newClusterInstance
+		})
+
+		It("should allow reinstall field changes without HoldInstallation", func() {
+			newClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "test-1",
+			}
+			newClusterInstance.Spec.Nodes[0].BmcAddress = "new-bmc-for-reinstall"
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should allow reinstall field changes with HoldInstallation previously enabled", func() {
+			oldClusterInstance.Spec.HoldInstallation = true
+			newClusterInstance.Spec.HoldInstallation = true
+			newClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "test-1",
+			}
+			newClusterInstance.Spec.Nodes[0].BootMACAddress = "new-mac-for-reinstall"
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should block changes during reinstall InProgress regardless of HoldInstallation", func() {
+			oldClusterInstance.Spec.HoldInstallation = true
+			oldClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "test-1",
+			}
+			oldClusterInstance.Status.Reinstall = &ReinstallStatus{
+				InProgressGeneration: "test-1",
+				ObservedGeneration:   "",
+			}
+			oldObj = oldClusterInstance
+
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.Nodes[0].BootMACAddress = "should-be-blocked"
+			newObj = newClusterInstance
+
+			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec update not allowed during provisioning or cluster reinstalls"))
 		})
 	})
 })
