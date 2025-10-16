@@ -17,10 +17,13 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -32,6 +35,76 @@ import (
 
 const maxK8sNameLength = 253
 const maxGenerationLength = maxK8sNameLength - 100
+
+// OperationType represents the type of node operation
+type OperationType string
+
+// Operation type constants for node changes
+const (
+	OperationTypeNoChange     OperationType = "no-change"    // No changes detected in the node array
+	OperationTypeScaleOut     OperationType = "scale-out"    // Adding nodes only (pure scale-out)
+	OperationTypeScaleIn      OperationType = "scale-in"     // Removing nodes only (pure scale-in)
+	OperationTypeMixed        OperationType = "mixed"        // Adding and removing nodes simultaneously
+	OperationTypeReplacement  OperationType = "replacement"  // Replacing all nodes with new ones (same count)
+	OperationTypeModification OperationType = "modification" // Modifying existing nodes without count change
+	OperationTypeInvalid      OperationType = "invalid"      // Invalid operation with unauthorized changes
+)
+
+// Permission constants for field changes
+var (
+	// Base permissible fields (always allowed)
+	BasePermissibleFields = []string{
+		"extraAnnotations",
+		"extraLabels",
+		"suppressedManifests",
+		"pruneManifests",
+	}
+
+	// Reinstall permissions - single source of truth
+	ReinstallPermissions = map[string]string{
+		"bmcAddress":             "/nodes/*/bmcAddress",
+		"bootMACAddress":         "/nodes/*/bootMACAddress",
+		"nodeNetwork/interfaces": "/nodes/*/nodeNetwork/interfaces/*/macAddress",
+		"rootDeviceHints":        "/nodes/*/rootDeviceHints",
+	}
+
+	// Cluster-level paths (always allowed)
+	ClusterLevelAllowedPaths = []string{
+		"/extraAnnotations",
+		"/extraLabels",
+		"/suppressedManifests",
+		"/pruneManifests",
+		"/clusterImageSetNameRef",
+	}
+
+	// Node-level path patterns (always allowed)
+	NodeLevelAllowedPaths = []string{
+		"/nodes/*/extraAnnotations",
+		"/nodes/*/extraLabels",
+		"/nodes/*/suppressedManifests",
+		"/nodes/*/pruneManifests",
+	}
+
+	// Additional cluster-level paths allowed during reinstall
+	ReinstallClusterPaths = []string{
+		"/reinstall",
+	}
+)
+
+// String returns the string representation of the OperationType
+func (ot OperationType) String() string {
+	return string(ot)
+}
+
+// IsScaling returns true if the operation involves changing node count
+func (ot OperationType) IsScaling() bool {
+	return ot == OperationTypeScaleOut || ot == OperationTypeScaleIn || ot == OperationTypeMixed
+}
+
+// IsValid returns true if the operation type is valid (not invalid)
+func (ot OperationType) IsValid() bool {
+	return ot != OperationTypeInvalid
+}
 
 // ValidateClusterInstance ensures the ClusterInstance has required fields and valid configurations.
 func ValidateClusterInstance(clusterInstance *ClusterInstance) error {
@@ -67,6 +140,381 @@ func validatePostProvisioningChanges(
 	oldClusterInstance, newClusterInstance *ClusterInstance,
 	allowReinstall bool,
 ) error {
+	// Analyze node changes to determine the operation type
+	nodeAnalysis := analyzeNodeChanges(oldClusterInstance.Spec.Nodes, newClusterInstance.Spec.Nodes, allowReinstall)
+
+	// If there are unauthorized node modifications, reject immediately
+	if nodeAnalysis.hasUnauthorizedChanges {
+		return fmt.Errorf("detected unauthorized node modifications: %v", nodeAnalysis.errors)
+	}
+
+	// Log detected node operation
+	if nodeAnalysis.IsPermitted() {
+		log.Info(fmt.Sprintf("Detected node operation: %s", nodeAnalysis.description))
+	}
+
+	// Use JSON diff validation for all other spec changes
+	return validateChangesWithJSONDiff(log, oldClusterInstance, newClusterInstance, allowReinstall, nodeAnalysis)
+}
+
+// nodeChangeAnalysis holds the simplified analysis of node changes
+type nodeChangeAnalysis struct {
+	operationType          OperationType
+	description            string
+	hasUnauthorizedChanges bool
+	errors                 []string
+}
+
+// IsPermitted returns true if this is a valid operation without unauthorized changes
+func (a *nodeChangeAnalysis) IsPermitted() bool {
+	return a.operationType.IsValid() && !a.hasUnauthorizedChanges
+}
+
+// analyzeNodeChanges performs simplified analysis of node operations
+func analyzeNodeChanges(oldNodes, newNodes []NodeSpec, allowReinstall bool) *nodeChangeAnalysis {
+	analysis := &nodeChangeAnalysis{}
+
+	oldCount := len(oldNodes)
+	newCount := len(newNodes)
+
+	// Handle simple cases first
+	if oldCount == newCount {
+		if areSameNodeSets(oldNodes, newNodes) {
+			analysis.operationType = OperationTypeNoChange
+			analysis.description = "no node changes detected"
+			return analysis
+		}
+
+		if isPureReplacement, err := isPureNodeReplacement(oldNodes, newNodes); err != nil {
+			analysis.hasUnauthorizedChanges = true
+			analysis.errors = append(analysis.errors, fmt.Sprintf("failed to check node replacement: %v", err))
+			analysis.operationType = OperationTypeInvalid
+			analysis.description = "invalid node operation due to key generation error"
+			return analysis
+		} else if isPureReplacement {
+			analysis.operationType = OperationTypeReplacement
+			analysis.description = fmt.Sprintf("pure node replacement (%d nodes)", oldCount)
+			return analysis
+		}
+
+		// Same count but mixed changes - check for unauthorized modifications
+		analysis.checkNodeModifications(oldNodes, newNodes, allowReinstall)
+		analysis.operationType = OperationTypeModification
+		analysis.description = "node modifications detected"
+		return analysis
+	}
+
+	// Different counts - analyze if it's pure scaling or mixed operation
+	if newCount != oldCount {
+		// Check if this is a pure operation or mixed
+		addedNodes, removedNodes, err := analyzeNodeAdditionsAndRemovals(oldNodes, newNodes)
+		if err != nil {
+			analysis.hasUnauthorizedChanges = true
+			analysis.errors = append(analysis.errors, fmt.Sprintf("failed to analyze node additions/removals: %v", err))
+			analysis.operationType = OperationTypeInvalid
+			analysis.description = "invalid node operation due to key generation error"
+			return analysis
+		}
+
+		// Determine operation type based on changes
+		switch {
+		case len(addedNodes) > 0 && len(removedNodes) > 0:
+			// Mixed operation: both additions and removals
+			analysis.operationType = OperationTypeMixed
+			netChange := newCount - oldCount
+			if netChange > 0 {
+				analysis.description = fmt.Sprintf("mixed operation: %d added, %d removed (net +%d)",
+					len(addedNodes), len(removedNodes), netChange)
+			} else {
+				analysis.description = fmt.Sprintf("mixed operation: %d added, %d removed (net %d)",
+					len(addedNodes), len(removedNodes), netChange)
+			}
+		case len(addedNodes) > 0:
+			// Pure scale-out: only additions
+			analysis.operationType = OperationTypeScaleOut
+			analysis.description = fmt.Sprintf("pure scale-out: %d nodes added", len(addedNodes))
+		default:
+			// Pure scale-in: only removals
+			analysis.operationType = OperationTypeScaleIn
+			analysis.description = fmt.Sprintf("pure scale-in: %d nodes removed", len(removedNodes))
+		}
+	}
+
+	// Check for unauthorized modifications in scaling operations
+	analysis.checkNodeModifications(oldNodes, newNodes, allowReinstall)
+
+	return analysis
+}
+
+// analyzeNodeAdditionsAndRemovals determines which nodes are added vs removed
+func analyzeNodeAdditionsAndRemovals(oldNodes, newNodes []NodeSpec) ([]NodeSpec, []NodeSpec, error) {
+	// Create maps for efficient lookups using node keys
+	oldNodeMap := make(map[string]NodeSpec)
+	newNodeMap := make(map[string]NodeSpec)
+
+	for _, node := range oldNodes {
+		key, err := generateNodeMatchingKey(node)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to generate key for old node: %w", err)
+		}
+		oldNodeMap[key] = node
+	}
+
+	for _, node := range newNodes {
+		key, err := generateNodeMatchingKey(node)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to generate key for new node: %w", err)
+		}
+		newNodeMap[key] = node
+	}
+
+	var addedNodes, removedNodes []NodeSpec
+
+	// Find added nodes (in new but not in old)
+	for _, newNode := range newNodes {
+		key, err := generateNodeMatchingKey(newNode)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to generate key for new node: %w", err)
+		}
+		if _, exists := oldNodeMap[key]; !exists {
+			addedNodes = append(addedNodes, newNode)
+		}
+	}
+
+	// Find removed nodes (in old but not in new)
+	for _, oldNode := range oldNodes {
+		key, err := generateNodeMatchingKey(oldNode)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to generate key for old node: %w", err)
+		}
+		if _, exists := newNodeMap[key]; !exists {
+			removedNodes = append(removedNodes, oldNode)
+		}
+	}
+
+	return addedNodes, removedNodes, nil
+}
+
+// checkNodeModifications looks for unauthorized changes in node modifications
+func (a *nodeChangeAnalysis) checkNodeModifications(oldNodes, newNodes []NodeSpec, allowReinstall bool) {
+	// Create maps for efficient lookups
+	oldNodeMap := make(map[string]NodeSpec)
+	for _, node := range oldNodes {
+		key, err := generateNodeMatchingKey(node)
+		if err != nil {
+			a.hasUnauthorizedChanges = true
+			a.errors = append(a.errors, fmt.Sprintf("failed to generate key for old node: %v", err))
+			return
+		}
+		oldNodeMap[key] = node
+	}
+
+	// Check each new node for modifications
+	for _, newNode := range newNodes {
+		key, err := generateNodeMatchingKey(newNode)
+		if err != nil {
+			a.hasUnauthorizedChanges = true
+			a.errors = append(a.errors, fmt.Sprintf("failed to generate key for new node: %v", err))
+			return
+		}
+		if oldNode, exists := oldNodeMap[key]; exists {
+			// Found matching node, check for unauthorized changes
+			if unauthorized := getUnauthorizedChanges(oldNode, newNode, allowReinstall); len(unauthorized) > 0 {
+				a.hasUnauthorizedChanges = true
+				nodeId := getNodeIdentifier(oldNode)
+				for _, change := range unauthorized {
+					a.errors = append(a.errors, fmt.Sprintf("node %s: unauthorized change to %s", nodeId, change))
+				}
+			}
+		}
+	}
+}
+
+// getNodeStableIdentifier returns the most stable identifier for a node in priority order
+func getNodeStableIdentifier(node NodeSpec) (string, bool) {
+	// Use hostname as primary identifier if available
+	if node.HostName != "" {
+		return node.HostName, true
+	}
+	// Use BMC address as secondary identifier
+	if node.BmcAddress != "" {
+		return node.BmcAddress, true
+	}
+	// Use boot MAC as tertiary identifier
+	if node.BootMACAddress != "" {
+		return node.BootMACAddress, true
+	}
+	// No stable identifier available
+	return "", false
+}
+
+// generateNodeMatchingKey creates a unique key for node matching based on stable fields
+func generateNodeMatchingKey(node NodeSpec) (string, error) {
+	identifier, found := getNodeStableIdentifier(node)
+	if !found {
+		return "", fmt.Errorf("node has no unique identifiers (hostname, BMC address, or boot MAC address)")
+	}
+
+	// Add prefix based on identifier type for uniqueness across different identifier types
+	switch {
+	case node.HostName != "":
+		return "host:" + identifier, nil
+	case node.BmcAddress != "":
+		return "bmc:" + identifier, nil
+	default: // BootMACAddress
+		return "mac:" + identifier, nil
+	}
+}
+
+// areSameNodeSets checks if two node arrays contain identical nodes (order-independent)
+func areSameNodeSets(oldNodes, newNodes []NodeSpec) bool {
+	if len(oldNodes) != len(newNodes) {
+		return false
+	}
+
+	// Create maps for order-independent comparison
+	oldNodeMap := make(map[string]NodeSpec)
+	newNodeMap := make(map[string]NodeSpec)
+
+	// Build old nodes map
+	for _, node := range oldNodes {
+		key, err := generateNodeMatchingKey(node)
+		if err != nil {
+			return false // If we can't generate keys, consider them different
+		}
+		oldNodeMap[key] = node
+	}
+
+	// Build new nodes map and check for missing nodes
+	for _, node := range newNodes {
+		key, err := generateNodeMatchingKey(node)
+		if err != nil {
+			return false // If we can't generate keys, consider them different
+		}
+		newNodeMap[key] = node
+
+		// Check if this node exists in old set
+		if _, exists := oldNodeMap[key]; !exists {
+			return false // New node not in old set
+		}
+	}
+
+	// Check if all old nodes exist in new set and have identical content
+	for key, oldNode := range oldNodeMap {
+		newNode, exists := newNodeMap[key]
+		if !exists {
+			return false // Old node not in new set
+		}
+
+		// Compare node content using JSON marshaling
+		oldJSON, _ := json.Marshal(oldNode)
+		newJSON, _ := json.Marshal(newNode)
+		if !bytes.Equal(oldJSON, newJSON) {
+			return false // Same key but different content
+		}
+	}
+
+	return true
+}
+
+// isPureNodeReplacement checks if all nodes are being replaced with new ones
+func isPureNodeReplacement(oldNodes, newNodes []NodeSpec) (bool, error) {
+	if len(oldNodes) != len(newNodes) {
+		return false, nil
+	}
+
+	oldKeys := make(map[string]bool)
+	for _, node := range oldNodes {
+		key, err := generateNodeMatchingKey(node)
+		if err != nil {
+			return false, fmt.Errorf("failed to generate key for old node: %w", err)
+		}
+		oldKeys[key] = true
+	}
+
+	// Check if any new nodes match old ones
+	for _, newNode := range newNodes {
+		key, err := generateNodeMatchingKey(newNode)
+		if err != nil {
+			return false, fmt.Errorf("failed to generate key for new node: %w", err)
+		}
+		if oldKeys[key] {
+			return false, nil // Found matching node, not pure replacement
+		}
+	}
+
+	return true, nil // No matching nodes, pure replacement
+}
+
+// getUnauthorizedChanges compares two nodes and returns unauthorized field changes
+func getUnauthorizedChanges(oldNode, newNode NodeSpec, allowReinstall bool) []string {
+	var unauthorized []string
+
+	// Check key immutable fields
+	if oldNode.BmcAddress != newNode.BmcAddress && !allowReinstall {
+		unauthorized = append(unauthorized, "bmcAddress")
+	}
+	if oldNode.BootMACAddress != newNode.BootMACAddress && !allowReinstall {
+		unauthorized = append(unauthorized, "bootMACAddress")
+	}
+	if oldNode.HostName != newNode.HostName {
+		unauthorized = append(unauthorized, "hostName")
+	}
+
+	// Check other fields using JSON diff for completeness
+	if len(unauthorized) == 0 {
+		oldJSON, _ := json.Marshal(oldNode)
+		newJSON, _ := json.Marshal(newNode)
+		if !bytes.Equal(oldJSON, newJSON) {
+			// There are changes, check if they're all permissible
+			diffs, err := jsondiff.CompareJSON(oldJSON, newJSON)
+			if err == nil {
+				for _, diff := range diffs {
+					if !isPermissibleNodeChange(diff.Path, allowReinstall) {
+						unauthorized = append(unauthorized, diff.Path)
+					}
+				}
+			}
+		}
+	}
+
+	return unauthorized
+}
+
+// getNodeIdentifier returns a human-readable identifier for a node
+func getNodeIdentifier(node NodeSpec) string {
+	identifier, found := getNodeStableIdentifier(node)
+	if found {
+		return identifier
+	}
+	return "unknown"
+}
+
+// isPermissibleNodeChange checks if a node field change is allowed
+func isPermissibleNodeChange(fieldPath string, allowReinstall bool) bool {
+	// Start with base permissible fields
+	permissibleChanges := append([]string{}, BasePermissibleFields...)
+
+	if allowReinstall {
+		permissibleChanges = append(permissibleChanges, getReinstallPermissibleFields()...)
+	}
+
+	for _, allowed := range permissibleChanges {
+		if strings.Contains(fieldPath, allowed) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// validateChangesWithJSONDiff is the original JSON diff-based validation logic
+func validateChangesWithJSONDiff(
+	log logr.Logger,
+	oldClusterInstance, newClusterInstance *ClusterInstance,
+	allowReinstall bool,
+	nodeAnalysis *nodeChangeAnalysis,
+) error {
 	// Marshal old and new ClusterInstance specs to JSON for comparison.
 	oldSpecJSON, err := json.Marshal(oldClusterInstance.Spec)
 	if err != nil {
@@ -91,45 +539,54 @@ func validatePostProvisioningChanges(
 	}
 
 	// Define permissible field changes without requiring reinstall.
-	allowedUpdates := []string{
-		"/extraAnnotations",
-		"/extraLabels",
-		"/suppressedManifests",
-		"/pruneManifests",
-		"/clusterImageSetNameRef",
-		"/nodes/*/extraAnnotations",
-		"/nodes/*/extraLabels",
-		"/nodes/*/suppressedManifests",
-		"/nodes/*/pruneManifests",
-	}
+	allowedUpdates := append([]string{}, ClusterLevelAllowedPaths...)
+	allowedUpdates = append(allowedUpdates, NodeLevelAllowedPaths...)
 
 	// Define additional permissible changes if reinstall is requested.
 	if allowReinstall {
-		allowedUpdates = append(allowedUpdates, []string{
-			"/reinstall",
-			"/nodes/*/bmcAddress",
-			"/nodes/*/bootMACAddress",
-			"/nodes/*/nodeNetwork/interfaces/*/macAddress",
-			"/nodes/*/rootDeviceHints",
-		}...)
+		allowedUpdates = append(allowedUpdates, ReinstallClusterPaths...)
+		allowedUpdates = append(allowedUpdates, getReinstallNodePaths()...)
 	}
 
 	var restrictedChanges []string
+	oldNodeCount := len(oldClusterInstance.Spec.Nodes)
+	newNodeCount := len(newClusterInstance.Spec.Nodes)
+	isScalingOperation := oldNodeCount != newNodeCount
 
 	// Validate each detected change.
 	for _, diff := range diffs {
-
 		if pathMatchesAnyPattern(diff.Path, allowedUpdates) {
 			continue // Change is allowed
 		}
 
+		// Handle node array changes during scaling operations
+		if isScalingOperation && pathMatchesPattern(diff.Path, "/nodes") {
+			// Allow the entire nodes array to change during scaling
+			continue
+		}
+
+		// Handle node replacement operations (same count)
+		if nodeAnalysis.IsPermitted() {
+			if pathMatchesPattern(diff.Path, "/nodes") || pathMatchesPattern(diff.Path, "/nodes/*") {
+				// Allow all node-related changes for validated node operations
+				continue
+			}
+		}
+
 		// Detect node scaling operations (adding/removing nodes).
 		if pathMatchesPattern(diff.Path, "/nodes/*") {
-			if diff.Type == jsondiff.OperationAdd {
+			switch diff.Type {
+			case jsondiff.OperationAdd:
 				log.Info("Detected scale-out: new worker node added")
 				continue
-			} else if diff.Type == jsondiff.OperationRemove {
+			case jsondiff.OperationRemove:
 				log.Info("Detected scale-in: worker node removed")
+				continue
+			case jsondiff.OperationReplace:
+				// Node replacement/modification should be rejected unless it's a pure scaling operation
+				// For now, let's be conservative and reject all node modifications
+				log.Info("Detected node replacement/modification - rejecting")
+				restrictedChanges = append(restrictedChanges, diff.Path)
 				continue
 			}
 		}
@@ -353,4 +810,14 @@ func validateReinstallGeneration(generation string) error {
 	}
 
 	return nil
+}
+
+// getReinstallPermissibleFields returns field names from ReinstallPermissions
+func getReinstallPermissibleFields() []string {
+	return slices.Collect(maps.Keys(ReinstallPermissions))
+}
+
+// getReinstallNodePaths returns JSON paths from ReinstallPermissions
+func getReinstallNodePaths() []string {
+	return slices.Collect(maps.Values(ReinstallPermissions))
 }
