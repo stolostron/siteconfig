@@ -55,9 +55,15 @@ func (a apiError) MarshalJSON() ([]byte, error) {
 // New creates a new API error with a code and a message
 func New(code int32, message string, args ...interface{}) Error {
 	if len(args) > 0 {
-		return &apiError{code, fmt.Sprintf(message, args...)}
+		return &apiError{
+			code:    code,
+			message: fmt.Sprintf(message, args...),
+		}
 	}
-	return &apiError{code, message}
+	return &apiError{
+		code:    code,
+		message: message,
+	}
 }
 
 // NotFound creates a new not found error
@@ -65,12 +71,12 @@ func NotFound(message string, args ...interface{}) Error {
 	if message == "" {
 		message = "Not found"
 	}
-	return New(http.StatusNotFound, fmt.Sprintf(message, args...))
+	return New(http.StatusNotFound, message, args...)
 }
 
 // NotImplemented creates a new not implemented error
 func NotImplemented(message string) Error {
-	return New(http.StatusNotImplemented, message)
+	return New(http.StatusNotImplemented, "%s", message)
 }
 
 // MethodNotAllowedError represents an error for when the path matches but the method doesn't
@@ -112,7 +118,7 @@ func flattenComposite(errs *CompositeError) *CompositeError {
 	for _, er := range errs.Errors {
 		switch e := er.(type) {
 		case *CompositeError:
-			if len(e.Errors) > 0 {
+			if e != nil && len(e.Errors) > 0 {
 				flat := flattenComposite(e)
 				if len(flat.Errors) > 0 {
 					res = append(res, flat.Errors...)
@@ -130,10 +136,14 @@ func flattenComposite(errs *CompositeError) *CompositeError {
 // MethodNotAllowed creates a new method not allowed error
 func MethodNotAllowed(requested string, allow []string) Error {
 	msg := fmt.Sprintf("method %s is not allowed, but [%s] are", requested, strings.Join(allow, ","))
-	return &MethodNotAllowedError{code: http.StatusMethodNotAllowed, Allowed: allow, message: msg}
+	return &MethodNotAllowedError{
+		code:    http.StatusMethodNotAllowed,
+		Allowed: allow,
+		message: msg,
+	}
 }
 
-// ServeError the error handler interface implementation
+// ServeError implements the http error handler interface
 func ServeError(rw http.ResponseWriter, r *http.Request, err error) {
 	rw.Header().Set("Content-Type", "application/json")
 	switch e := err.(type) {
@@ -169,13 +179,13 @@ func ServeError(rw http.ResponseWriter, r *http.Request, err error) {
 	default:
 		rw.WriteHeader(http.StatusInternalServerError)
 		if r == nil || r.Method != http.MethodHead {
-			_, _ = rw.Write(errorAsJSON(New(http.StatusInternalServerError, err.Error())))
+			_, _ = rw.Write(errorAsJSON(New(http.StatusInternalServerError, "%v", err)))
 		}
 	}
 }
 
 func asHTTPCode(input int) int {
-	if input >= 600 {
+	if input >= maximumValidHTTPCode {
 		return DefaultHTTPCode
 	}
 	return input
