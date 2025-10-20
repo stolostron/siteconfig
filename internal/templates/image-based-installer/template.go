@@ -116,7 +116,10 @@ spec:
     namespace: "{{ .Spec.ClusterName }}"
 {{ end }}
 {{ if .Spec.MachineNetwork }}
-  machineNetwork: "{{ (index .Spec.MachineNetwork 0).CIDR }}"
+  machineNetworks:
+{{ range .Spec.MachineNetwork }}
+  - cidr: "{{ .CIDR }}"
+{{ end }}
 {{ end }}
 {{ if .Spec.Proxy }}
   proxy:
