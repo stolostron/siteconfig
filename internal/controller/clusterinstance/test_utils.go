@@ -247,6 +247,7 @@ spec:
   provisionRequirements:
     controlPlaneAgents: {{ .SpecialVars.ControlPlaneAgents }}
     workerAgents: {{ .SpecialVars.WorkerAgents }}
+    arbiterAgents: {{ .SpecialVars.ArbiterAgents }}
 {{ if .Spec.Proxy }}
   proxy:
 {{ .Spec.Proxy | toYaml | indent 4 }}
