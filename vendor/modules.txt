@@ -29,6 +29,8 @@ github.com/davecgh/go-spew/spew
 ## explicit; go 1.13
 github.com/emicklei/go-restful/v3
 github.com/emicklei/go-restful/v3/log
+# github.com/evanphx/json-patch v5.7.0+incompatible
+## explicit
 # github.com/evanphx/json-patch/v5 v5.9.0
 ## explicit; go 1.18
 github.com/evanphx/json-patch/v5
@@ -290,17 +292,15 @@ github.com/onsi/gomega/types
 # github.com/openshift/api v0.0.0-20240521212423-414cf30d37be
 ## explicit; go 1.21
 github.com/openshift/api/config/v1
-# github.com/openshift/assisted-service v1.0.10-0.20250810104629-4ef833fbd2b9
-## explicit; go 1.21
-github.com/openshift/assisted-service/pkg/validations
-# github.com/openshift/assisted-service/api v0.0.0 => github.com/openshift/assisted-service/api v0.0.0-20250808001126-3d6dbe3de42c
+# github.com/openshift/assisted-service/api v0.0.0 => github.com/openshift/assisted-service/api v0.0.0-20251026193953-3266b6d73526
 ## explicit; go 1.21
 github.com/openshift/assisted-service/api/common
 github.com/openshift/assisted-service/api/hiveextension/v1beta1
 github.com/openshift/assisted-service/api/v1beta1
-# github.com/openshift/assisted-service/models v0.0.0 => github.com/openshift/assisted-service/models v0.0.0-20250810104629-4ef833fbd2b9
+# github.com/openshift/assisted-service/models v0.0.0 => github.com/openshift/assisted-service/models v0.0.0-20251026193953-3266b6d73526
 ## explicit; go 1.21
 github.com/openshift/assisted-service/models
+github.com/openshift/assisted-service/models/validations
 # github.com/openshift/custom-resource-status v1.1.3-0.20220503160415-f2fdb4999d87
 ## explicit; go 1.12
 github.com/openshift/custom-resource-status/conditions/v1
@@ -1253,5 +1253,5 @@ sigs.k8s.io/structured-merge-diff/v4/value
 ## explicit; go 1.12
 sigs.k8s.io/yaml
 sigs.k8s.io/yaml/goyaml.v2
-# github.com/openshift/assisted-service/api => github.com/openshift/assisted-service/api v0.0.0-20250808001126-3d6dbe3de42c
-# github.com/openshift/assisted-service/models => github.com/openshift/assisted-service/models v0.0.0-20250810104629-4ef833fbd2b9
+# github.com/openshift/assisted-service/api => github.com/openshift/assisted-service/api v0.0.0-20251026193953-3266b6d73526
+# github.com/openshift/assisted-service/models => github.com/openshift/assisted-service/models v0.0.0-20251026193953-3266b6d73526
