@@ -83,7 +83,7 @@ func (id *ObjectId) Scan(raw interface{}) error {
 	case string:
 		data = []byte(v)
 	default:
-		return fmt.Errorf("cannot sql.Scan() strfmt.URI from: %#v", v)
+		return fmt.Errorf("cannot sql.Scan() strfmt.URI from: %#v: %w", v, ErrFormat)
 	}
 
 	return id.UnmarshalText(data)
@@ -135,14 +135,14 @@ func (id *ObjectId) UnmarshalBSON(data []byte) error {
 // BSON document if the error is nil.
 func (id ObjectId) MarshalBSONValue() (bsontype.Type, []byte, error) {
 	oid := bsonprim.ObjectID(id)
-	return bsontype.ObjectID, oid[:], nil
+	return bson.TypeObjectID, oid[:], nil
 }
 
 // UnmarshalBSONValue is an interface implemented by types that can unmarshal a
 // BSON value representation of themselves. The BSON bytes and type can be
 // assumed to be valid. UnmarshalBSONValue must copy the BSON value bytes if it
 // wishes to retain the data after returning.
-func (id *ObjectId) UnmarshalBSONValue(tpe bsontype.Type, data []byte) error {
+func (id *ObjectId) UnmarshalBSONValue(_ bsontype.Type, data []byte) error {
 	var oid bsonprim.ObjectID
 	copy(oid[:], data)
 	*id = ObjectId(oid)
