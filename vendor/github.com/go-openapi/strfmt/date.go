@@ -17,7 +17,6 @@ package strfmt
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -57,7 +56,7 @@ func (d *Date) UnmarshalText(text []byte) error {
 	if len(text) == 0 {
 		return nil
 	}
-	dd, err := time.Parse(RFC3339FullDate, string(text))
+	dd, err := time.ParseInLocation(RFC3339FullDate, string(text), DefaultTimeLocation)
 	if err != nil {
 		return err
 	}
@@ -84,7 +83,7 @@ func (d *Date) Scan(raw interface{}) error {
 		*d = Date{}
 		return nil
 	default:
-		return fmt.Errorf("cannot sql.Scan() strfmt.Date from: %#v", v)
+		return fmt.Errorf("cannot sql.Scan() strfmt.Date from: %#v: %w", v, ErrFormat)
 	}
 }
 
@@ -107,7 +106,7 @@ func (d *Date) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &strdate); err != nil {
 		return err
 	}
-	tt, err := time.Parse(RFC3339FullDate, strdate)
+	tt, err := time.ParseInLocation(RFC3339FullDate, strdate, DefaultTimeLocation)
 	if err != nil {
 		return err
 	}
@@ -126,7 +125,7 @@ func (d *Date) UnmarshalBSON(data []byte) error {
 	}
 
 	if data, ok := m["data"].(string); ok {
-		rd, err := time.Parse(RFC3339FullDate, data)
+		rd, err := time.ParseInLocation(RFC3339FullDate, data, DefaultTimeLocation)
 		if err != nil {
 			return err
 		}
@@ -134,7 +133,7 @@ func (d *Date) UnmarshalBSON(data []byte) error {
 		return nil
 	}
 
-	return errors.New("couldn't unmarshal bson bytes value as Date")
+	return fmt.Errorf("couldn't unmarshal bson bytes value as Date: %w", ErrFormat)
 }
 
 // DeepCopyInto copies the receiver and writes its value into out.
