@@ -56,7 +56,9 @@ func PatchCIStatus(
 	clusterInstance *v1alpha1.ClusterInstance,
 	patch client.Patch,
 ) error {
-	if err := retry.RetryOnConflictOrRetriable(retry.RetryBackoff30Seconds, func() error {
+	// Retry only on transient errors (internal, service unavailable, connection refused)
+	// Let conflicts fail and propagate - controller will requeue
+	if err := retry.RetryOnRetriable(retry.RetryBackoff30Seconds, func() error {
 		return c.Status().Patch(ctx, clusterInstance, patch) //nolint:wrapcheck
 	}); err != nil {
 		return fmt.Errorf("failed to update ClusterInstance status: %w", err)
