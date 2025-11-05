@@ -757,6 +757,75 @@ var _ = Describe("Helper Functions", func() {
 		})
 	})
 
+	DescribeTable("getPropagationPolicyForResource",
+		func(gvk schema.GroupVersionKind, expectedPolicy metav1.DeletionPropagation) {
+			obj := &unstructured.Unstructured{}
+			obj.SetGroupVersionKind(gvk)
+			obj.SetName("test-resource")
+			obj.SetNamespace(Namespace)
+
+			policy := getPropagationPolicyForResource(obj)
+			Expect(policy).NotTo(BeNil())
+			Expect(*policy).To(Equal(expectedPolicy))
+		},
+		Entry("should return Background propagation policy for ManagedCluster",
+			schema.GroupVersionKind{
+				Group:   "cluster.open-cluster-management.io",
+				Version: "v1",
+				Kind:    "ManagedCluster",
+			},
+			metav1.DeletePropagationBackground,
+		),
+		Entry("should return Foreground propagation policy for ClusterDeployment",
+			schema.GroupVersionKind{
+				Group:   "hive.openshift.io",
+				Version: "v1",
+				Kind:    "ClusterDeployment",
+			},
+			metav1.DeletePropagationForeground,
+		),
+		Entry("should return Foreground propagation policy for BareMetalHost",
+			schema.GroupVersionKind{
+				Group:   "metal3.io",
+				Version: "v1alpha1",
+				Kind:    "BareMetalHost",
+			},
+			metav1.DeletePropagationForeground,
+		),
+		Entry("should return Foreground propagation policy for ConfigMap",
+			schema.GroupVersionKind{
+				Group:   "",
+				Version: "v1",
+				Kind:    "ConfigMap",
+			},
+			metav1.DeletePropagationForeground,
+		),
+		Entry("should return Foreground propagation policy for Secret",
+			schema.GroupVersionKind{
+				Group:   "",
+				Version: "v1",
+				Kind:    "Secret",
+			},
+			metav1.DeletePropagationForeground,
+		),
+		Entry("should return Foreground propagation policy for AgentClusterInstall",
+			schema.GroupVersionKind{
+				Group:   "extensions.hive.openshift.io",
+				Version: "v1beta1",
+				Kind:    "AgentClusterInstall",
+			},
+			metav1.DeletePropagationForeground,
+		),
+		Entry("should return Foreground propagation policy for KlusterletAddonConfig",
+			schema.GroupVersionKind{
+				Group:   "agent.open-cluster-management.io",
+				Version: "v1",
+				Kind:    "KlusterletAddonConfig",
+			},
+			metav1.DeletePropagationForeground,
+		),
+	)
+
 	Describe("initiateObjectDeletion", func() {
 
 		It("should initiate deletion successfully", func() {
