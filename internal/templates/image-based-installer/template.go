@@ -125,6 +125,10 @@ spec:
   proxy:
 {{ .Spec.Proxy | toYaml | indent 4 }}
 {{ end }}
+{{ if .Spec.AdditionalNTPSources }}
+  additionalNTPSources:
+{{ .Spec.AdditionalNTPSources | toYaml | indent 4 }}
+{{ end }}
 `
 
 const BareMetalHost = `apiVersion: metal3.io/v1alpha1
