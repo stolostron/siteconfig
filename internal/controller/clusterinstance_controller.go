@@ -474,8 +474,6 @@ func (r *ClusterInstanceReconciler) handleValidate(
 	clusterInstance *v1alpha1.ClusterInstance,
 ) error {
 
-	patch := client.MergeFrom(clusterInstance.DeepCopy())
-
 	newCond := metav1.Condition{Type: string(v1alpha1.ClusterInstanceValidated)}
 	log.Info("Starting validation")
 	err := ci.Validate(ctx, r.Client, clusterInstance)
@@ -495,6 +493,7 @@ func (r *ClusterInstanceReconciler) handleValidate(
 	}
 	log.Info("Finished validation")
 
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
 	conditions.SetStatusCondition(&clusterInstance.Status.Conditions, v1alpha1.ClusterInstanceConditionType(newCond.Type),
 		v1alpha1.ClusterInstanceConditionReason(newCond.Reason), newCond.Status, newCond.Message)
 
@@ -516,23 +515,24 @@ func (r *ClusterInstanceReconciler) renderManifests(
 ) (ci.RenderedObjectCollection, error) {
 	log.Info("Starting to render templates")
 
-	patch := client.MergeFrom(clusterInstance.DeepCopy())
 	renderedObjects, err := r.TmplEngine.ProcessTemplates(ctx, r.Client, log.Named("TemplateEngine"), *clusterInstance)
+
+	conditionReason := v1alpha1.Completed
+	conditionStatus := metav1.ConditionTrue
+	message := "Rendered templates successfully"
 	if err != nil {
 		log.Error("Failed to render templates", zap.Error(err))
-		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			v1alpha1.RenderedTemplates,
-			v1alpha1.Failed,
-			metav1.ConditionFalse,
-			fmt.Sprintf("Failed to render templates, err= %s", err))
+		conditionReason = v1alpha1.Failed
+		conditionStatus = metav1.ConditionFalse
+		message = fmt.Sprintf("Failed to render templates, err= %s", err)
 	} else {
 		log.Info("Successfully rendered templates")
-		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			v1alpha1.RenderedTemplates,
-			v1alpha1.Completed,
-			metav1.ConditionTrue,
-			"Rendered templates successfully")
 	}
+
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
+	conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
+		v1alpha1.RenderedTemplates,
+		conditionReason, conditionStatus, message)
 
 	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
@@ -588,18 +588,17 @@ func applyObject(
 	return controllerutil.OperationResultUpdated, nil
 }
 
+// executeRenderedManifests applies objects and returns updated ManifestsRendered status
 func (r *ClusterInstanceReconciler) executeRenderedManifests(
 	ctx context.Context,
 	c client.Client,
 	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 	objects []ci.RenderedObject,
-	manifestStatus string) (bool, error) {
+	manifestStatus string) (manifestsRendered []v1alpha1.ManifestReference, ok bool, err error) {
 
-	ok := true
-
-	patch := client.MergeFrom(clusterInstance.DeepCopy())
-	manifestsRendered := append([]v1alpha1.ManifestReference{}, clusterInstance.Status.ManifestsRendered...)
+	ok = true
+	manifestsRendered = append([]v1alpha1.ManifestReference{}, clusterInstance.Status.ManifestsRendered...)
 
 	var errs []error
 	for _, object := range objects {
@@ -607,32 +606,24 @@ func (r *ClusterInstanceReconciler) executeRenderedManifests(
 
 		status := v1alpha1.ManifestRenderedFailure
 		message := ""
-		if result, err := applyObject(ctx, c, log, object.GetObject()); err != nil {
-			errs = append(errs, err)
+		if result, applyErr := applyObject(ctx, c, log, object.GetObject()); applyErr != nil {
+			errs = append(errs, applyErr)
 			ok = false
-			message = err.Error()
+			message = applyErr.Error()
 		} else if result != controllerutil.OperationResultNone {
 			status = manifestStatus
 		}
 		manifestRef.UpdateStatus(status, message)
 
-		// Check if the manifestRef needs to be added to manifestsRendered
-		if index, err := v1alpha1.IndexOfManifestByIdentity(manifestRef, manifestsRendered); err != nil {
+		// Update in manifestsRendered slice
+		if index, findErr := v1alpha1.IndexOfManifestByIdentity(manifestRef, manifestsRendered); findErr != nil {
 			manifestsRendered = append(manifestsRendered, *manifestRef)
 		} else {
 			manifestsRendered[index].UpdateStatus(manifestRef.Status, manifestRef.Message)
 		}
 	}
 
-	// Update ClusterInstance.Status.ManifestsRendered only if there are changes
-	if !equality.Semantic.DeepEqual(clusterInstance.Status.ManifestsRendered, manifestsRendered) {
-		clusterInstance.Status.ManifestsRendered = manifestsRendered
-		if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
-			log.Error("Failed to update ClusterInstance.Status.ManifestsRendered", zap.Error(updateErr))
-			errs = append(errs, updateErr)
-		}
-	}
-	return ok, utilerrors.NewAggregate(errs)
+	return manifestsRendered, ok, utilerrors.NewAggregate(errs)
 
 }
 
@@ -646,32 +637,34 @@ func (r *ClusterInstanceReconciler) validateRenderedManifests(
 	log.Info("Executing a dry-run validation on the rendered manifests")
 
 	dryRunClient := client.NewDryRunClient(r.Client)
-	patch := client.MergeFrom(clusterInstance.DeepCopy())
-	rendered, err = r.executeRenderedManifests(ctx, dryRunClient, log, clusterInstance, objects,
-		v1alpha1.ManifestRenderedValidated)
-	if err != nil || !rendered {
-		msg := "failed to validate rendered manifests using dry-run validation"
-		if err != nil {
-			msg = fmt.Sprintf(", err: %v", err)
-		}
-		log.Info(msg)
 
-		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			v1alpha1.RenderedTemplatesValidated,
-			v1alpha1.Failed,
-			metav1.ConditionFalse,
-			"Rendered manifests failed dry-run validation")
-	} else {
-		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			v1alpha1.RenderedTemplatesValidated,
-			v1alpha1.Completed,
-			metav1.ConditionTrue,
-			"Rendered templates validation succeeded")
+	manifestsRendered, rendered, err := r.executeRenderedManifests(ctx, dryRunClient, log,
+		clusterInstance, objects, v1alpha1.ManifestRenderedValidated)
+
+	conditionReason := v1alpha1.Completed
+	conditionStatus := metav1.ConditionTrue
+	message := "Rendered templates validation succeeded"
+	if err != nil || !rendered {
+		conditionReason = v1alpha1.Failed
+		conditionStatus = metav1.ConditionFalse
+		message = "Rendered manifests failed dry-run validation"
+		if err != nil {
+			message = fmt.Sprintf("%s, err: %v", message, err)
+		}
+		log.Info(message)
 	}
+
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
+
+	// Update in-memory status with both ManifestsRendered and Conditions
+	clusterInstance.Status.ManifestsRendered = manifestsRendered
+	conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
+		v1alpha1.RenderedTemplatesValidated,
+		conditionReason, conditionStatus, message)
 
 	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
-			log.Error("failed to update ClusterInstance status post validation of rendered templates",
+			log.Error("failed to update ClusterInstance status after validation",
 				zap.Error(updateErr))
 			err = updateErr
 		}
@@ -691,32 +684,30 @@ func (r *ClusterInstanceReconciler) applyRenderedManifests(
 	log := pLog.Named("applyRenderedManifests")
 	log.Info("Applying the rendered manifests")
 
-	patch := client.MergeFrom(clusterInstance.DeepCopy())
-	if rendered, err = r.executeRenderedManifests(ctx,
-		r.Client,
-		log,
-		clusterInstance,
-		objects,
-		v1alpha1.ManifestRenderedSuccess,
-	); err != nil || !rendered {
+	manifestsRendered, rendered, err := r.executeRenderedManifests(ctx, r.Client,
+		log, clusterInstance, objects, v1alpha1.ManifestRenderedSuccess)
+
+	conditionReason := v1alpha1.Completed
+	conditionStatus := metav1.ConditionTrue
+	message := "Applied site config manifests"
+	if err != nil || !rendered {
 		msg := "failed to apply rendered manifests"
 		if err != nil {
 			msg = fmt.Sprintf(", err: %v", err)
 		}
 		log.Info(msg)
-
-		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			v1alpha1.RenderedTemplatesApplied,
-			v1alpha1.Failed,
-			metav1.ConditionFalse,
-			"Failed to apply site config manifests")
-	} else {
-		conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
-			v1alpha1.RenderedTemplatesApplied,
-			v1alpha1.Completed,
-			metav1.ConditionTrue,
-			"Applied site config manifests")
+		conditionReason = v1alpha1.Failed
+		conditionStatus = metav1.ConditionFalse
+		message = "Failed to apply site config manifests"
 	}
+
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
+
+	// Update in-memory status with both ManifestsRendered and Conditions
+	clusterInstance.Status.ManifestsRendered = manifestsRendered
+	conditions.SetStatusCondition(&clusterInstance.Status.Conditions,
+		v1alpha1.RenderedTemplatesApplied,
+		conditionReason, conditionStatus, message)
 
 	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 		if err == nil {
@@ -727,7 +718,7 @@ func (r *ClusterInstanceReconciler) applyRenderedManifests(
 	}
 
 	log.Info("Finished applying the rendered manifests")
-	return
+	return rendered, err
 }
 
 func (r *ClusterInstanceReconciler) pruneManifests(
@@ -776,7 +767,6 @@ func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(
 	objects []ci.RenderedObject,
 ) error {
 
-	patch := client.MergeFrom(clusterInstance.DeepCopy())
 	manifestsRendered := append([]v1alpha1.ManifestReference{}, clusterInstance.Status.ManifestsRendered...)
 
 	for _, object := range objects {
@@ -796,7 +786,9 @@ func (r *ClusterInstanceReconciler) updateSuppressedManifestsStatus(
 
 	// Update ClusterInstance.Status.ManifestsRendered only if there are changes
 	if !equality.Semantic.DeepEqual(clusterInstance.Status.ManifestsRendered, manifestsRendered) {
+		patch := client.MergeFrom(clusterInstance.DeepCopy())
 		clusterInstance.Status.ManifestsRendered = manifestsRendered
+
 		if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
 			log.Error("Failed to update ClusterInstance.Status.ManifestsRendered", zap.Error(updateErr))
 			return fmt.Errorf("failed to update ClusterInstance.Status.ManifestsRendered for ClusterInstance %s/%s: %w",
