@@ -2115,12 +2115,8 @@ var _ = Describe("executeRenderedManifests", func() {
 		clusterName      = TestClusterInstanceName
 		clusterNamespace = TestClusterInstanceNamespace
 		baseDomain       = "foobar"
-		key              = types.NamespacedName{
-			Name:      clusterName,
-			Namespace: clusterNamespace,
-		}
-		apiGroup    = "ClusterDeploymentApiVersion"
-		expManifest = v1alpha1.ManifestReference{
+		apiGroup         = "ClusterDeploymentApiVersion"
+		expManifest      = v1alpha1.ManifestReference{
 			APIGroup:  &apiGroup,
 			Kind:      ClusterDeploymentKind,
 			Name:      clusterName,
@@ -2177,15 +2173,14 @@ var _ = Describe("executeRenderedManifests", func() {
 		expManifest.Status = v1alpha1.ManifestRenderedSuccess
 
 		testClient := createSSAMockClient(clusterInstance)
-		result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status)
+		manifestsRendered, result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeTrue())
 
-		// Verify ClusterInstance status
-		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
-		index, err := v1alpha1.IndexOfManifestByIdentity(&expManifest, clusterInstance.Status.ManifestsRendered)
+		// Verify returned ManifestsRendered
+		index, err := v1alpha1.IndexOfManifestByIdentity(&expManifest, manifestsRendered)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(clusterInstance.Status.ManifestsRendered[index].Status).To(Equal(expManifest.Status))
+		Expect(manifestsRendered[index].Status).To(Equal(expManifest.Status))
 	})
 
 	It("fails to apply the manifest due to an error while creating the kubernetes resource", func() {
@@ -2207,16 +2202,15 @@ var _ = Describe("executeRenderedManifests", func() {
 			Return(fmt.Errorf("failed to apply object using Server-Side Apply: %s", testError)).
 			Times(1)
 
-		result, err := r.executeRenderedManifests(ctx, mockClient, testLogger, clusterInstance, objects, v1alpha1.ManifestRenderedSuccess)
+		manifestsRendered, result, err := r.executeRenderedManifests(ctx, mockClient, testLogger, clusterInstance, objects, v1alpha1.ManifestRenderedSuccess)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring(testError))
 		Expect(result).To(BeFalse())
 
-		// Verify ClusterInstance status
-		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
-		index, err := v1alpha1.IndexOfManifestByIdentity(&expManifest, clusterInstance.Status.ManifestsRendered)
+		// Verify returned ManifestsRendered
+		index, err := v1alpha1.IndexOfManifestByIdentity(&expManifest, manifestsRendered)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(clusterInstance.Status.ManifestsRendered[index]).To(Satisfy(func(manifest v1alpha1.ManifestReference) bool {
+		Expect(manifestsRendered[index]).To(Satisfy(func(manifest v1alpha1.ManifestReference) bool {
 			Expect(manifest.Status).To(Equal(expManifest.Status))
 			Expect(manifest.Message).To(ContainSubstring(testError))
 			return true
@@ -2235,15 +2229,14 @@ var _ = Describe("executeRenderedManifests", func() {
 			Return(nil).
 			Times(1)
 
-		result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status)
+		manifestsRendered, result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeTrue())
 
-		// Verify ClusterInstance status
-		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
-		index, err := v1alpha1.IndexOfManifestByIdentity(&expManifest, clusterInstance.Status.ManifestsRendered)
+		// Verify returned ManifestsRendered
+		index, err := v1alpha1.IndexOfManifestByIdentity(&expManifest, manifestsRendered)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(clusterInstance.Status.ManifestsRendered[index].Status).To(Equal(expManifest.Status))
+		Expect(manifestsRendered[index].Status).To(Equal(expManifest.Status))
 	})
 
 	It("fails to update the manifest due to an error while patching the kubernetes resource", func() {
@@ -2259,16 +2252,15 @@ var _ = Describe("executeRenderedManifests", func() {
 			Return(fmt.Errorf("%s", testError)).
 			Times(1)
 
-		result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status)
+		manifestsRendered, result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring(testError))
 		Expect(result).To(BeFalse())
 
-		// Verify ClusterInstance status
-		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
-		index, err := v1alpha1.IndexOfManifestByIdentity(&expManifest, clusterInstance.Status.ManifestsRendered)
+		// Verify returned ManifestsRendered
+		index, err := v1alpha1.IndexOfManifestByIdentity(&expManifest, manifestsRendered)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(clusterInstance.Status.ManifestsRendered[index]).To(Satisfy(func(manifest v1alpha1.ManifestReference) bool {
+		Expect(manifestsRendered[index]).To(Satisfy(func(manifest v1alpha1.ManifestReference) bool {
 			Expect(manifest.Status).To(Equal(expManifest.Status))
 			Expect(manifest.Message).To(ContainSubstring(testError))
 			return true
