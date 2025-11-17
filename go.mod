@@ -1,8 +1,6 @@
 module github.com/stolostron/siteconfig
 
-go 1.24.0
-
-toolchain go1.24.6
+go 1.25.4
 
 require (
 	github.com/go-logr/logr v1.4.3 // indirect
