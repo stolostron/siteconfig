@@ -251,10 +251,10 @@ func (r *ClusterDeploymentReconciler) getClusterInstance(
 
 func (r *ClusterDeploymentReconciler) mapClusterInstanceToCD(
 	ctx context.Context,
-	obj client.Object,
+	obj *v1alpha1.ClusterInstance,
 ) []reconcile.Request {
 	clusterInstance := &v1alpha1.ClusterInstance{}
-	if err := r.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()},
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()},
 		clusterInstance); err != nil {
 		return []reconcile.Request{}
 	}
@@ -274,6 +274,8 @@ func (r *ClusterDeploymentReconciler) mapClusterInstanceToCD(
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClusterDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+
+	//nolint:wrapcheck
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("clusterDeploymentReconciler").
 		For(&hivev1.ClusterDeployment{},
@@ -288,7 +290,9 @@ func (r *ClusterDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					return isOwnedByClusterInstance(e.ObjectNew.GetLabels())
 				},
 			})).
-		WatchesRawSource(source.Kind(mgr.GetCache(), &v1alpha1.ClusterInstance{}),
-			handler.EnqueueRequestsFromMapFunc(r.mapClusterInstanceToCD)).
+		WatchesRawSource(source.TypedKind(mgr.GetCache(),
+			&v1alpha1.ClusterInstance{},
+			handler.TypedEnqueueRequestsFromMapFunc(r.mapClusterInstanceToCD),
+		)).
 		Complete(r)
 }
