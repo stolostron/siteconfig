@@ -137,6 +137,8 @@ metadata:
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
     inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
+  labels:
+    cluster.open-cluster-management.io/backup: cluster-activation
 spec:
   bootMode: "{{ .SpecialVars.CurrentNode.BootMode }}"
   bmc:
