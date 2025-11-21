@@ -207,6 +207,11 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return doNotRequeue(), nil
 	}
 
+	// Apply the ACM disaster recovery backup labels to the install template ConfigMaps
+	if err := r.applyACMBackupLabelToInstallTemplates(ctx, log, clusterInstance); err != nil {
+		return requeueWithError(err)
+	}
+
 	// Check if reinstall is triggered
 	if reinstallSpec := clusterInstance.Spec.Reinstall; reinstallSpec != nil {
 		reinstallStatus := clusterInstance.Status.Reinstall
