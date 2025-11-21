@@ -283,6 +283,10 @@ spec:
   proxy:
 {{ .Spec.Proxy | toYaml | indent 4 }}
 {{ end }}
+{{ if .Spec.AdditionalNTPSources }}
+  additionalNTPSources:
+{{ .Spec.AdditionalNTPSources | toYaml | indent 4 }}
+{{ end }}
 `
 }
 

@@ -206,6 +206,7 @@ func TestTemplateEngineRender(t *testing.T) {
 					"clusterDeploymentRef": map[string]interface{}{"name": "site-sno-du-1"},
 					"imageSetRef":          map[string]interface{}{"name": "openshift-test"},
 					"proxy":                map[string]interface{}{"noProxy": "foobar"},
+					"additionalNTPSources": []interface{}{"NTP.server1", "192.0.2.3"},
 					"extraManifestsRefs": []interface{}{
 						map[string]interface{}{
 							"name": "foobar1",
