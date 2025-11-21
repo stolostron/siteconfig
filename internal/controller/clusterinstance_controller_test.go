@@ -128,6 +128,29 @@ var _ = Describe("Reconcile", func() {
 
 		Expect(c.Create(ctx, testParams.GeneratePullSecret())).To(Succeed())
 
+		// Create "installation" template ConfigMaps that are referenced by the ClusterInstance
+		// These are needed by applyACMBackupLabelToInstallTemplates during reconciliation
+		clusterTemplate := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-cluster-template",
+				Namespace: "default",
+			},
+			Data: map[string]string{
+				"ClusterDeployment": "apiVersion: hive.openshift.io/v1\nkind: ClusterDeployment",
+			},
+		}
+		nodeTemplate := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-node-template",
+				Namespace: "default",
+			},
+			Data: map[string]string{
+				"BareMetalHost": "apiVersion: metal3.io/v1alpha1\nkind: BareMetalHost",
+			},
+		}
+		Expect(c.Create(ctx, clusterTemplate)).To(Succeed())
+		Expect(c.Create(ctx, nodeTemplate)).To(Succeed())
+
 		clusterInstance = &v1alpha1.ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       testParams.ClusterName,
@@ -272,6 +295,70 @@ var _ = Describe("Reconcile", func() {
 		// reconcile should stop early since we have intentionally set the ObservedGeneration to be the same as
 		// ObjectMeta.Generation
 		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(Equal(ctrl.Result{}))
+	})
+
+	It("applies ACM disaster recovery backup labels to custom installation template ConfigMaps during reconcile", func() {
+
+		// Set Generation to ensure reconciliation proceeds past ObservedGeneration check
+		generation := int64(1)
+		clusterInstance.ObjectMeta.Generation = generation
+		clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
+			ObservedGeneration: generation - 1, // Different from Generation to trigger reconciliation
+		}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		// Trigger reconciliation
+		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+		// The reconciliation will fail at validation, but the ACM backup labels should still be applied
+		// before validation occurs
+		if err != nil {
+			// If there's an error, it should be a validation error with requeue
+			Expect(res.Requeue).To(BeTrue())
+		}
+
+		// Verify the ACM backup labels were applied to the templates
+		updatedClusterTemplate := &corev1.ConfigMap{}
+		Expect(c.Get(ctx, types.NamespacedName{
+			Name:      "test-cluster-template",
+			Namespace: "default",
+		}, updatedClusterTemplate)).To(Succeed())
+		Expect(updatedClusterTemplate.GetLabels()).To(
+			HaveKeyWithValue(acmBackupLabel, acmBackupLabelValue),
+			"Cluster template should have ACM DR backup label applied during reconcile",
+		)
+
+		updatedNodeTemplate := &corev1.ConfigMap{}
+		Expect(c.Get(ctx, types.NamespacedName{
+			Name:      "test-node-template",
+			Namespace: "default",
+		}, updatedNodeTemplate)).To(Succeed())
+		Expect(updatedNodeTemplate.GetLabels()).To(
+			HaveKeyWithValue(acmBackupLabel, acmBackupLabelValue),
+			"Node template should have ACM DR backup label applied during reconcile",
+		)
+	})
+
+	It("returns error when ACM backup label application fails during reconcile", func() {
+		// Reference a non-existent template ConfigMap to trigger an error
+		clusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
+			{Name: "non-existent-template", Namespace: "default"},
+		}
+
+		// Set Generation to ensure reconciliation proceeds past ObservedGeneration check
+		generation := int64(1)
+		clusterInstance.ObjectMeta.Generation = generation
+		clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
+			ObservedGeneration: generation - 1,
+		}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		// Trigger reconciliation - should fail when trying to apply labels to non-existent ConfigMap
+		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+
+		// Verify error is returned
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("non-existent-template"))
 		Expect(res).To(Equal(ctrl.Result{}))
 	})
 })
