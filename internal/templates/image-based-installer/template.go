@@ -32,6 +32,7 @@ metadata:
   namespace: "{{ .Spec.ClusterName }}"
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
+    velero.io/restore-status: "true"
 spec:
   baseDomain: "{{ .Spec.BaseDomain }}"
   clusterInstallRef:
@@ -143,6 +144,7 @@ metadata:
 {{ end }}      
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
+    velero.io/restore-status: "true"
     inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
   labels:
     cluster.open-cluster-management.io/backup: cluster-activation
