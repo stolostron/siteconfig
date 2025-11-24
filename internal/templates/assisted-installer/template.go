@@ -244,6 +244,7 @@ metadata:
 {{ else }}
     infraenvs.agent-install.openshift.io: "{{ .SpecialVars.CurrentNode.HostName }}"
 {{ end }}
+    cluster.open-cluster-management.io/backup: cluster-activation
 spec:
   bootMode: "{{ .SpecialVars.CurrentNode.BootMode }}"
   bmc:
