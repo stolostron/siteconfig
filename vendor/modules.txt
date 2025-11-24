@@ -1,4 +1,4 @@
-# cel.dev/expr v0.25.0
+# cel.dev/expr v0.25.1
 ## explicit; go 1.23.0
 cel.dev/expr
 # github.com/Masterminds/goutils v1.1.1
