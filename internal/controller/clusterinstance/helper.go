@@ -39,9 +39,9 @@ const (
 )
 
 type SpecialVars struct {
-	CurrentNode                          v1alpha1.NodeSpec
-	InstallConfigOverrides, ReleaseImage string
-	ControlPlaneAgents, WorkerAgents     int
+	CurrentNode                                     v1alpha1.NodeSpec
+	InstallConfigOverrides, ReleaseImage            string
+	ControlPlaneAgents, WorkerAgents, ArbiterAgents int
 }
 
 // ClusterData is a special object that provides an interface to the ClusterInstance spec fields for use in rendering
@@ -145,15 +145,18 @@ func buildClusterData(
 		installConfigOverrides = ""
 	}
 
-	// Determine the number of control-plane and worker agents
+	// Determine the number of control-plane, worker, and arbiter agents
 	controlPlaneAgents := 0
 	workerAgents := 0
+	arbiterAgents := 0
 	for _, node := range clusterInstance.Spec.Nodes {
 		switch node.Role {
 		case "master":
 			controlPlaneAgents++
 		case "worker":
 			workerAgents++
+		case "arbiter":
+			arbiterAgents++
 		}
 	}
 
@@ -181,6 +184,7 @@ func buildClusterData(
 			InstallConfigOverrides: installConfigOverrides,
 			ControlPlaneAgents:     controlPlaneAgents,
 			WorkerAgents:           workerAgents,
+			ArbiterAgents:          arbiterAgents,
 			ReleaseImage:           releaseImage,
 		},
 	}
