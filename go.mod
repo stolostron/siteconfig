@@ -69,7 +69,7 @@ require (
 	github.com/google/pprof v0.0.0-20241210010833-40e02aabc2ad // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect
-	github.com/imdario/mergo v0.3.16 // indirect
+	github.com/imdario/mergo v1.0.2 // indirect
 	github.com/itchyny/gojq v0.12.18 // indirect
 	github.com/itchyny/timefmt-go v0.1.7 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
