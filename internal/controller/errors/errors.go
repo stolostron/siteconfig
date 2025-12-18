@@ -37,9 +37,10 @@ func (e *ClusterInstanceError) Error() string {
 
 // Predefined error types for ClusterInstance operations.
 const (
-	ErrorTypeNotOwnedObject  = "NOT_OWNED_OBJECT"
-	ErrorTypeDeletionTimeout = "DELETION_TIMEOUT"
-	ErrorTypeUnknown         = ""
+	ErrorTypeNotOwnedObject              = "NOT_OWNED_OBJECT"
+	ErrorTypeDeletionTimeout             = "DELETION_TIMEOUT"
+	ErrorTypeManagedClusterNotInManifest = "MANAGED_CLUSTER_NOT_IN_MANIFEST"
+	ErrorTypeUnknown                     = ""
 )
 
 // New creates a new ClusterInstanceError with a given code and message.
@@ -63,6 +64,12 @@ func NewNotOwnedObjectError(owner, resourceId string) error {
 func NewDeletionTimeoutError(resourceId string) error {
 	return New(ErrorTypeDeletionTimeout,
 		fmt.Sprintf("Timed out waiting to delete object (%s)", resourceId))
+}
+
+// NewManagedClusterNotInManifestError returns an error indicating the ManagedCluster resource
+// is not found in the ClusterInstance's rendered manifests.
+func NewManagedClusterNotInManifestError() error {
+	return New(ErrorTypeManagedClusterNotInManifest, "ManagedCluster not found in rendered manifests")
 }
 
 func isErrorOfType(err error, errType string) bool {
@@ -101,4 +108,10 @@ func IsNotOwnedObject(err error) bool {
 // IsDeletionTimeoutError checks if an error contains a DeletionTimeoutError.
 func IsDeletionTimeoutError(err error) bool {
 	return isErrorOfType(err, ErrorTypeDeletionTimeout)
+}
+
+// IsManagedClusterNotInManifestError checks if an error indicates the ManagedCluster
+// is not found in the rendered manifests.
+func IsManagedClusterNotInManifestError(err error) bool {
+	return isErrorOfType(err, ErrorTypeManagedClusterNotInManifest)
 }

@@ -265,6 +265,7 @@ var _ = Describe("getManagedCluster", func() {
 			Kind:     "ManagedCluster",
 			Name:     "test-cluster",
 			SyncWave: 1,
+			Status:   v1alpha1.ManifestRenderedSuccess,
 		})
 		managedCluster, err := getManagedCluster(clusterInstance)
 		Expect(err).NotTo(HaveOccurred())
@@ -617,5 +618,72 @@ var _ = Describe("computeClusterInstanceSpecDiff", func() {
 		diff2, err := computeClusterInstanceSpecDiff(clusterInstance)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(diff2).To(Equal(string(expected)))
+	})
+})
+
+var _ = Describe("getManagedClusterManifest", func() {
+	var clusterInstance *v1alpha1.ClusterInstance
+
+	BeforeEach(func() {
+		clusterInstance = &v1alpha1.ClusterInstance{
+			Status: v1alpha1.ClusterInstanceStatus{
+				ManifestsRendered: []v1alpha1.ManifestReference{},
+			},
+		}
+	})
+
+	It("should return ManagedCluster manifest when it exists with success status", func() {
+		apiGroup := ptr.To("cluster.open-cluster-management.io/v1")
+		clusterInstance.Status.ManifestsRendered = []v1alpha1.ManifestReference{
+			{
+				APIGroup: apiGroup,
+				Kind:     "ManagedCluster",
+				Name:     "test-cluster",
+				SyncWave: 1,
+				Status:   v1alpha1.ManifestRenderedSuccess,
+			},
+		}
+
+		manifest := getManagedClusterManifest(clusterInstance)
+		Expect(manifest).NotTo(BeNil())
+		Expect(manifest.Kind).To(Equal("ManagedCluster"))
+		Expect(manifest.Name).To(Equal("test-cluster"))
+		Expect(manifest.Status).To(Equal(v1alpha1.ManifestRenderedSuccess))
+	})
+
+	It("should return nil when ManagedCluster manifest does not exist", func() {
+		manifest := getManagedClusterManifest(clusterInstance)
+		Expect(manifest).To(BeNil())
+	})
+
+	It("should return nil when ManagedCluster manifest exists but status is not success", func() {
+		apiGroup := ptr.To("cluster.open-cluster-management.io/v1")
+		clusterInstance.Status.ManifestsRendered = []v1alpha1.ManifestReference{
+			{
+				APIGroup: apiGroup,
+				Kind:     "ManagedCluster",
+				Name:     "test-cluster",
+				SyncWave: 1,
+				Status:   v1alpha1.ManifestRenderedFailure,
+			},
+		}
+
+		manifest := getManagedClusterManifest(clusterInstance)
+		Expect(manifest).To(BeNil())
+	})
+
+	It("should return nil when only non-ManagedCluster manifests exist", func() {
+		apiGroup := ptr.To("v1")
+		clusterInstance.Status.ManifestsRendered = []v1alpha1.ManifestReference{
+			{
+				APIGroup: apiGroup,
+				Kind:     "ConfigMap",
+				Name:     "test-cm",
+				Status:   v1alpha1.ManifestRenderedSuccess,
+			},
+		}
+
+		manifest := getManagedClusterManifest(clusterInstance)
+		Expect(manifest).To(BeNil())
 	})
 })
