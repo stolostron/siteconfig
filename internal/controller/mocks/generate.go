@@ -18,3 +18,4 @@ package mocks
 
 // nolint:lll
 //go:generate mockgen -destination=client_mock_generated.go -package=mocks -mock_names=Client=GeneratedMockClient,StatusWriter=GeneratedMockStatusWriter sigs.k8s.io/controller-runtime/pkg/client Client,StatusWriter
+//go:generate mockgen -destination=spoke_client_factory_mock_generated.go -package=mocks github.com/stolostron/siteconfig/internal/controller/reinstall SpokeClientFactory

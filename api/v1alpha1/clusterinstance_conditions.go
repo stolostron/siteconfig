@@ -61,6 +61,7 @@ const (
 	ReinstallPreservationDataRestored    ClusterInstanceConditionType = "ReinstallPreservationDataRestored"
 	ReinstallClusterIdentityDataDetected ClusterInstanceConditionType = "ReinstallClusterIdentityDataDetected"
 	ReinstallRenderedManifestsDeleted    ClusterInstanceConditionType = "ReinstallRenderedManifestsDeleted"
+	ReinstallClusterReimported           ClusterInstanceConditionType = "ReinstallClusterReimported"
 )
 
 // The following constants define additional reinstall condition reasons

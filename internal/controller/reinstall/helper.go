@@ -39,28 +39,39 @@ import (
 	"github.com/stolostron/siteconfig/internal/controller/preservation"
 )
 
-func getManagedCluster(clusterInstance *v1alpha1.ClusterInstance) (*ci.RenderedObject, error) {
-	manifests := append([]v1alpha1.ManifestReference(nil), clusterInstance.Status.ManifestsRendered...)
-	for _, manifest := range manifests {
-		if manifest.Kind == "ManagedCluster" {
-			obj, err := ci.NewRenderedObject(map[string]interface{}{
-				"apiVersion": *manifest.APIGroup,
-				"kind":       manifest.Kind,
-				"metadata": map[string]interface{}{
-					"name": manifest.Name,
-					"annotations": map[string]string{
-						ci.WaveAnnotation: fmt.Sprintf("%d", manifest.SyncWave),
-					},
-				},
-			})
-			if err != nil {
-				return nil, fmt.Errorf("encountered an error while converting ManagedCluster to RenderedObject, err: %w",
-					err)
-			}
-			return obj, nil
+// getManagedClusterManifest extracts the ManagedCluster manifest reference from ClusterInstance status.
+// Only returns manifests with ManifestRenderedSuccess status.
+func getManagedClusterManifest(clusterInstance *v1alpha1.ClusterInstance) *v1alpha1.ManifestReference {
+	for i := range clusterInstance.Status.ManifestsRendered {
+		manifest := &clusterInstance.Status.ManifestsRendered[i]
+		if manifest.Kind == "ManagedCluster" && manifest.Status == v1alpha1.ManifestRenderedSuccess {
+			return manifest
 		}
 	}
-	return nil, nil
+	return nil
+}
+
+func getManagedCluster(clusterInstance *v1alpha1.ClusterInstance) (*ci.RenderedObject, error) {
+	manifest := getManagedClusterManifest(clusterInstance)
+	if manifest == nil {
+		return nil, nil
+	}
+
+	obj, err := ci.NewRenderedObject(map[string]interface{}{
+		"apiVersion": *manifest.APIGroup,
+		"kind":       manifest.Kind,
+		"metadata": map[string]interface{}{
+			"name": manifest.Name,
+			"annotations": map[string]string{
+				ci.WaveAnnotation: fmt.Sprintf("%d", manifest.SyncWave),
+			},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encountered an error while converting ManagedCluster to RenderedObject, err: %w",
+			err)
+	}
+	return obj, nil
 }
 
 func findReinstallStatusCondition(
@@ -144,6 +155,15 @@ func reinstallPreservationDataRestoredConditionStatus(
 	return conditionSetter(v1alpha1.ReinstallPreservationDataRestored, status, reason, message)
 }
 
+// reinstallClusterReimportedConditionStatus creates a condition for cluster reimport status
+func reinstallClusterReimportedConditionStatus(
+	status metav1.ConditionStatus,
+	reason v1alpha1.ClusterInstanceConditionReason,
+	message string,
+) *metav1.Condition {
+	return conditionSetter(v1alpha1.ReinstallClusterReimported, status, reason, message)
+}
+
 func initializeReinstallStatus(
 	ctx context.Context,
 	c client.Client,
@@ -157,6 +177,7 @@ func initializeReinstallStatus(
 		v1alpha1.ReinstallClusterIdentityDataDetected,
 		v1alpha1.ReinstallRenderedManifestsDeleted,
 		v1alpha1.ReinstallPreservationDataRestored,
+		v1alpha1.ReinstallClusterReimported,
 	}
 
 	now := metav1.Now()
@@ -188,6 +209,8 @@ func initializeReinstallStatus(
 
 	if clusterInstance.Status.Reinstall.InProgressGeneration != clusterInstance.Spec.Reinstall.Generation {
 		clusterInstance.Status.Reinstall.InProgressGeneration = clusterInstance.Spec.Reinstall.Generation
+		// Clear existing conditions for new reinstall generation to ensure fresh timestamps
+		clusterInstance.Status.Reinstall.Conditions = []metav1.Condition{}
 		updateRequired = true
 	}
 
