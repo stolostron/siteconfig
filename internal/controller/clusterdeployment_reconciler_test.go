@@ -435,8 +435,7 @@ var _ = Describe("Reconcile", func() {
 		compareToExpectedCondition(found, expectedCondition)
 	})
 
-	It("tests that ClusterInstance provisioned status condition is set to Unknown with reason set to StaleConditions "+
-		"when ClusterDeployment.Spec.Installed=true and the deployment conditions have not been updated", func() {
+	It("sets Provisioned to Completed when Spec.Installed transitions from false to true with stale conditions", func() {
 		key := types.NamespacedName{
 			Namespace: clusterNamespace,
 			Name:      clusterName,
@@ -488,7 +487,6 @@ var _ = Describe("Reconcile", func() {
 		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 		Expect(err).NotTo(HaveOccurred())
 
-		// Set cluster installed -> true
 		clusterDeployment.Spec.Installed = true
 		Expect(c.Update(ctx, clusterDeployment)).To(Succeed())
 
@@ -501,12 +499,104 @@ var _ = Describe("Reconcile", func() {
 
 		expectedCondition := &metav1.Condition{
 			Type:   string(v1alpha1.ClusterProvisioned),
-			Status: metav1.ConditionUnknown,
-			Reason: string(v1alpha1.StaleConditions),
+			Status: metav1.ConditionTrue,
+			Reason: string(v1alpha1.Completed),
 		}
 
 		found := conditions.FindStatusCondition(ci.Status.Conditions, expectedCondition.Type)
 		compareToExpectedCondition(found, expectedCondition)
+		Expect(found.Message).To(Equal("Cluster is installed (detected from ClusterDeployment Spec.Installed=true)"))
 	})
+
+	DescribeTable("sets Provisioned to Completed when Spec.Installed=true regardless of condition state",
+		func(statusConditions []hivev1.ClusterDeploymentCondition) {
+			key := types.NamespacedName{
+				Namespace: clusterNamespace,
+				Name:      clusterName,
+			}
+
+			clusterDeployment := &hivev1.ClusterDeployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      clusterName,
+					Namespace: clusterNamespace,
+					Labels: map[string]string{
+						ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
+					},
+				},
+				Spec: hivev1.ClusterDeploymentSpec{
+					Installed: true,
+				},
+				Status: hivev1.ClusterDeploymentStatus{
+					Conditions: statusConditions,
+				},
+			}
+
+			Expect(c.Create(ctx, clusterDeployment)).To(Succeed())
+
+			res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(ctrl.Result{}))
+
+			ci := &v1alpha1.ClusterInstance{}
+			Expect(c.Get(ctx, key, ci)).To(Succeed())
+
+			expectedCondition := &metav1.Condition{
+				Type:   string(v1alpha1.ClusterProvisioned),
+				Status: metav1.ConditionTrue,
+				Reason: string(v1alpha1.Completed),
+			}
+
+			found := conditions.FindStatusCondition(ci.Status.Conditions, expectedCondition.Type)
+			compareToExpectedCondition(found, expectedCondition)
+			Expect(found.Message).To(Equal("Cluster is installed (detected from ClusterDeployment Spec.Installed=true)"))
+		},
+		Entry("with missing conditions (restored cluster)",
+			[]hivev1.ClusterDeploymentCondition{},
+		),
+		Entry("with partial conditions (missing Stopped and Failed)",
+			[]hivev1.ClusterDeploymentCondition{
+				{
+					Type:    hivev1.ClusterInstallRequirementsMetClusterDeploymentCondition,
+					Status:  corev1.ConditionTrue,
+					Reason:  "ClusterInstallationStopped",
+					Message: "The cluster installation stopped",
+				},
+				{
+					Type:    hivev1.ClusterInstallCompletedClusterDeploymentCondition,
+					Status:  corev1.ConditionTrue,
+					Reason:  "InstallationCompleted",
+					Message: "The installation has completed: Cluster is installed",
+				},
+			},
+		),
+		Entry("with Unknown status conditions",
+			[]hivev1.ClusterDeploymentCondition{
+				{
+					Type:    hivev1.ClusterInstallRequirementsMetClusterDeploymentCondition,
+					Status:  corev1.ConditionUnknown,
+					Reason:  "Unknown",
+					Message: "Unknown",
+				},
+				{
+					Type:    hivev1.ClusterInstallStoppedClusterDeploymentCondition,
+					Status:  corev1.ConditionUnknown,
+					Reason:  "Unknown",
+					Message: "Unknown",
+				},
+				{
+					Type:    hivev1.ClusterInstallCompletedClusterDeploymentCondition,
+					Status:  corev1.ConditionUnknown,
+					Reason:  "Unknown",
+					Message: "Unknown",
+				},
+				{
+					Type:    hivev1.ClusterInstallFailedClusterDeploymentCondition,
+					Status:  corev1.ConditionUnknown,
+					Reason:  "Unknown",
+					Message: "Unknown",
+				},
+			},
+		),
+	)
 
 })
