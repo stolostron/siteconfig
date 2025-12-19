@@ -39,8 +39,6 @@ import (
 
 const DefaultDeletionTimeout = 30 * time.Minute
 
-const ManagedClusterKind = "ManagedCluster"
-
 type DeletionHandler struct {
 	Client client.Client
 	Logger *zap.Logger
@@ -245,32 +243,13 @@ func isObjectDeleted(ctx context.Context, c client.Client, obj client.Object) (b
 	return false, nil
 }
 
-// getPropagationPolicyForResource determines the appropriate deletion propagation policy
-// based on the resource type.
-//
-// ManagedCluster resources use Background propagation to allow ACM/OCM controllers to
-// manage the proper cleanup sequence (ManagedClusterAddons → ManifestWorks → ManagedCluster).
-// All other resources use Foreground propagation to ensure dependent resources are cleaned
-// up before the parent resource is deleted.
-func getPropagationPolicyForResource(obj client.Object) *metav1.DeletionPropagation {
-	gvk := obj.GetObjectKind().GroupVersionKind()
-
-	switch gvk.Kind {
-	case ManagedClusterKind:
-		// Use Background propagation for ManagedCluster to prevent immediate
-		// klusterlet uninstallation and allow proper ACM cleanup sequence
-		return ptr.To(metav1.DeletePropagationBackground)
-	default:
-		// Use Foreground propagation for all other resources to ensure
-		// dependent resources are deleted before the parent
-		return ptr.To(metav1.DeletePropagationForeground)
-	}
-}
-
 func initiateObjectDeletion(ctx context.Context, c client.Client, obj client.Object) error {
-	propagationPolicy := getPropagationPolicyForResource(obj)
+	// Use Background propagation for all resources to allow external controllers
+	// (baremetal-operator, assisted-service, ACM/OCM, etc.) to manage their own
+	// cleanup sequences for dependent resources. SiteConfig tracks deletion completion
+	// independently by checking if objects still exist in the API server.
 	if err := client.IgnoreNotFound(c.Delete(ctx, obj, &client.DeleteOptions{
-		PropagationPolicy: propagationPolicy,
+		PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
 	})); err != nil {
 		return fmt.Errorf(
 			"failed to delete object (%s/%s): %w", obj.GetNamespace(), obj.GetName(), err)
