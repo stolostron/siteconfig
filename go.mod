@@ -4,8 +4,8 @@ go 1.24.0
 
 require (
 	github.com/go-logr/logr v1.4.3
-	github.com/onsi/ginkgo/v2 v2.27.3
-	github.com/onsi/gomega v1.38.3
+	github.com/onsi/ginkgo/v2 v2.27.4
+	github.com/onsi/gomega v1.39.0
 	github.com/openshift/hive/apis v0.0.0-20251117181851-acea5e9196a2
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.34.3
