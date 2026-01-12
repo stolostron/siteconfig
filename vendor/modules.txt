@@ -1186,7 +1186,7 @@ k8s.io/utils/net
 k8s.io/utils/path
 k8s.io/utils/ptr
 k8s.io/utils/trace
-# open-cluster-management.io/api v0.15.0
+# open-cluster-management.io/api v0.16.2
 ## explicit; go 1.22.0
 open-cluster-management.io/api/cluster/v1
 # sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.34.0
