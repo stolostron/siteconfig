@@ -212,10 +212,11 @@ func main() {
 
 	// Create ReinstallHandler
 	reinstallHandler := &reinstall.ReinstallHandler{
-		Client:          mgr.GetClient(),
-		Logger:          siteconfigLogger.Named("ReinstallHandler"),
-		ConfigStore:     sharedConfigStore,
-		DeletionHandler: deletionHandler,
+		Client:             mgr.GetClient(),
+		Logger:             siteconfigLogger.Named("ReinstallHandler"),
+		ConfigStore:        sharedConfigStore,
+		DeletionHandler:    deletionHandler,
+		SpokeClientFactory: &reinstall.DefaultSpokeClientFactory{},
 	}
 
 	// Create ClusterInstance controller for reconciling ClusterInstance CRs
