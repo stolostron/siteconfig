@@ -32,6 +32,7 @@ metadata:
   namespace: "{{ .Spec.ClusterName }}"
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
+    velero.io/restore-status: "true"
 spec:
   baseDomain: "{{ .Spec.BaseDomain }}"
   clusterInstallRef:
@@ -92,6 +93,7 @@ metadata:
   namespace: "{{ .Spec.ClusterName }}"
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "1"
+    velero.io/restore-status: "true"
 spec:
   clusterDeploymentRef:
     name: "{{ .Spec.ClusterName }}"
