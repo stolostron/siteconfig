@@ -59,7 +59,7 @@ func (r *ClusterDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	// Get the ClusterDeployment CR
 	clusterDeployment := &hivev1.ClusterDeployment{}
-	if err := r.Client.Get(ctx, req.NamespacedName, clusterDeployment); err != nil {
+	if err := r.Get(ctx, req.NamespacedName, clusterDeployment); err != nil {
 		if errors.IsNotFound(err) {
 			log.Info("ClusterDeployment not found")
 			return doNotRequeue(), nil
@@ -270,7 +270,7 @@ func (r *ClusterDeploymentReconciler) getClusterInstance(
 	}
 
 	clusterInstance := &v1alpha1.ClusterInstance{}
-	if err := r.Client.Get(ctx, clusterInstanceRef,
+	if err := r.Get(ctx, clusterInstanceRef,
 		clusterInstance); err != nil {
 		if errors.IsNotFound(err) {
 			log.Info("ClusterInstance not found", zap.String("name", clusterInstanceRef.String()))
@@ -287,7 +287,7 @@ func (r *ClusterDeploymentReconciler) mapClusterInstanceToCD(
 	obj *v1alpha1.ClusterInstance,
 ) []reconcile.Request {
 	clusterInstance := &v1alpha1.ClusterInstance{}
-	if err := r.Client.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()},
+	if err := r.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()},
 		clusterInstance); err != nil {
 		return []reconcile.Request{}
 	}
