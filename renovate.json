@@ -106,7 +106,7 @@
         {
             "description": "Disable updates for pseudo-versions and replace directives",
             "matchManagers": ["gomod"],
-            "matchPackageNames": ["/^github\\.com\\/openshift\\/assisted-service//", "/^github\\.com\\/openshift\\/hive\\/apis//"],
+            "matchPackageNames": ["/^github\\.com\\/openshift\\/assisted-service//"],
             "enabled": false
         },
         {
