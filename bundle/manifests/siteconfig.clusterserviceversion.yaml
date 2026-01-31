@@ -1319,6 +1319,14 @@ spec:
           - get
           - patch
           - update
+        - apiGroups:
+          - work.open-cluster-management.io
+          resources:
+          - manifestworks
+          verbs:
+          - get
+          - list
+          - watch
         serviceAccountName: siteconfig-controller-manager
       deployments:
       - label:
