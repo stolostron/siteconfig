@@ -24,7 +24,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.1
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
-	open-cluster-management.io/api v0.15.0
+	open-cluster-management.io/api v0.16.2
 	sigs.k8s.io/yaml v1.4.0
 )
 
