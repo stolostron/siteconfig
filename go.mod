@@ -30,7 +30,7 @@ require (
 	go.uber.org/zap v1.27.1
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
-	open-cluster-management.io/api v0.15.0
+	open-cluster-management.io/api v0.16.2
 	sigs.k8s.io/yaml v1.6.0
 )
 
