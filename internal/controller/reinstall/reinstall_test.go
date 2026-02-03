@@ -27,7 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -585,7 +584,7 @@ var _ = Describe("ensureRenderedManifestsAreDeleted", func() {
 
 		result, err := handler.ensureRenderedManifestsAreDeleted(ctx, testLogger, clusterInstance)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeTrue())
+		Expect(result.RequeueAfter).ToNot(BeZero())
 
 		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallRenderedManifestsDeleted)
 		Expect(cond).NotTo(BeNil())
@@ -704,7 +703,6 @@ var _ = Describe("ensureRenderedManifestsAreDeleted", func() {
 		// Invoke deletion first time - to delete the resource, which triggers a requeue
 		result, err := handler.ensureRenderedManifestsAreDeleted(ctx, testLogger, clusterInstance)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeTrue())
 		Expect(result.RequeueAfter).To(Equal(deletionRequeueWithMediumInterval))
 
 		// Invoke deletion second time - to ensure that deletion was successful and that the status condition is correctly set
@@ -712,7 +710,7 @@ var _ = Describe("ensureRenderedManifestsAreDeleted", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Verify that requeue is set to reflect the update in ReinstallRenderedManifestsDeleted status condition
-		Expect(result.Requeue).To(BeTrue())
+		Expect(result.RequeueAfter).ToNot(BeZero())
 		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallRenderedManifestsDeleted)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
@@ -1131,7 +1129,7 @@ var _ = Describe("ensureDataIsPreserved", func() {
 
 		result, err := handler.ensureDataIsPreserved(ctx, testLogger, clusterInstance)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result).To(Equal(reconcile.Result{Requeue: true}))
+		Expect(result.RequeueAfter).ToNot(BeZero())
 		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallPreservationDataBackedup)
 		Expect(cond).ToNot(BeNil())
 		Expect(cond.Reason).To(Equal(string(v1alpha1.PreservationNotRequired)))
@@ -1248,7 +1246,7 @@ var _ = Describe("ensureDataIsPreserved", func() {
 
 		result, err := handler.ensureDataIsPreserved(ctx, testLogger, clusterInstance)
 		Expect(err).To(HaveOccurred())
-		Expect(result).To(Equal(reconcile.Result{Requeue: true}))
+		Expect(result.RequeueAfter).ToNot(BeZero())
 
 		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallPreservationDataBackedup)
 		Expect(cond).ToNot(BeNil())
@@ -1321,7 +1319,7 @@ var _ = Describe("ensurePreservedDataIsRestored", func() {
 
 		result, err := handler.ensurePreservedDataIsRestored(ctx, testLogger, clusterInstance)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result).To(Equal(reconcile.Result{Requeue: true}))
+		Expect(result.RequeueAfter).ToNot(BeZero())
 		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallPreservationDataRestored)
 		Expect(cond.Reason).To(Equal(string(v1alpha1.PreservationNotRequired)))
 	})
@@ -1398,7 +1396,7 @@ var _ = Describe("ensurePreservedDataIsRestored", func() {
 
 		result, err := handler.ensurePreservedDataIsRestored(ctx, testLogger, clusterInstance)
 		Expect(err).To(HaveOccurred())
-		Expect(result).To(Equal(reconcile.Result{Requeue: true}))
+		Expect(result.RequeueAfter).ToNot(BeZero())
 
 		cond := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallPreservationDataRestored)
 		Expect(cond).NotTo(BeNil())

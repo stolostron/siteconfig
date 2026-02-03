@@ -45,6 +45,7 @@ func ensureEquality(actual, expected client.Object) {
 	// Check for equality
 	sanitizeResourceMetadata(actual)
 	sanitizeResourceMetadata(expected)
+
 	Expect(equality.Semantic.DeepEqual(actual, expected)).To(BeTrue())
 }
 

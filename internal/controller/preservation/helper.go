@@ -165,6 +165,14 @@ func sanitizeResourceMetadata(obj client.Object) {
 	obj.SetOwnerReferences(nil)
 	obj.SetResourceVersion("")
 	obj.SetUID("")
+
+	// Clear TypeMeta as it's not consistently set when retrieved from the API
+	switch o := obj.(type) {
+	case *corev1.ConfigMap:
+		o.TypeMeta = metav1.TypeMeta{}
+	case *corev1.Secret:
+		o.TypeMeta = metav1.TypeMeta{}
+	}
 }
 
 func backupResources(
