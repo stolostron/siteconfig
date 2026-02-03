@@ -27,6 +27,7 @@ import (
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	"github.com/openshift/assisted-service/api/v1beta1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
+	hypershiftv1beta1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
@@ -42,6 +43,7 @@ func TestControllers(t *testing.T) {
 var _ = BeforeSuite(func() {
 	Expect(v1alpha1.AddToScheme(scheme.Scheme)).To(Succeed())
 	Expect(hivev1.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(hypershiftv1beta1.AddToScheme(scheme.Scheme)).To(Succeed())
 	Expect(v1beta1.AddToScheme(scheme.Scheme)).To(Succeed())
 	Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
 	Expect(bmh_v1alpha1.AddToScheme(scheme.Scheme)).To(Succeed())

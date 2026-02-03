@@ -280,6 +280,8 @@ github.com/openshift/custom-resource-status v1.1.3-0.20220503160415-f2fdb4999d87
 github.com/openshift/custom-resource-status v1.1.3-0.20220503160415-f2fdb4999d87/go.mod h1:DB/Mf2oTeiAmVVX1gN+NEqweonAPY0TKUwADizj8+ZA=
 github.com/openshift/hive/apis v0.0.0-20251117181851-acea5e9196a2 h1:xxJHYC6iqSuIXxAhGreMPihNYpPREwskYfn+n1t0bf4=
 github.com/openshift/hive/apis v0.0.0-20251117181851-acea5e9196a2/go.mod h1:B8r0x5pxVdoVmZNIiiTIonvarlstfasBleqXqpw2nP8=
+github.com/openshift/hypershift/api v0.0.0-20251023051326-e7286c1a2dab h1:SyQMPeaNY0eNfZT+D4EJfh8FXC4p1nCigdRGI+JCYDc=
+github.com/openshift/hypershift/api v0.0.0-20251023051326-e7286c1a2dab/go.mod h1:lgs9qSzYJJ2jLrDPNBBeVgsmIe9IKkE9TqJdumUqW3M=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=

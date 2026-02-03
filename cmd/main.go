@@ -48,6 +48,7 @@ import (
 	"github.com/openshift/assisted-service/api/v1beta1"
 
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
+	hypershiftv1beta1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 
@@ -74,6 +75,7 @@ func init() {
 	utilruntime.Must(v1alpha1.AddToScheme(scheme))
 	utilruntime.Must(hivev1.AddToScheme(scheme))
 	utilruntime.Must(v1beta1.AddToScheme(scheme))
+	utilruntime.Must(hypershiftv1beta1.AddToScheme(scheme))
 	utilruntime.Must(clusterv1.AddToScheme(scheme))
 	utilruntime.Must(bmh_v1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
@@ -246,6 +248,18 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error("Unable to create controller",
 			zap.String("controller", "ClusterDeploymentReconciler"),
+			zap.Error(err))
+		os.Exit(1)
+	}
+
+	// Create HostedCluster controller for monitoring cluster provisioning progress
+	if err := (&controller.HostedClusterReconciler{
+		Client: mgr.GetClient(),
+		Log:    siteconfigLogger.Named("HostedClusterReconciler"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error("Unable to create controller",
+			zap.String("controller", "HostedClusterReconciler"),
 			zap.Error(err))
 		os.Exit(1)
 	}
