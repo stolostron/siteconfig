@@ -22,7 +22,7 @@ require (
 
 require (
 	github.com/go-task/slim-sprig v2.20.0+incompatible
-	github.com/metal3-io/baremetal-operator/apis v0.9.1
+	github.com/metal3-io/baremetal-operator/apis v0.12.1
 	github.com/stretchr/testify v1.11.1
 	github.com/wI2L/jsondiff v0.7.0
 	go.uber.org/mock v0.6.0
@@ -90,7 +90,6 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/lib/pq v1.10.9 // indirect
-	github.com/metal3-io/baremetal-operator/pkg/hardwareutils v0.12.1 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
