@@ -307,7 +307,7 @@ func (r *ReinstallHandler) ensureRenderedManifestsAreDeleted(ctx context.Context
 					return
 				}
 				if changed && err == nil {
-					result.Requeue = true
+					result.RequeueAfter = requeueWithShortInterval
 				}
 			}
 		}
@@ -522,10 +522,9 @@ func (r *ReinstallHandler) ensureDataIsPreserved(
 		}
 
 		if updateRequired {
-			result.Requeue = true
+			result.RequeueAfter = requeueWithShortInterval
 			updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
 			if updateErr != nil {
-				result.RequeueAfter = requeueWithShortInterval
 				err = logAndWrapUpdateFailure(log, err, updateErr,
 					"failed to update reinstall preservation condition(s)")
 			}
@@ -580,10 +579,9 @@ func (r *ReinstallHandler) ensurePreservedDataIsRestored(
 			patch := client.MergeFrom(clusterInstance.DeepCopy())
 
 			if changed := setReinstallStatusCondition(clusterInstance, *preservationDataRestoredCondition); changed {
-				result.Requeue = true
+				result.RequeueAfter = requeueWithShortInterval
 				updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
 				if updateErr != nil {
-					result.RequeueAfter = requeueWithShortInterval
 					err = logAndWrapUpdateFailure(log, err, updateErr,
 						fmt.Sprintf("failed to update reinstall restore data condition '%s'",
 							preservationDataRestoredCondition.Type))
