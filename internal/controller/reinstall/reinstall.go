@@ -51,10 +51,11 @@ const (
 )
 
 type ReinstallHandler struct {
-	Client          client.Client
-	Logger          *zap.Logger
-	ConfigStore     *configuration.ConfigurationStore
-	DeletionHandler *deletion.DeletionHandler
+	Client             client.Client
+	Logger             *zap.Logger
+	ConfigStore        *configuration.ConfigurationStore
+	DeletionHandler    *deletion.DeletionHandler
+	SpokeClientFactory SpokeClientFactory
 }
 
 func (r *ReinstallHandler) ProcessRequest(

@@ -22,12 +22,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -39,6 +41,8 @@ import (
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
@@ -361,9 +365,175 @@ var _ = Describe("Reconcile", func() {
 		Expect(err.Error()).To(ContainSubstring("non-existent-template"))
 		Expect(res).To(Equal(ctrl.Result{}))
 	})
+
+	Context("Reinstall handling", func() {
+		BeforeEach(func() {
+			// Enable reinstalls for all tests in this context
+			r.ConfigStore.SetAllowReinstalls(true)
+		})
+
+		It("skips reimport check when provisioning is not complete and continues to validation", func() {
+			generation := int64(1)
+			clusterInstance.ObjectMeta.Generation = generation
+			clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
+				ObservedGeneration: generation - 1,
+				Reinstall: &v1alpha1.ReinstallStatus{
+					ObservedGeneration: "test-gen-1",
+					Conditions: []metav1.Condition{
+						{
+							Type:   string(v1alpha1.ReinstallRequestProcessed),
+							Status: metav1.ConditionTrue,
+							Reason: string(v1alpha1.Completed),
+						},
+					},
+				},
+				// Note: ClusterProvisioned condition is not set, so EnsureClusterIsReimported
+				// will skip the reimport check and return early without error
+			}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+			key := types.NamespacedName{
+				Namespace: testParams.ClusterName,
+				Name:      testParams.ClusterNamespace,
+			}
+
+			res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// EnsureClusterIsReimported returns early (no error, reimportNeeded=false) because
+			// ClusterProvisioned condition is not set. Reconcile continues to validation which
+			// fails because the ClusterInstance is not fully configured.
+			Expect(err).To(HaveOccurred())
+			Expect(res).To(Equal(requeueWithDelay(DefaultValidationErrorDelay)))
+		})
+
+		It("processes reinstall request when spec.Reinstall is set and status doesn't match", func() {
+			generation := int64(1)
+			clusterInstance.ObjectMeta.Generation = generation
+			clusterInstance.Spec.Reinstall = &v1alpha1.ReinstallSpec{
+				Generation:       "test-gen-1",
+				PreservationMode: v1alpha1.PreservationModeNone,
+			}
+			clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
+				ObservedGeneration: generation - 1,
+				// Status.Reinstall is nil, so ObservedGeneration doesn't match spec
+			}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+			key := types.NamespacedName{
+				Namespace: testParams.ClusterName,
+				Name:      testParams.ClusterNamespace,
+			}
+
+			res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// ProcessRequest will be called since status.Reinstall is nil
+			// When status.Reinstall is nil, ProcessRequest initializes the status and requeues
+			Expect(err).NotTo(HaveOccurred())
+			// Expect a requeue since ProcessRequest returns {Requeue: true} after initialization
+			Expect(res.Requeue).To(BeTrue())
+		})
+
+		It("skips reinstall processing when status.Reinstall.ObservedGeneration matches spec", func() {
+			generation := int64(1)
+			reinstallGen := "test-gen-1"
+			clusterInstance.ObjectMeta.Generation = generation
+			clusterInstance.Spec.Reinstall = &v1alpha1.ReinstallSpec{
+				Generation:       reinstallGen,
+				PreservationMode: v1alpha1.PreservationModeNone,
+			}
+			clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
+				ObservedGeneration: generation - 1,
+				Reinstall: &v1alpha1.ReinstallStatus{
+					ObservedGeneration: reinstallGen, // Matches spec.Reinstall.Generation
+					Conditions: []metav1.Condition{
+						{
+							Type:   string(v1alpha1.ReinstallRequestProcessed),
+							Status: metav1.ConditionTrue,
+							Reason: string(v1alpha1.Completed),
+						},
+					},
+				},
+			}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+			key := types.NamespacedName{
+				Namespace: testParams.ClusterName,
+				Name:      testParams.ClusterNamespace,
+			}
+
+			res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// Since status.Reinstall.ObservedGeneration matches spec.Reinstall.Generation,
+			// ProcessRequest should be skipped and reconcile continues to validation
+			// We expect a validation error since the ClusterInstance is not fully configured
+			Expect(err).To(HaveOccurred())
+			Expect(res).To(Equal(requeueWithDelay(DefaultValidationErrorDelay)))
+		})
+
+		It("requeues when reimport is still in progress", func() {
+			provisionedTime := metav1.NewTime(time.Now().Add(-2 * time.Minute)) // Within grace period
+			generation := int64(1)
+			clusterInstance.ObjectMeta.Generation = generation
+			clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
+				ObservedGeneration: generation - 1,
+				Conditions: []metav1.Condition{
+					{
+						Type:               string(v1alpha1.ClusterProvisioned),
+						Status:             metav1.ConditionTrue,
+						Reason:             string(v1alpha1.Completed),
+						LastTransitionTime: provisionedTime,
+					},
+				},
+				Reinstall: &v1alpha1.ReinstallStatus{
+					ObservedGeneration: "test-gen-1",
+					Conditions: []metav1.Condition{
+						{
+							Type:   string(v1alpha1.ReinstallRequestProcessed),
+							Status: metav1.ConditionTrue,
+							Reason: string(v1alpha1.Completed),
+						},
+					},
+				},
+				ManifestsRendered: []v1alpha1.ManifestReference{
+					{
+						APIGroup: ptr.To("cluster.open-cluster-management.io/v1"),
+						Kind:     "ManagedCluster",
+						Name:     testParams.ClusterName,
+						Status:   v1alpha1.ManifestRenderedSuccess,
+					},
+				},
+			}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+			// Create unhealthy ManagedCluster (triggers reimport in progress)
+			managedCluster := &clusterv1.ManagedCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testParams.ClusterName,
+				},
+				Status: clusterv1.ManagedClusterStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   clusterv1.ManagedClusterConditionAvailable,
+							Status: metav1.ConditionUnknown,
+							Reason: "ManagedClusterLeaseUpdateStopped",
+						},
+					},
+				},
+			}
+			Expect(c.Create(ctx, managedCluster)).To(Succeed())
+
+			key := types.NamespacedName{
+				Namespace: testParams.ClusterName,
+				Name:      testParams.ClusterNamespace,
+			}
+
+			res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// EnsureClusterIsReimported returns reimportNeeded=true because cluster is
+			// unhealthy within grace period. Reconcile should return early with requeue.
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Requeue).To(BeTrue())
+		})
+	})
 })
 
-var _ = Describe("Reconcile", func() {
+var _ = Describe("updateObservedStatus", func() {
 	var (
 		c               client.Client
 		r               *ClusterInstanceReconciler
@@ -3434,5 +3604,486 @@ var _ = Describe("applyACMBackupLabelToInstallTemplates", func() {
 				installTemplateCM.Namespace, installTemplateCM.Name,
 			)
 		}
+	})
+})
+
+var _ = Describe("SetupWithManager", func() {
+	var (
+		testLogger = zap.NewNop().Named("Test")
+	)
+
+	It("successfully sets up the controller with the manager", func() {
+		// Get config (does not panic like GetConfigOrDie)
+		cfg, err := ctrl.GetConfig()
+		if err != nil {
+			Skip("Skipping SetupWithManager test - no kubeconfig available")
+		}
+
+		c := fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			Build()
+
+		configStore, err := configuration.NewConfigurationStore(configuration.NewDefaultConfiguration())
+		Expect(err).ToNot(HaveOccurred())
+
+		deletionHandler := &deletion.DeletionHandler{Client: c, Logger: testLogger}
+		r := &ClusterInstanceReconciler{
+			Client:          c,
+			Scheme:          scheme.Scheme,
+			Log:             testLogger,
+			TmplEngine:      ci.NewTemplateEngine(),
+			ConfigStore:     configStore,
+			DeletionHandler: deletionHandler,
+			ReinstallHandler: &reinstall.ReinstallHandler{Client: c, Logger: testLogger,
+				DeletionHandler: deletionHandler, ConfigStore: configStore},
+		}
+
+		// Create a manager
+		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+			Scheme: scheme.Scheme,
+		})
+		Expect(err).ToNot(HaveOccurred())
+
+		err = r.SetupWithManager(mgr)
+		Expect(err).ToNot(HaveOccurred())
+
+		// Verify that the event recorder was set
+		Expect(r.Recorder).ToNot(BeNil())
+	})
+
+	It("returns the configured max concurrent reconciles value", func() {
+		config := configuration.NewDefaultConfiguration()
+		err := config.FromMap(map[string]string{"maxConcurrentReconciles": "5"})
+		Expect(err).ToNot(HaveOccurred())
+
+		configStore, err := configuration.NewConfigurationStore(config)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(configStore.GetMaxConcurrentReconciles()).To(Equal(5))
+	})
+
+	Describe("holdAnnotationPredicate", func() {
+		// Create the predicate directly matching the implementation
+		holdAnnotationPredicate := predicate.Funcs{
+			UpdateFunc: func(e event.UpdateEvent) bool {
+				_, oldEvent := e.ObjectOld.GetAnnotations()[v1alpha1.PausedAnnotation]
+				_, newEvent := e.ObjectNew.GetAnnotations()[v1alpha1.PausedAnnotation]
+				return oldEvent != newEvent
+			},
+		}
+
+		It("returns true when paused annotation is added", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+				},
+			}
+			newCI := oldCI.DeepCopy()
+			metav1.SetMetaDataAnnotation(&newCI.ObjectMeta, v1alpha1.PausedAnnotation, "test-reason")
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newCI,
+			}
+
+			result := holdAnnotationPredicate.Update(updateEvent)
+			Expect(result).To(BeTrue())
+		})
+
+		It("returns true when paused annotation is removed", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        TestClusterInstanceName,
+					Namespace:   TestClusterInstanceNamespace,
+					Annotations: map[string]string{v1alpha1.PausedAnnotation: "test-reason"},
+				},
+			}
+			newCI := oldCI.DeepCopy()
+			delete(newCI.Annotations, v1alpha1.PausedAnnotation)
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newCI,
+			}
+
+			result := holdAnnotationPredicate.Update(updateEvent)
+			Expect(result).To(BeTrue())
+		})
+
+		It("returns false when paused annotation is unchanged (both absent)", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+				},
+			}
+			newCI := oldCI.DeepCopy()
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newCI,
+			}
+
+			result := holdAnnotationPredicate.Update(updateEvent)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false when paused annotation is unchanged (both present)", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        TestClusterInstanceName,
+					Namespace:   TestClusterInstanceNamespace,
+					Annotations: map[string]string{v1alpha1.PausedAnnotation: "test-reason"},
+				},
+			}
+			newCI := oldCI.DeepCopy()
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newCI,
+			}
+
+			result := holdAnnotationPredicate.Update(updateEvent)
+			Expect(result).To(BeFalse())
+		})
+	})
+
+	Describe("provisionedChangedPredicate", func() {
+		// Create the predicate directly matching the implementation
+		provisionedChangedPredicate := predicate.Funcs{
+			UpdateFunc: func(e event.UpdateEvent) bool {
+				oldCI, oldOK := e.ObjectOld.(*v1alpha1.ClusterInstance)
+				newCI, newOK := e.ObjectNew.(*v1alpha1.ClusterInstance)
+
+				if !oldOK || !newOK {
+					return false
+				}
+
+				// Only trigger if there's an active reinstall
+				if newCI.Spec.Reinstall == nil || newCI.Status.Reinstall == nil {
+					return false
+				}
+
+				// Trigger reconcile when Provisioned condition changes
+				oldProvisioned := meta.FindStatusCondition(oldCI.Status.Conditions, string(v1alpha1.ClusterProvisioned))
+				newProvisioned := meta.FindStatusCondition(newCI.Status.Conditions, string(v1alpha1.ClusterProvisioned))
+
+				// Check if status or reason changed
+				if oldProvisioned == nil && newProvisioned != nil {
+					return true
+				}
+				if oldProvisioned != nil && newProvisioned != nil {
+					return oldProvisioned.Status != newProvisioned.Status ||
+						oldProvisioned.Reason != newProvisioned.Reason
+				}
+
+				return false
+			},
+		}
+
+		It("returns false when type assertion fails for old object", func() {
+			oldObj := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "test"},
+			}
+			newCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+				},
+			}
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldObj,
+				ObjectNew: newCI,
+			}
+
+			result := provisionedChangedPredicate.Update(updateEvent)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false when type assertion fails for new object", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+				},
+			}
+			newObj := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "test"},
+			}
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newObj,
+			}
+
+			result := provisionedChangedPredicate.Update(updateEvent)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false when spec.Reinstall is nil", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+				},
+			}
+			newCI := oldCI.DeepCopy()
+			newCI.Status.Reinstall = &v1alpha1.ReinstallStatus{
+				ObservedGeneration: "test-gen",
+			}
+			// spec.Reinstall is nil
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newCI,
+			}
+
+			result := provisionedChangedPredicate.Update(updateEvent)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false when status.Reinstall is nil", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+				},
+			}
+			newCI := oldCI.DeepCopy()
+			newCI.Spec.Reinstall = &v1alpha1.ReinstallSpec{
+				Generation: "test-gen",
+			}
+			// status.Reinstall is nil
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newCI,
+			}
+
+			result := provisionedChangedPredicate.Update(updateEvent)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns true when Provisioned condition is added during reinstall", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+				},
+				Spec: v1alpha1.ClusterInstanceSpec{
+					Reinstall: &v1alpha1.ReinstallSpec{
+						Generation: "test-gen",
+					},
+				},
+				Status: v1alpha1.ClusterInstanceStatus{
+					Reinstall: &v1alpha1.ReinstallStatus{
+						ObservedGeneration: "test-gen",
+					},
+					// No Provisioned condition
+				},
+			}
+			newCI := oldCI.DeepCopy()
+			newCI.Status.Conditions = []metav1.Condition{
+				{
+					Type:   string(v1alpha1.ClusterProvisioned),
+					Status: metav1.ConditionTrue,
+					Reason: string(v1alpha1.Completed),
+				},
+			}
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newCI,
+			}
+
+			result := provisionedChangedPredicate.Update(updateEvent)
+			Expect(result).To(BeTrue())
+		})
+
+		It("returns true when Provisioned condition status changes during reinstall", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+				},
+				Spec: v1alpha1.ClusterInstanceSpec{
+					Reinstall: &v1alpha1.ReinstallSpec{
+						Generation: "test-gen",
+					},
+				},
+				Status: v1alpha1.ClusterInstanceStatus{
+					Reinstall: &v1alpha1.ReinstallStatus{
+						ObservedGeneration: "test-gen",
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:   string(v1alpha1.ClusterProvisioned),
+							Status: metav1.ConditionFalse,
+							Reason: string(v1alpha1.InProgress),
+						},
+					},
+				},
+			}
+			newCI := oldCI.DeepCopy()
+			newCI.Status.Conditions = []metav1.Condition{
+				{
+					Type:   string(v1alpha1.ClusterProvisioned),
+					Status: metav1.ConditionTrue,
+					Reason: string(v1alpha1.Completed),
+				},
+			}
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newCI,
+			}
+
+			result := provisionedChangedPredicate.Update(updateEvent)
+			Expect(result).To(BeTrue())
+		})
+
+		It("returns true when Provisioned condition reason changes during reinstall", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+				},
+				Spec: v1alpha1.ClusterInstanceSpec{
+					Reinstall: &v1alpha1.ReinstallSpec{
+						Generation: "test-gen",
+					},
+				},
+				Status: v1alpha1.ClusterInstanceStatus{
+					Reinstall: &v1alpha1.ReinstallStatus{
+						ObservedGeneration: "test-gen",
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:   string(v1alpha1.ClusterProvisioned),
+							Status: metav1.ConditionFalse,
+							Reason: string(v1alpha1.InProgress),
+						},
+					},
+				},
+			}
+			newCI := oldCI.DeepCopy()
+			newCI.Status.Conditions = []metav1.Condition{
+				{
+					Type:   string(v1alpha1.ClusterProvisioned),
+					Status: metav1.ConditionFalse,
+					Reason: string(v1alpha1.Failed),
+				},
+			}
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newCI,
+			}
+
+			result := provisionedChangedPredicate.Update(updateEvent)
+			Expect(result).To(BeTrue())
+		})
+
+		It("returns false when Provisioned condition is unchanged during reinstall", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+				},
+				Spec: v1alpha1.ClusterInstanceSpec{
+					Reinstall: &v1alpha1.ReinstallSpec{
+						Generation: "test-gen",
+					},
+				},
+				Status: v1alpha1.ClusterInstanceStatus{
+					Reinstall: &v1alpha1.ReinstallStatus{
+						ObservedGeneration: "test-gen",
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:   string(v1alpha1.ClusterProvisioned),
+							Status: metav1.ConditionTrue,
+							Reason: string(v1alpha1.Completed),
+						},
+					},
+				},
+			}
+			newCI := oldCI.DeepCopy()
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newCI,
+			}
+
+			result := provisionedChangedPredicate.Update(updateEvent)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false when Provisioned condition exists only in old object during reinstall", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+				},
+				Spec: v1alpha1.ClusterInstanceSpec{
+					Reinstall: &v1alpha1.ReinstallSpec{
+						Generation: "test-gen",
+					},
+				},
+				Status: v1alpha1.ClusterInstanceStatus{
+					Reinstall: &v1alpha1.ReinstallStatus{
+						ObservedGeneration: "test-gen",
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:   string(v1alpha1.ClusterProvisioned),
+							Status: metav1.ConditionTrue,
+							Reason: string(v1alpha1.Completed),
+						},
+					},
+				},
+			}
+			newCI := oldCI.DeepCopy()
+			newCI.Status.Conditions = []metav1.Condition{} // Remove all conditions
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newCI,
+			}
+
+			result := provisionedChangedPredicate.Update(updateEvent)
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false when neither object has Provisioned condition during reinstall", func() {
+			oldCI := &v1alpha1.ClusterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      TestClusterInstanceName,
+					Namespace: TestClusterInstanceNamespace,
+				},
+				Spec: v1alpha1.ClusterInstanceSpec{
+					Reinstall: &v1alpha1.ReinstallSpec{
+						Generation: "test-gen",
+					},
+				},
+				Status: v1alpha1.ClusterInstanceStatus{
+					Reinstall: &v1alpha1.ReinstallStatus{
+						ObservedGeneration: "test-gen",
+					},
+				},
+			}
+			newCI := oldCI.DeepCopy()
+
+			updateEvent := event.UpdateEvent{
+				ObjectOld: oldCI,
+				ObjectNew: newCI,
+			}
+
+			result := provisionedChangedPredicate.Update(updateEvent)
+			Expect(result).To(BeFalse())
+		})
 	})
 })

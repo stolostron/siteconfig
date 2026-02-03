@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -70,6 +71,7 @@ const (
 	DefaultDeletionRequeueDelay        = 1 * time.Minute
 	DefaultValidationErrorDelay        = 30 * time.Second
 	DefaultTemplateRenderingErrorDelay = 30 * time.Second
+	DefaultReimportErrorDelay          = 30 * time.Second
 )
 
 // ClusterInstanceReconciler reconciles a ClusterInstance object
@@ -137,6 +139,7 @@ func requeueForDeletion() ctrl.Result {
 //+kubebuilder:rbac:groups=metal3.io,resources=hostfirmwaresettings,verbs=get;create;update;patch;delete
 //+kubebuilder:rbac:groups=hypershift.openshift.io,resources=hostedclusters,verbs=get;create;update;patch;delete
 //+kubebuilder:rbac:groups=hypershift.openshift.io,resources=nodepools,verbs=get;create;update;patch;delete
+//+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -199,6 +202,18 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			log.Error("Encountered error while handling finalizer", zap.Error(err))
 		}
 		return res, err
+	}
+
+	// Check if ManagedCluster requires reimport (only during reinstalls)
+	if reinstallStatus := clusterInstance.Status.Reinstall; reinstallStatus != nil {
+		result, reimportNeeded, err := r.ReinstallHandler.EnsureClusterIsReimported(ctx, log, clusterInstance)
+		if err != nil {
+			return requeueWithErrorAfterDelay(err, DefaultReimportErrorDelay)
+		}
+		if reimportNeeded {
+			log.Info("Cluster reimport still in progress, requeuing")
+			return result, nil
+		}
 	}
 
 	// Pre-empt the reconcile-loop when the ObservedGeneration is the same as the Generation
@@ -857,6 +872,38 @@ func (r *ClusterInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		},
 	}
 
+	// Trigger reconciliation when Provisioned condition changes during reinstall
+	provisionedChangedPredicate := predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldCI, oldOK := e.ObjectOld.(*v1alpha1.ClusterInstance)
+			newCI, newOK := e.ObjectNew.(*v1alpha1.ClusterInstance)
+
+			if !oldOK || !newOK {
+				return false
+			}
+
+			// Only trigger if there's an active reinstall
+			if newCI.Spec.Reinstall == nil || newCI.Status.Reinstall == nil {
+				return false
+			}
+
+			// Trigger reconcile when Provisioned condition changes
+			oldProvisioned := meta.FindStatusCondition(oldCI.Status.Conditions, string(v1alpha1.ClusterProvisioned))
+			newProvisioned := meta.FindStatusCondition(newCI.Status.Conditions, string(v1alpha1.ClusterProvisioned))
+
+			// Check if status or reason changed
+			if oldProvisioned == nil && newProvisioned != nil {
+				return true
+			}
+			if oldProvisioned != nil && newProvisioned != nil {
+				return oldProvisioned.Status != newProvisioned.Status ||
+					oldProvisioned.Reason != newProvisioned.Reason
+			}
+
+			return false
+		},
+	}
+
 	//nolint:wrapcheck
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.ClusterInstance{}).
@@ -864,6 +911,7 @@ func (r *ClusterInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			predicate.GenerationChangedPredicate{},
 			predicate.LabelChangedPredicate{},
 			holdAnnotationPredicate,
+			provisionedChangedPredicate,
 		)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: r.ConfigStore.GetMaxConcurrentReconciles(),

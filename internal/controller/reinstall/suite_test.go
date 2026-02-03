@@ -19,7 +19,9 @@ package reinstall
 import (
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
+	clusterv1 "open-cluster-management.io/api/cluster/v1"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 
@@ -34,4 +36,6 @@ func TestReinstall(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	Expect(v1alpha1.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(corev1.AddToScheme(scheme.Scheme)).To(Succeed())
 })
