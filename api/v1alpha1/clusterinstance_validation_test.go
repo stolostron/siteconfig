@@ -427,6 +427,25 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 
+		It("should return nil when cluster-level cpuArchitecture is set from unset (CRD upgrade)", func() {
+			// Simulate CRD upgrade scenario: old spec has no cpuArchitecture,
+			// new spec has it set after the field was added to the CRD.
+			oldClusterInstance.Spec.CPUArchitecture = ""
+			newClusterInstance.Spec.CPUArchitecture = CPUArchitectureX86_64
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil when node cpuArchitecture is set from unset (CRD upgrade)", func() {
+			// Simulate CRD upgrade scenario: old nodes have no cpuArchitecture,
+			// new nodes have it set after the field was added to the CRD.
+			for i := range newClusterInstance.Spec.Nodes {
+				newClusterInstance.Spec.Nodes[i].CPUArchitecture = CPUArchitectureX86_64
+			}
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
 		It("should return nil for changes to nodes.nodeNetwork.macAddress when reinstall is triggered", func() {
 			newClusterInstance.Spec.Reinstall = &ReinstallSpec{
 				Generation: "reinstall-1",
@@ -451,6 +470,16 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 	})
 
 	Context("invalid spec changes", func() {
+		It("should return error for cluster-level cpuArchitecture change when already set", func() {
+			oldClusterInstance.Spec.CPUArchitecture = CPUArchitectureX86_64
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.CPUArchitecture = CPUArchitectureAarch64
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("detected unauthorized changes in immutable fields"))
+			Expect(err.Error()).To(ContainSubstring("/cpuArchitecture"))
+		})
+
 		It("should return error for ClusterNetwork changes", func() {
 			newClusterInstance.Spec.ClusterNetwork = []ClusterNetworkEntry{
 				{
@@ -476,6 +505,21 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("detected unauthorized node modifications"))
 			Expect(err.Error()).To(ContainSubstring("unauthorized change to bootMACAddress"))
+		})
+
+		It("should return error for cpuArchitecture change when already set", func() {
+			// When cpuArchitecture is already set, changing it should be rejected
+			for i := range oldClusterInstance.Spec.Nodes {
+				oldClusterInstance.Spec.Nodes[i].CPUArchitecture = CPUArchitectureX86_64
+			}
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			for i := range newClusterInstance.Spec.Nodes {
+				newClusterInstance.Spec.Nodes[i].CPUArchitecture = CPUArchitectureAarch64
+			}
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("detected unauthorized node modifications"))
+			Expect(err.Error()).To(ContainSubstring("unauthorized change to /cpuArchitecture"))
 		})
 	})
 

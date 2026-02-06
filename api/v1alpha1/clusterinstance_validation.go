@@ -529,22 +529,42 @@ func getUnauthorizedChanges(oldNode, newNode NodeSpec, allowReinstall bool) []st
 
 	// Check other fields using JSON diff for completeness
 	if len(unauthorized) == 0 {
-		oldJSON, _ := json.Marshal(oldNode)
-		newJSON, _ := json.Marshal(newNode)
-		if !bytes.Equal(oldJSON, newJSON) {
-			// There are changes, check if they're all permissible
-			diffs, err := jsondiff.CompareJSON(oldJSON, newJSON)
-			if err == nil {
-				for _, diff := range diffs {
-					if !isPermissibleNodeChange(diff.Path, allowReinstall) {
-						unauthorized = append(unauthorized, diff.Path)
-					}
-				}
-			}
-		}
+		unauthorized = append(unauthorized, getUnauthorizedJSONDiffs(oldNode, newNode, allowReinstall)...)
 	}
 
 	return unauthorized
+}
+
+// getUnauthorizedJSONDiffs compares two nodes via JSON diff and returns unauthorized field changes
+func getUnauthorizedJSONDiffs(oldNode, newNode NodeSpec, allowReinstall bool) []string {
+	oldJSON, _ := json.Marshal(oldNode)
+	newJSON, _ := json.Marshal(newNode)
+
+	if bytes.Equal(oldJSON, newJSON) {
+		return nil
+	}
+
+	diffs, err := jsondiff.CompareJSON(oldJSON, newJSON)
+	if err != nil {
+		return nil
+	}
+
+	var unauthorized []string
+	for _, diff := range diffs {
+		if isCRDUpgradeFieldAddition(diff) {
+			continue
+		}
+		if !isPermissibleNodeChange(diff.Path, allowReinstall) {
+			unauthorized = append(unauthorized, diff.Path)
+		}
+	}
+	return unauthorized
+}
+
+// isCRDUpgradeFieldAddition returns true if the diff represents a field being added
+// for the first time during a CRD upgrade (transition from absent to a valid value).
+func isCRDUpgradeFieldAddition(diff jsondiff.Operation) bool {
+	return diff.Path == "/cpuArchitecture" && diff.Type == jsondiff.OperationAdd
 }
 
 // getNodeIdentifier returns a human-readable identifier for a node
@@ -655,6 +675,10 @@ func validateChangesWithJSONDiff(
 				restrictedChanges = append(restrictedChanges, diff.Path)
 				continue
 			}
+		}
+
+		if isCRDUpgradeFieldAddition(diff) {
+			continue
 		}
 
 		// Record disallowed changes.
