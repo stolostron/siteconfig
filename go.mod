@@ -1,8 +1,6 @@
 module github.com/stolostron/siteconfig
 
-go 1.24.0
-
-toolchain go1.24.6
+go 1.25.0
 
 require (
 	github.com/go-logr/logr v1.4.3 // indirect
@@ -10,11 +8,11 @@ require (
 	github.com/onsi/gomega v1.36.2
 	github.com/openshift/hive/apis v0.0.0-20251118235423-715614a9f379
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.33.3
-	k8s.io/apiextensions-apiserver v0.31.3 // indirect
-	k8s.io/apimachinery v0.33.3
-	k8s.io/client-go v0.33.3
-	sigs.k8s.io/controller-runtime v0.19.7
+	k8s.io/api v0.34.1
+	k8s.io/apiextensions-apiserver v0.34.1 // indirect
+	k8s.io/apimachinery v0.34.1
+	k8s.io/client-go v0.34.1
+	sigs.k8s.io/controller-runtime v0.22.3
 )
 
 require (
@@ -23,9 +21,9 @@ require (
 	github.com/openshift/assisted-service/api v0.0.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.1
-	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
-	open-cluster-management.io/api v0.16.2
-	sigs.k8s.io/yaml v1.4.0
+	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
+	open-cluster-management.io/api v1.2.0
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -64,7 +62,8 @@ require (
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/google/gnostic-models v0.6.9 // indirect
+	github.com/google/btree v1.1.3 // indirect
+	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20241210010833-40e02aabc2ad // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -101,6 +100,7 @@ require (
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/term v0.39.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
@@ -112,11 +112,11 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gorm.io/gorm v1.31.1 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
-	k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff // indirect
+	k8s.io/kube-openapi v0.0.0-20250710124328-f3f2b991d03b // indirect
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
-	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
+	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
 )
 
 replace (
