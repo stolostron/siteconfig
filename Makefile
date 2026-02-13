@@ -97,6 +97,16 @@ help: ## Display this help.
 	@echo "Available targets:"
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+.PHONY: clean
+clean: ## Clean build artifacts, downloaded tools, caches.
+	@echo "Cleaning downloaded tools and build artifacts..."
+	rm -rf $(LOCALBIN)
+	rm -f test-coverage.out sorted-coverage.out controller.test
+	rm -f $(unit_test_json_output)
+
+	@# Clean Go build cache and test cache
+	go clean -cache -testcache
+
 ##@ Development
 
 .PHONY: manifests
