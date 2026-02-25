@@ -44,7 +44,7 @@ spec:
       - name: revision
         value: main
       - name: pathInRepo
-        value: pipelines/common.yaml
+        value: pipelines/common-base.yaml
   taskRunTemplate:
     serviceAccountName: build-pipeline-siteconfig-main
   workspaces:
