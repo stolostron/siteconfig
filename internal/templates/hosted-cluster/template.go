@@ -270,7 +270,7 @@ metadata:
   namespace: "{{ .SpecialVars.CurrentNode.HostRef.Namespace }}"
 {{ else }}
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
-  namespace: "{{ .Spec.ClusterName }}" 
+  namespace: "{{ .Spec.ClusterName }}"
 {{ end }}
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "3"
