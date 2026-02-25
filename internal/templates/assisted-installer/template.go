@@ -221,8 +221,8 @@ metadata:
   namespace: "{{ .SpecialVars.CurrentNode.HostRef.Namespace }}"
 {{ else }}
   name: "{{ .SpecialVars.CurrentNode.HostName }}"
-  namespace: "{{ .Spec.ClusterName }}" 
-{{ end }}    
+  namespace: "{{ .Spec.ClusterName }}"
+{{ end }}
   annotations:
     siteconfig.open-cluster-management.io/sync-wave: "3"
     inspect.metal3.io: "{{ .SpecialVars.CurrentNode.IronicInspect }}"
