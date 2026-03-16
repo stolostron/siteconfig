@@ -1,6 +1,6 @@
 module github.com/stolostron/siteconfig
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/go-logr/logr v1.4.3
@@ -29,7 +29,7 @@ require (
 	go.uber.org/zap v1.27.1
 	golang.org/x/exp v0.0.0-20250718183923-645b1fa84792
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397
-	open-cluster-management.io/api v0.16.2
+	open-cluster-management.io/api v1.2.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
