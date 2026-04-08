@@ -115,6 +115,37 @@ func clusterInstallConditionTypes() []hivev1.ClusterDeploymentConditionType {
 	}
 }
 
+// updateCIProvisionedStatus updates the ClusterInstance Provisioned condition based on ClusterDeployment state.
+//
+// Hive Behavior Context:
+// Hive stops reconciling ClusterDeployment status conditions once Spec.Installed=true.
+// When Spec.Installed is set to true, Hive treats the cluster as "adopted" and:
+//   - Sets the Provisioned condition to True
+//   - Sets InstalledTimestamp if not already set
+//   - Does NOT update ClusterInstall conditions (Stopped, Completed, Failed)
+//   - Returns early without further provisioning reconciliation
+//
+// See: https://github.com/openshift/hive/blob/b061ef0a98a594fa2099647cf228495566317c5f/pkg/controller/clusterdeployment/clusterdeployment_controller.go
+//
+// Scenarios Where Spec.Installed=true with Missing/Stale Conditions:
+//
+//  1. Restored Clusters: When a ClusterDeployment is restored from backup during disaster
+//     recovery, it may have Spec.Installed=true but missing or empty status conditions
+//     since status is often not preserved during backup/restore operations.
+//
+//  2. Imported Clusters: Clusters originally installed via other methods (ABI, IPI, or
+//     other installers) and later imported into ACM will have Spec.Installed=true set
+//     during the import process, but may lack the ClusterInstall conditions that are
+//     typically set during Assisted Installer provisioning.
+//
+// In both cases, since Hive won't reconcile conditions for installed clusters, we must
+// trust Spec.Installed as the source of truth. Any "contradictory" conditions (e.g.,
+// InstallCompleted=False) are stale artifacts, not active failures.
+//
+// This function mirrors Hive's behavior: when Spec.Installed=true, we set Provisioned=True
+// regardless of condition state to enable day-2 operations on restored/imported clusters.
+//
+//nolint:lll
 func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.ClusterInstance, log *zap.Logger) {
 
 	installStopped := conditions.FindCDConditionType(cd.Status.Conditions,
@@ -126,15 +157,11 @@ func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.Cluste
 	installFailed := conditions.FindCDConditionType(cd.Status.Conditions,
 		hivev1.ClusterInstallFailedClusterDeploymentCondition)
 
-	if installStopped == nil || installCompleted == nil || installFailed == nil {
-		log.Debug("Failed to extract ClusterInstall condition(s) from ClusterDeployment object")
-		return
-	}
-
-	// Check whether cluster has finished provisioning
+	// When Spec.Installed=true, trust it as the source of truth (see function comment for rationale)
 	if cd.Spec.Installed {
-		// Check for successful provisioning
-		if installStopped.Status == corev1.ConditionTrue && installCompleted.Status == corev1.ConditionTrue {
+		// Prefer confirmed conditions when available for a more descriptive message
+		if installStopped != nil && installCompleted != nil &&
+			installStopped.Status == corev1.ConditionTrue && installCompleted.Status == corev1.ConditionTrue {
 			conditions.SetStatusCondition(&ci.Status.Conditions,
 				v1alpha1.ClusterProvisioned,
 				v1alpha1.Completed,
@@ -142,16 +169,21 @@ func updateCIProvisionedStatus(cd *hivev1.ClusterDeployment, ci *v1alpha1.Cluste
 				"Provisioning completed")
 			return
 		}
-		// Check for stale deployment conditions:
-		//  - either Stopped OR Completed deployment conditions are reflecting a `ConditionFalse` status
-		if installStopped.Status == corev1.ConditionFalse || installCompleted.Status == corev1.ConditionFalse {
-			conditions.SetStatusCondition(&ci.Status.Conditions,
-				v1alpha1.ClusterProvisioned,
-				v1alpha1.StaleConditions,
-				metav1.ConditionUnknown,
-				"ClusterDeployment Spec.Installed=true, but Status.Conditions are not updated")
-			return
-		}
+
+		// Conditions are missing, stale, or inconsistent - trust Spec.Installed
+		// This handles restored/adopted cluster scenarios
+		log.Info("ClusterDeployment has Spec.Installed=true, setting Provisioned based on spec")
+		conditions.SetStatusCondition(&ci.Status.Conditions,
+			v1alpha1.ClusterProvisioned,
+			v1alpha1.Completed,
+			metav1.ConditionTrue,
+			"Cluster is installed (detected from ClusterDeployment Spec.Installed=true)")
+		return
+	}
+
+	if installStopped == nil || installCompleted == nil || installFailed == nil {
+		log.Debug("Failed to extract ClusterInstall condition(s) from ClusterDeployment object")
+		return
 	}
 
 	// Check whether cluster has failed provisioning
