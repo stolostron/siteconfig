@@ -22,6 +22,7 @@ import (
 	"errors"
 	"time"
 
+	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"go.uber.org/zap"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -575,6 +576,86 @@ var _ = Describe("ensureRenderedManifestsAreDeleted", func() {
 			DeletionHandler: &deletion.DeletionHandler{Client: c, Logger: testLogger},
 			Logger:          testLogger,
 		}
+	})
+
+	It("cleans up each resource from a rendered stream while retaining the ManagedCluster", func() {
+		// Start with actual multi-document rendering so cleanup is checked against
+		// the identities it produces. Reinstall must delete resources in descending
+		// sync-wave order while preserving the ManagedCluster and its status entry.
+		Expect(hivev1.AddToScheme(c.Scheme())).To(Succeed(), "register ClusterImageSet for the rendered stream fixture")
+		Expect(c.Delete(ctx, object)).To(Succeed(), "remove the default resource fixture before testing stream cleanup")
+		cleanupClient := c
+		imageSet := ci.GetMockClusterImageSet("release", "image")
+		Expect(c.Create(ctx, imageSet)).To(Succeed(), "create the ClusterImageSet referenced by the stream fixture")
+		DeferCleanup(func() error {
+			return client.IgnoreNotFound(cleanupClient.Delete(ctx, imageSet))
+		})
+		templates := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "stream-templates", Namespace: "test"},
+			Data: map[string]string{"resources": `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: high
+  namespace: test
+  annotations:
+    siteconfig.open-cluster-management.io/sync-wave: "2"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: low
+  namespace: test
+  annotations:
+    siteconfig.open-cluster-management.io/sync-wave: "1"
+---
+apiVersion: cluster.open-cluster-management.io/v1
+kind: ManagedCluster
+metadata:
+  name: test
+`}}
+		Expect(c.Create(ctx, templates)).To(Succeed(), "create the multi-document template used to generate tracked identities")
+		clusterInstance.Spec.ClusterImageSetNameRef = "release"
+		clusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{{Name: templates.Name, Namespace: templates.Namespace}}
+		objects, err := ci.NewTemplateEngine().ProcessTemplates(ctx, c, testLogger, *clusterInstance)
+		Expect(err).NotTo(HaveOccurred(), "render the stream fixture to generate resource identities for cleanup")
+		Expect(objects.GetRenderObjects()).To(HaveLen(3), "render both ConfigMaps and the ManagedCluster before testing cleanup")
+		clusterInstance.Status.ManifestsRendered = nil
+		for _, rendered := range objects.GetRenderObjects() {
+			object := rendered.GetObject()
+			Expect(c.Create(ctx, &object)).To(Succeed(), "create rendered resource %s/%s before reinstall cleanup", object.GetKind(), object.GetName())
+			if object.GetKind() == "ManagedCluster" {
+				DeferCleanup(func() error {
+					return client.IgnoreNotFound(cleanupClient.Delete(ctx, &object))
+				})
+			}
+			manifest := rendered.ManifestReference()
+			manifest.Status = v1alpha1.ManifestRenderedSuccess
+			clusterInstance.Status.ManifestsRendered = append(clusterInstance.Status.ManifestsRendered, *manifest)
+		}
+		setReinstallStatusCondition(clusterInstance, *reinstallRenderedManifestsDeletedConditionStatus(
+			metav1.ConditionFalse, v1alpha1.InProgress, "Deletion in progress"))
+		Expect(c.Status().Update(ctx, clusterInstance)).To(Succeed(), "persist the stream identities and in-progress cleanup condition")
+		var deleted []string
+		c = interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				deleted = append(deleted, obj.GetName())
+				return c.Delete(ctx, obj, opts...)
+			},
+		})
+		handler.Client = c
+		handler.DeletionHandler.Client = c
+		for range 3 {
+			_, err := handler.ensureRenderedManifestsAreDeleted(ctx, testLogger, clusterInstance)
+			Expect(err).NotTo(HaveOccurred(), "reinstall cleanup should delete each sync wave without error")
+		}
+		Expect(deleted).To(Equal([]string{"high", "low"}), "reinstall should delete ConfigMaps in descending sync-wave order and retain the ManagedCluster")
+		condition := findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallRenderedManifestsDeleted)
+		Expect(condition.Status).To(Equal(metav1.ConditionTrue), "cleanup should complete after both ConfigMaps have been deleted")
+		Expect(condition.Reason).To(Equal(string(v1alpha1.Completed)), "the cleanup condition should record completion")
+		Expect(clusterInstance.Status.ManifestsRendered).To(HaveLen(1), "cleanup should retain only the ManagedCluster status entry")
+		Expect(clusterInstance.Status.ManifestsRendered[0].Kind).To(Equal("ManagedCluster"), "the retained status entry should identify the ManagedCluster")
+		managedCluster := objects.GetRenderObjects()[0].GetObject()
+		Expect(managedCluster.GetKind()).To(Equal("ManagedCluster"), "select the ManagedCluster resource for the retention check")
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(&managedCluster), &managedCluster)).To(Succeed(), "the ManagedCluster should still exist after reinstall cleanup")
 	})
 
 	It("should set condition to InProgress if not initialized", func() {
