@@ -508,6 +508,73 @@ var _ = Describe("Reconcile", func() {
 		Expect(found.Message).To(Equal("Cluster is installed (detected from ClusterDeployment Spec.Installed=true)"))
 	})
 
+	It("does not update ClusterInstance status when reconciled with unchanged ClusterDeployment conditions", func() {
+		key := types.NamespacedName{
+			Namespace: clusterNamespace,
+			Name:      clusterName,
+		}
+
+		clusterDeployment := &hivev1.ClusterDeployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      clusterName,
+				Namespace: clusterNamespace,
+				Labels: map[string]string{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(clusterNamespace, clusterName),
+				},
+			},
+			Spec: hivev1.ClusterDeploymentSpec{
+				Installed: true,
+			},
+			Status: hivev1.ClusterDeploymentStatus{
+				Conditions: []hivev1.ClusterDeploymentCondition{
+					{
+						Type:    hivev1.ClusterInstallRequirementsMetClusterDeploymentCondition,
+						Status:  corev1.ConditionTrue,
+						Reason:  "ClusterAlreadyInstalling",
+						Message: "The cluster requirements are met",
+					},
+					{
+						Type:    hivev1.ClusterInstallStoppedClusterDeploymentCondition,
+						Status:  corev1.ConditionTrue,
+						Reason:  "InstallationCompleted",
+						Message: "The installation has stopped because it completed successfully",
+					},
+					{
+						Type:    hivev1.ClusterInstallCompletedClusterDeploymentCondition,
+						Status:  corev1.ConditionTrue,
+						Reason:  "InstallationCompleted",
+						Message: "The installation has completed: Cluster is installed",
+					},
+					{
+						Type:    hivev1.ClusterInstallFailedClusterDeploymentCondition,
+						Status:  corev1.ConditionFalse,
+						Reason:  "InstallationNotFailed",
+						Message: "The installation has not failed",
+					},
+				},
+			},
+		}
+
+		Expect(c.Create(ctx, clusterDeployment)).To(Succeed())
+
+		// First reconcile: initializes ClusterInstance status
+		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(Equal(ctrl.Result{}))
+
+		ci := &v1alpha1.ClusterInstance{}
+		Expect(c.Get(ctx, key, ci)).To(Succeed())
+		resourceVersionAfterFirst := ci.GetResourceVersion()
+
+		// Second reconcile: nothing changed, should not patch
+		res, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(Equal(ctrl.Result{}))
+
+		Expect(c.Get(ctx, key, ci)).To(Succeed())
+		Expect(ci.GetResourceVersion()).To(Equal(resourceVersionAfterFirst))
+	})
+
 	DescribeTable("sets Provisioned to Completed when Spec.Installed=true regardless of condition state",
 		func(statusConditions []hivev1.ClusterDeploymentCondition) {
 			key := types.NamespacedName{

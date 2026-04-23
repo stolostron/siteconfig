@@ -27,6 +27,7 @@ import (
 	"github.com/stolostron/siteconfig/internal/controller/conditions"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -77,6 +78,7 @@ func (r *ClusterDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return requeueWithError(err)
 	}
 
+	oldStatus := clusterInstance.Status.DeepCopy()
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
 
 	// Initialize ClusterInstance clusterdeployment reference if unset
@@ -99,8 +101,11 @@ func (r *ClusterDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	updateCIProvisionedStatus(clusterDeployment, clusterInstance, log)
 	updateCIDeploymentConditions(clusterDeployment, clusterInstance)
-	if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
-		return requeueWithError(updateErr)
+
+	if !equality.Semantic.DeepEqual(oldStatus, &clusterInstance.Status) {
+		if updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch); updateErr != nil {
+			return requeueWithError(updateErr)
+		}
 	}
 
 	return doNotRequeue(), nil
@@ -227,15 +232,16 @@ func updateCIDeploymentConditions(cd *hivev1.ClusterDeployment, ci *v1alpha1.Clu
 			installCond.LastTransitionTime = now
 			installCond.LastProbeTime = now
 			ci.Status.DeploymentConditions = append(ci.Status.DeploymentConditions, *installCond)
-		} else {
+		} else if ciCond.Status != installCond.Status ||
+			ciCond.Reason != installCond.Reason ||
+			ciCond.Message != installCond.Message {
+			if ciCond.Status != installCond.Status {
+				ciCond.LastTransitionTime = now
+			}
 			ciCond.Status = installCond.Status
 			ciCond.Reason = installCond.Reason
 			ciCond.Message = installCond.Message
 			ciCond.LastProbeTime = now
-
-			if ciCond.Status != installCond.Status {
-				ciCond.LastTransitionTime = now
-			}
 		}
 	}
 }
