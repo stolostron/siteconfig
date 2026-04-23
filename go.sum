@@ -265,8 +265,8 @@ github.com/onsi/gomega v1.17.0/go.mod h1:HnhC7FXeEQY45zxNK3PPoIUhzk/80Xly9PcubAl
 github.com/onsi/gomega v1.18.1/go.mod h1:0q+aL8jAiMXy9hbwj2mr5GziHiwhAIQpFmmtT5hitRs=
 github.com/onsi/gomega v1.39.1 h1:1IJLAad4zjPn2PsnhH70V4DKRFlrCzGBNrNaru+Vf28=
 github.com/onsi/gomega v1.39.1/go.mod h1:hL6yVALoTOxeWudERyfppUcZXjMwIMLnuSfruD2lcfg=
-github.com/openshift/api v0.0.0-20250609083529-2b129d95495e h1:QjdoupNBBgSMDypMWsbhb+/yfyv27b3mqT9eVj8g0h4=
-github.com/openshift/api v0.0.0-20250609083529-2b129d95495e/go.mod h1:yk60tHAmHhtVpJQo3TwVYq2zpuP70iJIFDCmeKMIzPw=
+github.com/openshift/api v0.0.0-20260304122341-cf5d8996109f h1:M8y0oBq/KRkuSNFlUMQRAn2MrXJh1mzTCFgbLpPWQbM=
+github.com/openshift/api v0.0.0-20260304122341-cf5d8996109f/go.mod h1:d5uzF0YN2nQQFA0jIEWzzOZ+edmo6wzlGLvx5Fhz4uY=
 github.com/openshift/assisted-service/api v0.0.0-20251026193953-3266b6d73526 h1:0s+jwJuxvyneqzprEIeLLRzY5lGAgQ2ctKxMA8Iea8A=
 github.com/openshift/assisted-service/api v0.0.0-20251026193953-3266b6d73526/go.mod h1:wA7MaLcf/KoUl7fhB1bHBdhRBLjWPih90sHpxOV6ZLE=
 github.com/openshift/assisted-service/models v0.0.0-20251026193953-3266b6d73526 h1:q2kwkDj0ASPDzKtkBpemCXzHoO/VtVrVH+fkg7k72/M=

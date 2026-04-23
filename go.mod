@@ -16,6 +16,7 @@ require (
 )
 
 require (
+	github.com/openshift/api v0.0.0-20260304122341-cf5d8996109f // indirect
 	github.com/openshift/assisted-service/api v0.0.0
 	github.com/openshift/assisted-service/models v0.0.0 // indirect
 )
@@ -94,7 +95,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oklog/ulid/v2 v2.1.1 // indirect
-	github.com/openshift/api v0.0.0-20250609083529-2b129d95495e // indirect
 	github.com/openshift/custom-resource-status v1.1.3-0.20220503160415-f2fdb4999d87 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
