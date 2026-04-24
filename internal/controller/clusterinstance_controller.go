@@ -137,7 +137,7 @@ func requeueForDeletion() ctrl.Result {
 //+kubebuilder:rbac:groups=metal3.io,resources=baremetalhosts,verbs=get;create;update;patch;delete
 //+kubebuilder:rbac:groups=agent.open-cluster-management.io,resources=klusterletaddonconfigs,verbs=get;create;update;patch;delete
 //+kubebuilder:rbac:groups=metal3.io,resources=hostfirmwaresettings,verbs=get;create;update;patch;delete
-//+kubebuilder:rbac:groups=hypershift.openshift.io,resources=hostedclusters,verbs=get;create;update;patch;delete
+//+kubebuilder:rbac:groups=hypershift.openshift.io,resources=hostedclusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=hypershift.openshift.io,resources=nodepools,verbs=get;create;update;patch;delete
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch
 
