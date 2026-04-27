@@ -8,9 +8,9 @@ require (
 	github.com/onsi/gomega v1.39.0
 	github.com/openshift/hive/apis v0.0.0-20251117181851-acea5e9196a2
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.34.5
+	k8s.io/api v0.34.7
 	k8s.io/apiextensions-apiserver v0.34.3 // indirect
-	k8s.io/apimachinery v0.34.5
+	k8s.io/apimachinery v0.34.7
 	k8s.io/client-go v0.34.3
 	sigs.k8s.io/controller-runtime v0.22.5
 )
@@ -22,7 +22,7 @@ require (
 
 require (
 	github.com/go-task/slim-sprig v2.20.0+incompatible
-	github.com/metal3-io/baremetal-operator/apis v0.12.3
+	github.com/metal3-io/baremetal-operator/apis v0.12.4
 	github.com/stretchr/testify v1.11.1
 	github.com/wI2L/jsondiff v0.7.0
 	go.uber.org/mock v0.6.0
