@@ -142,6 +142,11 @@ bashate: ## Run bashate.
 	@echo "Running bashate"
 	hack/bashate.sh
 
+.PHONY: enhancement-lint
+enhancement-lint: ## Validate enhancement proposal structure.
+	@echo "Running enhancement lint"
+	hack/enhancement-lint.sh
+
 .PHONY: vet
 vet: ## Run go vet against code.
 	@echo "Running go vet"
@@ -165,7 +170,7 @@ ci-test-unit:
 		./...
 
 .PHONY: ci-job
-ci-job: common-deps-update generate fmt vet golangci-lint unittest shellcheck bashate bundle-check
+ci-job: common-deps-update generate fmt vet golangci-lint unittest shellcheck bashate enhancement-lint bundle-check
 
 ##@ Build
 
