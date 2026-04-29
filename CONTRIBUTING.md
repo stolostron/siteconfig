@@ -13,6 +13,7 @@
 - [Testing Requirements](#testing-requirements)
 - [Code Coverage Requirements](#code-coverage-requirements)
 - [API and CRD Changes](#api-and-crd-changes)
+- [Enhancement Proposals](#enhancement-proposals)
 - [Documentation Requirements](#documentation-requirements)
 - [Pull Request Guidelines](#pull-request-guidelines)
 - [Contributing a patch](#contributing-a-patch)
@@ -237,6 +238,20 @@ Breaking API changes must be:
 - Backed by a JIRA issue with architecture/design review
 - Discussed with maintainers before implementation
 - Include deprecation warnings in the previous version when possible
+
+## Enhancement Proposals
+
+Significant changes to the siteconfig project require an enhancement proposal before implementation begins. This includes:
+
+- New features or significant behavioral changes
+- Changes to the ClusterInstance API or CRDs
+- Architectural decisions affecting controllers, templates, or the rendering pipeline
+
+Enhancement proposals are Markdown documents that describe the motivation, design, and impact of a change. They are reviewed and approved through the normal PR process.
+
+For the full process, template, and lifecycle details, see the [Enhancement Proposals guide](docs/enhancements/README.md).
+
+Enhancement proposals must be merged before implementation PRs are submitted.
 
 ## Documentation Requirements
 

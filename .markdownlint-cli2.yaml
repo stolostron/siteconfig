@@ -1,0 +1,21 @@
+config:
+  first-line-heading: false
+  single-title: false
+  no-hard-tabs: false
+  no-bare-urls: false
+  commands-show-output: false
+  line-length:
+    line_length: 400
+  no-emphasis-as-heading: false
+  no-inline-html: false
+  ul-style: false
+  ol-prefix: false
+  blanks-around-fences: false
+  blanks-around-headings: false
+  blanks-around-lists: false
+  single-trailing-newline: false
+  no-multiple-blanks: false
+  no-trailing-spaces: false
+  emphasis-style: false
+  strong-style: false
+  no-space-in-emphasis: false
