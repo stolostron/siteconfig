@@ -77,7 +77,7 @@ check_frontmatter() {
         return 1
     fi
 
-    if ! sed -n '2,$p' "$file" | grep -q '^---$'; then
+    if ! grep -q '^---$' <(sed -n '2,$p' "$file"); then
         echo "  ERROR: missing closing --- marker in YAML frontmatter" >&2
         return 1
     fi
