@@ -123,6 +123,16 @@ var _ = Describe("Validate", func() {
 		Expect(err).To(MatchError(ContainSubstring("failed to validate Pull Secret")))
 	})
 
+	It("successfully validates when pull secret is absent but SkipPullSecretPresenceValidationAnnotation is set", func() {
+		clusterInstance.Spec.PullSecretRef = corev1.LocalObjectReference{Name: doesNotExist}
+		clusterInstance.Annotations = map[string]string{
+			v1alpha1.SkipPullSecretPresenceValidationAnnotation: "true",
+		}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		Expect(Validate(ctx, c, clusterInstance)).To(Succeed())
+	})
+
 	It("fails validation due to invalid cluster-level installConfigOverrides JSON-formatted strings", func() {
 		clusterInstance.Spec.InstallConfigOverrides = "foobar"
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
@@ -167,6 +177,16 @@ var _ = Describe("Validate", func() {
 
 		err := Validate(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("failed to validate BMC credentials")))
+	})
+
+	It("successfully validates when BMC credential secret is absent but SkipBmcSecretPresenceValidationAnnotation is set", func() {
+		clusterInstance.Spec.Nodes[0].BmcCredentialsName = v1alpha1.BmcCredentialsName{Name: doesNotExist}
+		clusterInstance.Annotations = map[string]string{
+			v1alpha1.SkipBmcSecretPresenceValidationAnnotation: "true",
+		}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		Expect(Validate(ctx, c, clusterInstance)).To(Succeed())
 	})
 
 	It("fails validation due to missing BMC credential secret in referenced Node namespace", func() {
