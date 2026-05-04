@@ -1,5 +1,5 @@
 # Build the siteconfig-manager binary
-FROM registry.redhat.io/ubi9/go-toolset:1.24 AS builder
+FROM registry.redhat.io/ubi9/go-toolset:1.25.9-1777537863 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
