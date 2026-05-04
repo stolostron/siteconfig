@@ -27,7 +27,7 @@ require (
 	github.com/metal3-io/baremetal-operator/apis v0.9.1
 	github.com/stretchr/testify v1.11.1
 	github.com/wI2L/jsondiff v0.6.1
-	go.uber.org/zap v1.27.1
+	go.uber.org/zap v1.28.0
 	golang.org/x/exp v0.0.0-20240823005443-9b4947da3948
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
 	open-cluster-management.io/api v0.15.0
