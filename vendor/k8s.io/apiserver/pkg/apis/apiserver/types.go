@@ -146,6 +146,10 @@ type TLSConfig struct {
 	// Must be configured if TCPTransport.URL is prefixed with https://
 	// +optional
 	ClientCert string
+
+	// tlsServerName is used to check server certificate. If tlsServerName is empty, the hostname used to contact the server is used.
+	// +optional
+	TLSServerName string
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -234,6 +238,7 @@ type Issuer struct {
 	CertificateAuthority string
 	Audiences            []string
 	AudienceMatchPolicy  AudienceMatchPolicyType
+	EgressSelectorType   EgressSelectorType
 }
 
 // AudienceMatchPolicyType is a set of valid values for Issuer.AudienceMatchPolicy
@@ -242,6 +247,14 @@ type AudienceMatchPolicyType string
 // Valid types for AudienceMatchPolicyType
 const (
 	AudienceMatchPolicyMatchAny AudienceMatchPolicyType = "MatchAny"
+)
+
+type EgressSelectorType string
+
+const (
+	EgressSelectorControlPlane EgressSelectorType = "controlplane"
+
+	EgressSelectorCluster EgressSelectorType = "cluster"
 )
 
 // ClaimValidationRule provides the configuration for a single claim validation rule.
@@ -334,11 +347,21 @@ type WebhookConfiguration struct {
 	// Same as setting `--authorization-webhook-cache-authorized-ttl` flag
 	// Default: 5m0s
 	AuthorizedTTL metav1.Duration
+	// CacheAuthorizedRequests specifies whether authorized requests should be cached.
+	// If set to true, the TTL for cached decisions can be configured via the
+	// AuthorizedTTL field.
+	// Default: true
+	CacheAuthorizedRequests bool
 	// The duration to cache 'unauthorized' responses from the webhook
 	// authorizer.
 	// Same as setting `--authorization-webhook-cache-unauthorized-ttl` flag
 	// Default: 30s
 	UnauthorizedTTL metav1.Duration
+	// CacheUnauthorizedRequests specifies whether unauthorized requests should be cached.
+	// If set to true, the TTL for cached decisions can be configured via the
+	// UnauthorizedTTL field.
+	// Default: true
+	CacheUnauthorizedRequests bool
 	// Timeout for the webhook request
 	// Maximum allowed value is 30s.
 	// Required, no default value.
@@ -400,6 +423,13 @@ type WebhookMatchCondition struct {
 	// CEL expressions have access to the contents of the SubjectAccessReview in v1 version.
 	// If version specified by subjectAccessReviewVersion in the request variable is v1beta1,
 	// the contents would be converted to the v1 version before evaluating the CEL expression.
+	//
+	// - 'resourceAttributes' describes information for a resource access request and is unset for non-resource requests. e.g. has(request.resourceAttributes) && request.resourceAttributes.namespace == 'default'
+	// - 'nonResourceAttributes' describes information for a non-resource access request and is unset for resource requests. e.g. has(request.nonResourceAttributes) && request.nonResourceAttributes.path == '/healthz'.
+	// - 'user' is the user to test for. e.g. request.user == 'alice'
+	// - 'groups' is the groups to test for. e.g. ('group1' in request.groups)
+	// - 'extra' corresponds to the user.Info.GetExtra() method from the authenticator.
+	// - 'uid' is the information about the requesting user. e.g. request.uid == '1'
 	//
 	// Documentation on CEL: https://kubernetes.io/docs/reference/using-api/cel/
 	Expression string
