@@ -1,12 +1,11 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-    "baseBranches": ["main"],
+    "baseBranches": ["main", "/^release-\\d+\\.\\d+/"],
     "automergeStrategy": "rebase",
     "automergeType": "pr",
     "prConcurrentLimit": 5,
     "prHourlyLimit": 2,
     "commitMessagePrefix": "NO-ISSUE: ",
-    "labels": ["lgtm", "approved"],
     "ignorePaths": ["vendor/**"],
     "gomod": {
         "enabled": true,
@@ -14,19 +13,23 @@
     },
     "packageRules": [
         {
+            "description": "Disable non-security updates on release branches",
+            "matchBaseBranches": ["/^release-/"],
+            "matchManagers": ["gomod"],
+            "enabled": false
+        },
+        {
             "description": "Auto-merge patch updates for Go dependencies",
             "matchManagers": ["gomod"],
             "matchUpdateTypes": ["patch"],
-            "addLabels": ["dependencies", "go-mod"],
-            "autoApprove": true,
+            "addLabels": ["dependencies", "go-mod", "lgtm", "approved"],
             "automerge": true
         },
         {
             "description": "Auto-approve minor updates for Go dependencies",
             "matchManagers": ["gomod"],
             "matchUpdateTypes": ["minor"],
-            "addLabels": ["dependencies", "go-mod"],
-            "autoApprove": true,
+            "addLabels": ["dependencies", "go-mod", "lgtm", "approved"],
             "automerge": false
         },
         {
@@ -34,15 +37,13 @@
             "matchManagers": ["gomod"],
             "matchUpdateTypes": ["major"],
             "addLabels": ["dependencies", "go-mod", "major-update"],
-            "autoApprove": false,
             "automerge": false
         },
         {
             "description": "Group Kubernetes dependencies",
             "matchManagers": ["gomod"],
             "groupName": "kubernetes dependencies",
-            "addLabels": ["dependencies", "kubernetes"],
-            "autoApprove": true,
+            "addLabels": ["dependencies", "kubernetes", "lgtm", "approved"],
             "automerge": false,
             "matchPackageNames": ["/^k8s\\.io//", "/^sigs\\.k8s\\.io//"]
         },
@@ -50,8 +51,7 @@
             "description": "Group OpenShift dependencies",
             "matchManagers": ["gomod"],
             "groupName": "openshift dependencies",
-            "addLabels": ["dependencies", "openshift"],
-            "autoApprove": true,
+            "addLabels": ["dependencies", "openshift", "lgtm", "approved"],
             "automerge": false,
             "matchPackageNames": [
                 "/^github\\.com/openshift//",
@@ -62,67 +62,61 @@
             "description": "Group Google API dependencies",
             "matchManagers": ["gomod"],
             "groupName": "google apis",
-            "addLabels": ["dependencies", "google-apis"],
-            "autoApprove": true,
+            "addLabels": ["dependencies", "google-apis", "lgtm", "approved"],
             "automerge": false,
-            "matchPackageNames": ["/^google\\.golang\\.org\\/genproto//", "/^google\\.golang\\.org\\/grpc//"]
+            "matchPackageNames": ["/^google\\.golang\\.org/genproto//", "/^google\\.golang\\.org/grpc//"]
         },
         {
             "description": "Group golang.org/x dependencies",
             "matchManagers": ["gomod"],
             "groupName": "golang.org/x",
-            "addLabels": ["dependencies", "golang-x"],
-            "autoApprove": true,
+            "addLabels": ["dependencies", "golang-x", "lgtm", "approved"],
             "automerge": false,
-            "matchPackageNames": ["/^golang\\.org\\/x//"]
+            "matchPackageNames": ["/^golang\\.org/x//"]
         },
         {
             "description": "Group testing dependencies",
             "matchManagers": ["gomod"],
             "groupName": "testing dependencies",
-            "addLabels": ["dependencies", "testing"],
-            "autoApprove": true,
+            "addLabels": ["dependencies", "testing", "lgtm", "approved"],
             "automerge": false,
-            "matchPackageNames": ["/^github\\.com\\/onsi//", "/^github\\.com\\/stretchr\\/testify//", "/^go\\.uber\\.org\\/mock//"]
+            "matchPackageNames": ["/^github\\.com/onsi//", "/^github\\.com/stretchr/testify//", "/^go\\.uber\\.org/mock//"]
         },
         {
             "description": "Group telemetry and observability dependencies",
             "matchManagers": ["gomod"],
             "groupName": "observability dependencies",
-            "addLabels": ["dependencies", "observability"],
-            "autoApprove": true,
+            "addLabels": ["dependencies", "observability", "lgtm", "approved"],
             "automerge": false,
-            "matchPackageNames": ["/^go\\.opentelemetry\\.io//", "/^github\\.com\\/prometheus//", "/^go\\.uber\\.org\\/zap//"]
+            "matchPackageNames": ["/^go\\.opentelemetry\\.io//", "/^github\\.com/prometheus//", "/^go\\.uber\\.org/zap//"]
         },
         {
             "description": "Group utility and helper dependencies",
             "matchManagers": ["gomod"],
             "groupName": "utility dependencies",
-            "addLabels": ["dependencies", "utilities"],
-            "autoApprove": true,
+            "addLabels": ["dependencies", "utilities", "lgtm", "approved"],
             "automerge": true,
             "matchUpdateTypes": ["patch", "minor"],
-            "matchPackageNames": ["/^github\\.com\\/go-logr//", "/^gopkg\\.in\\/yaml//", "/^github\\.com\\/wI2L\\/jsondiff//"]
+            "matchPackageNames": ["/^github\\.com/go-logr//", "/^gopkg\\.in/yaml//", "/^github\\.com/wI2L/jsondiff//"]
+        },
+        {
+            "description": "Disable updates for the go directive in go.mod",
+            "matchManagers": ["gomod"],
+            "matchDepNames": ["go"],
+            "matchDepTypes": ["golang"],
+            "enabled": false
         },
         {
             "description": "Disable updates for pseudo-versions and replace directives",
             "matchManagers": ["gomod"],
-            "matchPackageNames": ["/^github\\.com\\/openshift\\/assisted-service//"],
+            "matchPackageNames": ["/^github\\.com/openshift/assisted-service//"],
             "enabled": false
-        },
-        {
-            "description": "Auto-merge security updates",
-            "matchManagers": ["gomod"],
-            "matchDepTypes": ["require"],
-            "vulnerabilityAlerts": {
-                "addLabels": ["security"],
-                "autoApprove": true,
-                "automerge": true
-            }
         }
     ],
     "vulnerabilityAlerts": {
-        "enabled": true
+        "enabled": true,
+        "addLabels": ["security"],
+        "automerge": true
     },
     "osvVulnerabilityAlerts": true,
     "schedule": [
