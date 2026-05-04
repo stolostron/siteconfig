@@ -39,12 +39,17 @@ func validateResources(ctx context.Context, c client.Client, clusterInstance *v1
 			clusterInstance.Spec.ClusterImageSetNameRef, err)
 	}
 
+	_, skipPullSecret := clusterInstance.Annotations[v1alpha1.SkipPullSecretPresenceValidationAnnotation]
+	_, skipBmcSecrets := clusterInstance.Annotations[v1alpha1.SkipBmcSecretPresenceValidationAnnotation]
+
 	// Check that pull secret exists in cluster namespace
-	pullSecret := &corev1.Secret{}
-	key = types.NamespacedName{Name: clusterInstance.Spec.PullSecretRef.Name, Namespace: clusterInstance.Namespace}
-	if err := c.Get(ctx, key, pullSecret); err != nil {
-		return fmt.Errorf("failed to validate Pull Secret: [%s in namespace %s], err: %w",
-			key.Name, key.Namespace, err)
+	if !skipPullSecret {
+		pullSecret := &corev1.Secret{}
+		key = types.NamespacedName{Name: clusterInstance.Spec.PullSecretRef.Name, Namespace: clusterInstance.Namespace}
+		if err := c.Get(ctx, key, pullSecret); err != nil {
+			return fmt.Errorf("failed to validate Pull Secret: [%s in namespace %s], err: %w",
+				key.Name, key.Namespace, err)
+		}
 	}
 
 	// If extraManifests are defined - check that they exist
@@ -60,17 +65,19 @@ func validateResources(ctx context.Context, c client.Client, clusterInstance *v1
 	}
 
 	// Check that node BMC secrets exist in namespace
-	for _, node := range clusterInstance.Spec.Nodes {
-		bmcCredentialNS := clusterInstance.Namespace
-		if node.HostRef != nil {
-			bmcCredentialNS = node.HostRef.Namespace
-		}
-		key = types.NamespacedName{Name: node.BmcCredentialsName.Name, Namespace: bmcCredentialNS}
-		bmcSecret := &corev1.Secret{}
-		if err := c.Get(ctx, key, bmcSecret); err != nil {
-			return fmt.Errorf(
-				"failed to validate BMC credentials: %s in namespace %s [Node: Hostname=%s], err: %w",
-				node.BmcCredentialsName.Name, bmcCredentialNS, node.HostName, err)
+	if !skipBmcSecrets {
+		for _, node := range clusterInstance.Spec.Nodes {
+			bmcCredentialNS := clusterInstance.Namespace
+			if node.HostRef != nil {
+				bmcCredentialNS = node.HostRef.Namespace
+			}
+			key = types.NamespacedName{Name: node.BmcCredentialsName.Name, Namespace: bmcCredentialNS}
+			bmcSecret := &corev1.Secret{}
+			if err := c.Get(ctx, key, bmcSecret); err != nil {
+				return fmt.Errorf(
+					"failed to validate BMC credentials: %s in namespace %s [Node: Hostname=%s], err: %w",
+					node.BmcCredentialsName.Name, bmcCredentialNS, node.HostName, err)
+			}
 		}
 	}
 

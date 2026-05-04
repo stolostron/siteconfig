@@ -25,4 +25,14 @@ const (
 // PausedAnnotation is the annotation that pauses the reconciliation.
 const PausedAnnotation = "clusterinstance." + Group + "/paused"
 
+// SkipPullSecretPresenceValidationAnnotation, when present on a ClusterInstance, skips
+// controller validation that the pull secret exists. Use only as a temporary workaround
+// when the pull secret is supplied by another mechanism.
+const SkipPullSecretPresenceValidationAnnotation = "clusterinstance." + Group + "/skip-pull-secret-presence-validation"
+
+// SkipBmcSecretPresenceValidationAnnotation, when present on a ClusterInstance, skips
+// controller validation that node BMC credential secrets exist. Use only as a temporary
+// workaround when BMC credentials are supplied by another mechanism.
+const SkipBmcSecretPresenceValidationAnnotation = "clusterinstance." + Group + "/skip-bmc-secret-presence-validation"
+
 const LastClusterInstanceSpecAnnotation = "clusterinstance." + Group + "/last-observed-spec"
