@@ -88,8 +88,9 @@ type TangConfig struct {
 // type sub-field to select the encryption mode and tang to provide
 // Tang server details when using network-bound disk encryption.
 type DiskEncryption struct {
-	// type specifies the disk encryption mode. Valid values depend on the
-	// installation flow. The default is "none" (encryption disabled).
+	// type specifies the disk encryption mode. The default "none" disables
+	// encryption. Use "tpmv2" for TPM 2.0 or "tang" for network-bound disk
+	// encryption via Tang servers (requires the tang field).
 	// +kubebuilder:default:=none
 	// +optional
 	Type string `json:"type,omitempty"`

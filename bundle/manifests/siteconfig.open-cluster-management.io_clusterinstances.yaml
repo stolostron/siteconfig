@@ -194,8 +194,9 @@ spec:
                   type:
                     default: none
                     description: |-
-                      type specifies the disk encryption mode. Valid values depend on the
-                      installation flow. The default is "none" (encryption disabled).
+                      type specifies the disk encryption mode. The default "none" disables
+                      encryption. Use "tpmv2" for TPM 2.0 or "tang" for network-bound disk
+                      encryption via Tang servers (requires the tang field).
                     type: string
                 type: object
               extraAnnotations:
