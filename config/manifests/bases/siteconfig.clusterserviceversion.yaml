@@ -10,7 +10,11 @@ spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
     owned:
-    - description: ClusterInstance is the Schema for the clusterinstances API
+    - description: ClusterInstance defines the desired configuration for provisioning
+        an OpenShift cluster. Based on the selected templateRefs and clusterType,
+        the controller renders and applies the Kubernetes resources needed for cluster
+        installation (e.g., ClusterDeployment, ManagedCluster, BareMetalHost, or HostedCluster
+        depending on the installation flow).
       displayName: Cluster Instance
       kind: ClusterInstance
       name: clusterinstances.siteconfig.open-cluster-management.io
