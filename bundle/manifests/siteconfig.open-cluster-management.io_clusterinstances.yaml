@@ -72,6 +72,7 @@ spec:
                   Enter one IP address for single-stack clusters, or up to two for dual-stack clusters (at
                   most one IP address per IP stack used). The order of stacks should be the same as order
                   of subnets in Cluster Networks, Service Networks, and Machine Networks.
+                  Not applicable to Single Node OpenShift (SNO) clusters.
                 items:
                   type: string
                 maxItems: 2
@@ -106,7 +107,10 @@ spec:
               clusterName:
                 description: |-
                   clusterName is the name of the cluster. It is used as the base name
-                  for generated resources and their namespace.
+                  for generated resources and their namespace. Must be a valid
+                  Kubernetes namespace name: lowercase alphanumeric characters or
+                  hyphens, must start and end with an alphanumeric character, and at
+                  most 63 characters long.
                 type: string
               clusterNetwork:
                 description: ClusterNetwork is the list of IP address pools for pods.
@@ -171,6 +175,8 @@ spec:
                   diskEncryption configures disk encryption for cluster nodes. Use the
                   type sub-field to select the encryption mode and tang to provide
                   Tang server details when using network-bound disk encryption.
+                  These fields are not consumed by the default provided templates
+                  and require custom templates (via templateRefs) to take effect.
                 properties:
                   tang:
                     description: |-
@@ -264,6 +270,7 @@ spec:
                   Enter one IP address for single-stack clusters, or up to two for dual-stack clusters (at
                   most one IP address per IP stack used). The order of stacks should be the same as order
                   of subnets in Cluster Networks, Service Networks, and Machine Networks.
+                  Not applicable to Single Node OpenShift (SNO) clusters.
                 items:
                   type: string
                 maxItems: 2
@@ -340,6 +347,9 @@ spec:
                       description: |-
                         Which MAC address will PXE boot? This is optional for some
                         types, but required for libvirt VMs driven by vbmc.
+                        This MAC address should correspond to one of the interfaces
+                        defined in nodeNetwork so that the host can be provisioned
+                        on the correct network.
                       pattern: '[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}'
                       type: string
                     bootMode:
@@ -367,10 +377,13 @@ spec:
                         type: object
                       description: |-
                         extraAnnotations specifies additional node-level annotations keyed by
-                        resource Kind. If a Kind is present in the node-level map, those
-                        annotations are used for this node instead of any cluster-level
-                        annotations for the same Kind. Kinds not defined at node level fall
-                        back to cluster-level extraAnnotations.
+                        the Kubernetes resource Kind (e.g., "BareMetalHost", "NMStateConfig").
+                        The key is matched against the kind field of each rendered manifest.
+                        If a Kind is present in the node-level map, those annotations are
+                        used for this node instead of any cluster-level annotations for the
+                        same Kind. Kinds not defined at node level fall back to cluster-level
+                        extraAnnotations. Annotations already defined in the template take
+                        precedence and are not overwritten.
                       type: object
                     extraLabels:
                       additionalProperties:
@@ -378,11 +391,14 @@ spec:
                           type: string
                         type: object
                       description: |-
-                        extraLabels specifies additional node-level labels keyed by resource
-                        Kind. If a Kind is present in the node-level map, those labels are
-                        used for this node instead of any cluster-level labels for the same
-                        Kind. Kinds not defined at node level fall back to cluster-level
-                        extraLabels.
+                        extraLabels specifies additional node-level labels keyed by the
+                        Kubernetes resource Kind (e.g., "BareMetalHost", "NMStateConfig").
+                        The key is matched against the kind field of each rendered manifest.
+                        If a Kind is present in the node-level map, those labels are used
+                        for this node instead of any cluster-level labels for the same Kind.
+                        Kinds not defined at node level fall back to cluster-level
+                        extraLabels. Labels already defined in the template take precedence
+                        and are not overwritten.
                       type: object
                     hostName:
                       description: Hostname is the desired hostname for the host
@@ -571,7 +587,8 @@ spec:
                         suppressedManifests is a list of Kubernetes resource Kinds to exclude
                         from rendering for this node. Combined with cluster-level
                         suppressedManifests. Matching manifests are not applied and are
-                        recorded as "suppressed" in status.
+                        recorded as "suppressed" in status. Previously applied resources
+                        are not deleted; use pruneManifests to remove them.
                       items:
                         type: string
                       type: array
@@ -736,6 +753,8 @@ spec:
                   from rendering. Manifests whose rendered Kind matches an entry in this
                   list are not applied to the cluster and are recorded as "suppressed" in
                   status. Cluster-level suppression also applies to node-level manifests.
+                  Previously applied resources are not deleted; use pruneManifests to
+                  remove them.
                 items:
                   type: string
                 type: array

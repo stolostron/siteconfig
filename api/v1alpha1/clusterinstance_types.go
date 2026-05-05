@@ -170,6 +170,9 @@ type NodeSpec struct {
 
 	// Which MAC address will PXE boot? This is optional for some
 	// types, but required for libvirt VMs driven by vbmc.
+	// This MAC address should correspond to one of the interfaces
+	// defined in nodeNetwork so that the host can be provisioned
+	// on the correct network.
 	// +kubebuilder:validation:Pattern=`[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}`
 	// +required
 	BootMACAddress string `json:"bootMACAddress"`
@@ -241,25 +244,32 @@ type NodeSpec struct {
 	Role string `json:"role,omitempty"`
 
 	// extraAnnotations specifies additional node-level annotations keyed by
-	// resource Kind. If a Kind is present in the node-level map, those
-	// annotations are used for this node instead of any cluster-level
-	// annotations for the same Kind. Kinds not defined at node level fall
-	// back to cluster-level extraAnnotations.
+	// the Kubernetes resource Kind (e.g., "BareMetalHost", "NMStateConfig").
+	// The key is matched against the kind field of each rendered manifest.
+	// If a Kind is present in the node-level map, those annotations are
+	// used for this node instead of any cluster-level annotations for the
+	// same Kind. Kinds not defined at node level fall back to cluster-level
+	// extraAnnotations. Annotations already defined in the template take
+	// precedence and are not overwritten.
 	// +optional
 	ExtraAnnotations map[string]map[string]string `json:"extraAnnotations,omitempty"`
 
-	// extraLabels specifies additional node-level labels keyed by resource
-	// Kind. If a Kind is present in the node-level map, those labels are
-	// used for this node instead of any cluster-level labels for the same
-	// Kind. Kinds not defined at node level fall back to cluster-level
-	// extraLabels.
+	// extraLabels specifies additional node-level labels keyed by the
+	// Kubernetes resource Kind (e.g., "BareMetalHost", "NMStateConfig").
+	// The key is matched against the kind field of each rendered manifest.
+	// If a Kind is present in the node-level map, those labels are used
+	// for this node instead of any cluster-level labels for the same Kind.
+	// Kinds not defined at node level fall back to cluster-level
+	// extraLabels. Labels already defined in the template take precedence
+	// and are not overwritten.
 	// +optional
 	ExtraLabels map[string]map[string]string `json:"extraLabels,omitempty"`
 
 	// suppressedManifests is a list of Kubernetes resource Kinds to exclude
 	// from rendering for this node. Combined with cluster-level
 	// suppressedManifests. Matching manifests are not applied and are
-	// recorded as "suppressed" in status.
+	// recorded as "suppressed" in status. Previously applied resources
+	// are not deleted; use pruneManifests to remove them.
 	// +optional
 	SuppressedManifests []string `json:"suppressedManifests,omitempty"`
 
@@ -335,7 +345,10 @@ type ReinstallSpec struct {
 // topology, networking, platform, node roles, and installation settings.
 type ClusterInstanceSpec struct {
 	// clusterName is the name of the cluster. It is used as the base name
-	// for generated resources and their namespace.
+	// for generated resources and their namespace. Must be a valid
+	// Kubernetes namespace name: lowercase alphanumeric characters or
+	// hyphens, must start and end with an alphanumeric character, and at
+	// most 63 characters long.
 	// +required
 	ClusterName string `json:"clusterName"`
 
@@ -361,6 +374,7 @@ type ClusterInstanceSpec struct {
 	// Enter one IP address for single-stack clusters, or up to two for dual-stack clusters (at
 	// most one IP address per IP stack used). The order of stacks should be the same as order
 	// of subnets in Cluster Networks, Service Networks, and Machine Networks.
+	// Not applicable to Single Node OpenShift (SNO) clusters.
 	// +kubebuilder:validation:MaxItems=2
 	// +optional
 	ApiVIPs []string `json:"apiVIPs,omitempty"`
@@ -369,6 +383,7 @@ type ClusterInstanceSpec struct {
 	// Enter one IP address for single-stack clusters, or up to two for dual-stack clusters (at
 	// most one IP address per IP stack used). The order of stacks should be the same as order
 	// of subnets in Cluster Networks, Service Networks, and Machine Networks.
+	// Not applicable to Single Node OpenShift (SNO) clusters.
 	// +kubebuilder:validation:MaxItems=2
 	// +optional
 	IngressVIPs []string `json:"ingressVIPs,omitempty"`
@@ -446,6 +461,8 @@ type ClusterInstanceSpec struct {
 	// diskEncryption configures disk encryption for cluster nodes. Use the
 	// type sub-field to select the encryption mode and tang to provide
 	// Tang server details when using network-bound disk encryption.
+	// These fields are not consumed by the default provided templates
+	// and require custom templates (via templateRefs) to take effect.
 	// +optional
 	DiskEncryption *DiskEncryption `json:"diskEncryption,omitempty"`
 
@@ -461,6 +478,8 @@ type ClusterInstanceSpec struct {
 	// from rendering. Manifests whose rendered Kind matches an entry in this
 	// list are not applied to the cluster and are recorded as "suppressed" in
 	// status. Cluster-level suppression also applies to node-level manifests.
+	// Previously applied resources are not deleted; use pruneManifests to
+	// remove them.
 	// +optional
 	SuppressedManifests []string `json:"suppressedManifests,omitempty"`
 
