@@ -1,6 +1,5 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-    "baseBranches": ["main", "/^release-\\d+\\.\\d+/"],
     "automergeStrategy": "rebase",
     "automergeType": "pr",
     "prConcurrentLimit": 5,
@@ -19,16 +18,9 @@
             "enabled": false
         },
         {
-            "description": "Auto-merge patch updates for Go dependencies",
+            "description": "Auto-approve patch and minor updates for Go dependencies",
             "matchManagers": ["gomod"],
-            "matchUpdateTypes": ["patch"],
-            "addLabels": ["dependencies", "go-mod", "lgtm", "approved"],
-            "automerge": true
-        },
-        {
-            "description": "Auto-approve minor updates for Go dependencies",
-            "matchManagers": ["gomod"],
-            "matchUpdateTypes": ["minor"],
+            "matchUpdateTypes": ["patch", "minor"],
             "addLabels": ["dependencies", "go-mod", "lgtm", "approved"],
             "automerge": false
         },
