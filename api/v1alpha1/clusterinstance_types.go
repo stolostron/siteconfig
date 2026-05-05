@@ -508,7 +508,7 @@ type ClusterInstanceSpec struct {
 
 	// caBundleRef is a reference to a ConfigMap containing a bundle of
 	// trusted CA certificates. The controller passes this reference to
-	// the downstream CRD (HostedCluster or ImageClusterInstall). Not
+	// the downstream resource (HostedCluster or ImageClusterInstall). Not
 	// applicable to the Assisted Installer flow.
 	// +optional
 	CaBundleRef *corev1.LocalObjectReference `json:"caBundleRef,omitempty"`
