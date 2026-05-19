@@ -19,6 +19,8 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -26,6 +28,36 @@ import (
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 )
+
+// LogObservedExternallyProvisionedSecretAnnotations logs when allowed skip annotations
+// are set. Invalid annotation values are not logged; validation reports those separately.
+func LogObservedExternallyProvisionedSecretAnnotations(
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) {
+	annos := clusterInstance.Annotations
+	externallyProvisionedPullSecret, pullErr := v1alpha1.ExternallyProvisionedPullSecretEnabled(annos)
+	externallyProvisionedBmcSecret, bmcErr := v1alpha1.ExternallyProvisionedBmcSecretEnabled(annos)
+	if pullErr != nil || bmcErr != nil {
+		return
+	}
+	if !externallyProvisionedPullSecret && !externallyProvisionedBmcSecret {
+		return
+	}
+
+	skipAnnotations := make([]string, 0, 2)
+	if externallyProvisionedPullSecret {
+		skipAnnotations = append(skipAnnotations, v1alpha1.ExternallyProvisionedPullSecretAnnotation)
+	}
+	if externallyProvisionedBmcSecret {
+		skipAnnotations = append(skipAnnotations, v1alpha1.ExternallyProvisionedBmcSecretAnnotation)
+	}
+	log.Info("Observed skip annotation for externally provisioned secrets; skipping presence validation",
+		zap.String("namespace", clusterInstance.Namespace),
+		zap.String("clusterInstance", clusterInstance.Name),
+		zap.Strings("annotations", skipAnnotations),
+	)
+}
 
 func validateResources(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance) error {
 	if clusterInstance.Spec.ClusterImageSetNameRef == "" {
@@ -39,12 +71,26 @@ func validateResources(ctx context.Context, c client.Client, clusterInstance *v1
 			clusterInstance.Spec.ClusterImageSetNameRef, err)
 	}
 
+	annos := clusterInstance.Annotations
+	externallyProvisionedPullSecret, pullSecretAnnoErr := v1alpha1.ExternallyProvisionedPullSecretEnabled(annos)
+	if pullSecretAnnoErr != nil {
+		return fmt.Errorf("failed to validate %q annotation: %w",
+			v1alpha1.ExternallyProvisionedPullSecretAnnotation, pullSecretAnnoErr)
+	}
+	externallyProvisionedBmcSecret, bmcSecretAnnoErr := v1alpha1.ExternallyProvisionedBmcSecretEnabled(annos)
+	if bmcSecretAnnoErr != nil {
+		return fmt.Errorf("failed to validate %q annotation: %w",
+			v1alpha1.ExternallyProvisionedBmcSecretAnnotation, bmcSecretAnnoErr)
+	}
+
 	// Check that pull secret exists in cluster namespace
-	pullSecret := &corev1.Secret{}
-	key = types.NamespacedName{Name: clusterInstance.Spec.PullSecretRef.Name, Namespace: clusterInstance.Namespace}
-	if err := c.Get(ctx, key, pullSecret); err != nil {
-		return fmt.Errorf("failed to validate Pull Secret: [%s in namespace %s], err: %w",
-			key.Name, key.Namespace, err)
+	if !externallyProvisionedPullSecret {
+		pullSecret := &corev1.Secret{}
+		key = types.NamespacedName{Name: clusterInstance.Spec.PullSecretRef.Name, Namespace: clusterInstance.Namespace}
+		if err := c.Get(ctx, key, pullSecret); err != nil {
+			return fmt.Errorf("failed to validate Pull Secret: [%s in namespace %s], err: %w",
+				key.Name, key.Namespace, err)
+		}
 	}
 
 	// If extraManifests are defined - check that they exist
@@ -60,17 +106,19 @@ func validateResources(ctx context.Context, c client.Client, clusterInstance *v1
 	}
 
 	// Check that node BMC secrets exist in namespace
-	for _, node := range clusterInstance.Spec.Nodes {
-		bmcCredentialNS := clusterInstance.Namespace
-		if node.HostRef != nil {
-			bmcCredentialNS = node.HostRef.Namespace
-		}
-		key = types.NamespacedName{Name: node.BmcCredentialsName.Name, Namespace: bmcCredentialNS}
-		bmcSecret := &corev1.Secret{}
-		if err := c.Get(ctx, key, bmcSecret); err != nil {
-			return fmt.Errorf(
-				"failed to validate BMC credentials: %s in namespace %s [Node: Hostname=%s], err: %w",
-				node.BmcCredentialsName.Name, bmcCredentialNS, node.HostName, err)
+	if !externallyProvisionedBmcSecret {
+		for _, node := range clusterInstance.Spec.Nodes {
+			bmcCredentialNS := clusterInstance.Namespace
+			if node.HostRef != nil {
+				bmcCredentialNS = node.HostRef.Namespace
+			}
+			key = types.NamespacedName{Name: node.BmcCredentialsName.Name, Namespace: bmcCredentialNS}
+			bmcSecret := &corev1.Secret{}
+			if err := c.Get(ctx, key, bmcSecret); err != nil {
+				return fmt.Errorf(
+					"failed to validate BMC credentials: %s in namespace %s [Node: Hostname=%s], err: %w",
+					node.BmcCredentialsName.Name, bmcCredentialNS, node.HostName, err)
+			}
 		}
 	}
 
