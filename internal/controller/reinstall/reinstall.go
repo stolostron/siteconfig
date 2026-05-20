@@ -306,7 +306,7 @@ func (r *ReinstallHandler) ensureRenderedManifestsAreDeleted(ctx context.Context
 					return
 				}
 				if changed && err == nil {
-					result.Requeue = true
+					result.RequeueAfter = requeueWithShortInterval
 				}
 			}
 		}
@@ -357,7 +357,7 @@ func (r *ReinstallHandler) ensureRenderedManifestsAreDeleted(ctx context.Context
 
 	if !deletionCompleted {
 		log.Info("Waiting for rendered manifests to be deleted")
-		result = reconcile.Result{Requeue: true, RequeueAfter: deletionRequeueWithMediumInterval}
+		result = reconcile.Result{RequeueAfter: deletionRequeueWithMediumInterval}
 		return
 	}
 
@@ -521,7 +521,7 @@ func (r *ReinstallHandler) ensureDataIsPreserved(
 		}
 
 		if updateRequired {
-			result.Requeue = true
+			result.RequeueAfter = requeueWithShortInterval
 			updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
 			if updateErr != nil {
 				result.RequeueAfter = requeueWithShortInterval
@@ -579,7 +579,7 @@ func (r *ReinstallHandler) ensurePreservedDataIsRestored(
 			patch := client.MergeFrom(clusterInstance.DeepCopy())
 
 			if changed := setReinstallStatusCondition(clusterInstance, *preservationDataRestoredCondition); changed {
-				result.Requeue = true
+				result.RequeueAfter = requeueWithShortInterval
 				updateErr := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, patch)
 				if updateErr != nil {
 					result.RequeueAfter = requeueWithShortInterval
