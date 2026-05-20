@@ -1,5 +1,5 @@
 # Build the siteconfig-manager binary
-FROM registry.ci.openshift.org/stolostron/builder:go1.24-linux AS builder
+FROM registry.ci.openshift.org/stolostron/builder:go1.25-linux AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
