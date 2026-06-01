@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="1.64.6"
+VERSION="2.8.0"
 
 rootdir=$(git rev-parse --show-toplevel)
 if [ -z "${rootdir}" ]; then
@@ -41,4 +41,4 @@ fi
 
 export GOCACHE=/tmp/
 export GOLANGCI_LINT_CACHE=/tmp/.cache
-"${golangci_lint}" run --verbose --print-resources-usage --modules-download-mode=vendor --timeout=5m0s
+"${golangci_lint}" run --verbose --modules-download-mode=vendor
