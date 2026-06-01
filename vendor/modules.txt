@@ -127,8 +127,8 @@ github.com/go-openapi/swag/typeutils
 # github.com/go-openapi/swag/yamlutils v0.26.0
 ## explicit; go 1.25.0
 github.com/go-openapi/swag/yamlutils
-# github.com/go-openapi/validate v0.25.2
-## explicit; go 1.24.0
+# github.com/go-openapi/validate v0.25.3
+## explicit; go 1.25.0
 github.com/go-openapi/validate
 # github.com/go-task/slim-sprig v2.20.0+incompatible
 ## explicit

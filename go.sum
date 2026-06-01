@@ -125,8 +125,8 @@ github.com/go-openapi/testify/enable/yaml/v2 v2.4.2 h1:5zRca5jw7lzVREKCZVNBpysDN
 github.com/go-openapi/testify/enable/yaml/v2 v2.4.2/go.mod h1:XVevPw5hUXuV+5AkI1u1PeAm27EQVrhXTTCPAF85LmE=
 github.com/go-openapi/testify/v2 v2.5.1 h1:TMdhCaw8fUNraVSf3Omoob1dO/AzBfhtFAPW0an6sBo=
 github.com/go-openapi/testify/v2 v2.5.1/go.mod h1:SgsVHtfooshd0tublTtJ50FPKhujf47YRqauXXOUxfw=
-github.com/go-openapi/validate v0.25.2 h1:12NsfLAwGegqbGWr2CnvT65X/Q2USJipmJ9b7xDJZz0=
-github.com/go-openapi/validate v0.25.2/go.mod h1:Pgl1LpPPGFnZ+ys4/hTlDiRYQdI1ocKypgE+8Q8BLfY=
+github.com/go-openapi/validate v0.25.3 h1:4nzAIavcJ7WveHK2+V1UAkZK3kWcjzxZCzjfZAfavKs=
+github.com/go-openapi/validate v0.25.3/go.mod h1:GemfuGMyYpIaBoKpX3z8sLywrmxpzWVOoJ7R0VeAVuk=
 github.com/go-task/slim-sprig v0.0.0-20210107165309-348f09dbbbc0/go.mod h1:fyg7847qk6SyHyPtNmDHnmrv/HOrqktSC+C9fM+CJOE=
 github.com/go-task/slim-sprig v2.20.0+incompatible h1:4Xh3bDzO29j4TWNOI+24ubc0vbVFMg2PMnXKxK54/CA=
 github.com/go-task/slim-sprig v2.20.0+incompatible/go.mod h1:N/mhXZITr/EQAOErEHciKvO1bFei2Lld2Ym6h96pdy0=
