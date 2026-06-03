@@ -355,8 +355,8 @@ golang.org/x/net/http2/hpack
 golang.org/x/net/idna
 golang.org/x/net/internal/httpcommon
 golang.org/x/net/internal/httpsfv
-# golang.org/x/oauth2 v0.35.0
-## explicit; go 1.24.0
+# golang.org/x/oauth2 v0.36.0
+## explicit; go 1.25.0
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
 # golang.org/x/sys v0.45.0
@@ -391,10 +391,10 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# golang.org/x/time v0.14.0
-## explicit; go 1.24.0
+# golang.org/x/time v0.15.0
+## explicit; go 1.25.0
 golang.org/x/time/rate
-# golang.org/x/tools v0.44.0
+# golang.org/x/tools v0.45.0
 ## explicit; go 1.25.0
 golang.org/x/tools/cover
 golang.org/x/tools/go/ast/edge
