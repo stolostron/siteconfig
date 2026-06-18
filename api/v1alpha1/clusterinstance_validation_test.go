@@ -446,6 +446,26 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 
+		It("should return nil when cluster-level cpuArchitecture is removed (GitOps reconciliation)", func() {
+			oldClusterInstance.Spec.CPUArchitecture = CPUArchitectureX86_64
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.CPUArchitecture = ""
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should return nil when node cpuArchitecture is removed (GitOps reconciliation)", func() {
+			for i := range oldClusterInstance.Spec.Nodes {
+				oldClusterInstance.Spec.Nodes[i].CPUArchitecture = CPUArchitectureX86_64
+			}
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			for i := range newClusterInstance.Spec.Nodes {
+				newClusterInstance.Spec.Nodes[i].CPUArchitecture = ""
+			}
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
 		It("should return nil for changes to nodes.nodeNetwork.macAddress when reinstall is triggered", func() {
 			newClusterInstance.Spec.Reinstall = &ReinstallSpec{
 				Generation: "reinstall-1",
