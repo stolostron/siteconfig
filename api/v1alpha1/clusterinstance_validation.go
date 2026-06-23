@@ -551,7 +551,7 @@ func getUnauthorizedJSONDiffs(oldNode, newNode NodeSpec, allowReinstall bool) []
 
 	var unauthorized []string
 	for _, diff := range diffs {
-		if isCRDUpgradeFieldAddition(diff) {
+		if isCRDUpgradeFieldChange(diff) {
 			continue
 		}
 		if !isPermissibleNodeChange(diff.Path, allowReinstall) {
@@ -561,10 +561,11 @@ func getUnauthorizedJSONDiffs(oldNode, newNode NodeSpec, allowReinstall bool) []
 	return unauthorized
 }
 
-// isCRDUpgradeFieldAddition returns true if the diff represents a field being added
-// for the first time during a CRD upgrade (transition from absent to a valid value).
-func isCRDUpgradeFieldAddition(diff jsondiff.Operation) bool {
-	return diff.Path == "/cpuArchitecture" && diff.Type == jsondiff.OperationAdd
+// isCRDUpgradeFieldChange returns true if the diff represents a field being added or
+// removed during/after a CRD upgrade, allowing GitOps tools to sync with pre-upgrade git sources.
+func isCRDUpgradeFieldChange(diff jsondiff.Operation) bool {
+	return diff.Path == "/cpuArchitecture" &&
+		(diff.Type == jsondiff.OperationAdd || diff.Type == jsondiff.OperationRemove)
 }
 
 // getNodeIdentifier returns a human-readable identifier for a node
@@ -677,7 +678,7 @@ func validateChangesWithJSONDiff(
 			}
 		}
 
-		if isCRDUpgradeFieldAddition(diff) {
+		if isCRDUpgradeFieldChange(diff) {
 			continue
 		}
 
