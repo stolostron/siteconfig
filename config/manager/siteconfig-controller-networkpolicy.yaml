@@ -1,0 +1,81 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: siteconfig-controller-manager
+  namespace: system
+  labels:
+    app.kubernetes.io/name: siteconfig-controller
+    app.kubernetes.io/component: siteconfig
+    control-plane: siteconfig-controller-manager
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: siteconfig-controller
+      app.kubernetes.io/component: siteconfig
+      control-plane: siteconfig-controller-manager
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Same-namespace traffic (operator components, leader election, etc.)
+    - from:
+        - podSelector: {}
+
+    # Webhook port (9443) — kube-apiserver calls admission webhooks from host network
+    - ports:
+        - protocol: TCP
+          port: 9443
+
+    # Health probe port (8081) — kubelet liveness/readiness probes from host network
+    - ports:
+        - protocol: TCP
+          port: 8081
+
+    # Metrics port (8443) — OpenShift monitoring / Prometheus scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: monitoring
+      ports:
+        - protocol: TCP
+          port: 8443
+
+  egress:
+    # DNS — both UDP and TCP (TCP needed for responses > 512 bytes)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+      ports:
+        - protocol: UDP
+          port: 5353
+        - protocol: TCP
+          port: 5353
+
+    # Hub Kubernetes API server — all controller-runtime RBAC operations
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              component: apiserver
+      ports:
+        - protocol: TCP
+          port: 6443
+
+    # Spoke cluster API servers — reinstall reimport via kubeconfig secrets (dynamic IPs)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 6443
+
+    # External HTTPS — OIDC/OAuth auth plugin for cloud provider authentication
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.169.254/32
+      ports:
+        - protocol: TCP
+          port: 443
