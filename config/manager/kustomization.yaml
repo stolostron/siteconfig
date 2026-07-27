@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
 - manager.yaml
+- siteconfig-controller-networkpolicy.yaml
 
 images:
 - name: controller
