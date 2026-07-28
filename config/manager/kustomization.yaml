@@ -8,4 +8,4 @@ resources:
 images:
 - name: controller
   newName: quay.io/stolostron/siteconfig-operator
-  newTag: 2.16.0
+  newTag: 5.0.0
