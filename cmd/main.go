@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -145,7 +146,10 @@ func run(metricsAddr, metricsCertDir, clusterInstanceWebhookCertDir, probeAddr s
 		return fmt.Errorf("failed to create pre-manager client: %w", err)
 	}
 
-	tlsProfileSpec, err := openshifttls.FetchAPIServerTLSProfile(ctx, preMgrClient)
+	fetchCtx, fetchCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer fetchCancel()
+
+	tlsProfileSpec, err := openshifttls.FetchAPIServerTLSProfile(fetchCtx, preMgrClient)
 	if err != nil {
 		return fmt.Errorf("failed to fetch cluster TLS security profile: %w", err)
 	}
