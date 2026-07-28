@@ -139,6 +139,7 @@ func requeueForDeletion() ctrl.Result {
 //+kubebuilder:rbac:groups=metal3.io,resources=hostfirmwaresettings,verbs=get;create;update;patch;delete
 //+kubebuilder:rbac:groups=hypershift.openshift.io,resources=hostedclusters,verbs=get;create;update;patch;delete
 //+kubebuilder:rbac:groups=hypershift.openshift.io,resources=nodepools,verbs=get;create;update;patch;delete
+//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
