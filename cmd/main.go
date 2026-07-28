@@ -230,61 +230,9 @@ func run(metricsAddr, metricsCertDir, clusterInstanceWebhookCertDir, probeAddr s
 		return fmt.Errorf("failed to initialize the ConfigurationStore for the SiteConfig Operator: %w", err)
 	}
 
-	// Create configuration monitor controller to track SiteConfig Operator configuration change(s)
-	if err := (&controller.ConfigurationMonitor{
-		Client:      mgr.GetClient(),
-		Log:         siteconfigLogger.Named("ConfigurationMonitor"),
-		Scheme:      mgr.GetScheme(),
-		Namespace:   siteConfigNamespace,
-		ConfigStore: sharedConfigStore,
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create controller ConfigurationMonitor: %w", err)
+	if err := setupControllers(mgr, siteconfigLogger, sharedConfigStore, siteConfigNamespace); err != nil {
+		return err
 	}
-
-	// Create DeletionHandler for graceful deletion of rendered objects
-	deletionHandler := &deletion.DeletionHandler{
-		Client: mgr.GetClient(),
-		Logger: siteconfigLogger.Named("DeletionHandler"),
-	}
-
-	// Create ReinstallHandler
-	reinstallHandler := &reinstall.ReinstallHandler{
-		Client:             mgr.GetClient(),
-		Logger:             siteconfigLogger.Named("ReinstallHandler"),
-		ConfigStore:        sharedConfigStore,
-		DeletionHandler:    deletionHandler,
-		SpokeClientFactory: &reinstall.DefaultSpokeClientFactory{},
-	}
-
-	// Create ClusterInstance controller for reconciling ClusterInstance CRs
-	clusterInstanceLogger := siteconfigLogger.Named("ClusterInstanceController")
-	if err := (&controller.ClusterInstanceReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		Recorder:         mgr.GetEventRecorderFor("ClusterInstanceController"),
-		Log:              clusterInstanceLogger,
-		TmplEngine:       ci.NewTemplateEngine(),
-		ConfigStore:      sharedConfigStore,
-		DeletionHandler:  deletionHandler,
-		ReinstallHandler: reinstallHandler,
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create controller ClusterInstance: %w", err)
-	}
-
-	// Create ClusterDeployment controller for monitoring cluster provisioning progress
-	if err := (&controller.ClusterDeploymentReconciler{
-		Client: mgr.GetClient(),
-		Log:    siteconfigLogger.Named("ClusterDeploymentReconciler"),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create controller ClusterDeploymentReconciler: %w", err)
-	}
-
-	// Create ClusterInstance validating admission webhook
-	if err = (&v1alpha1.ClusterInstance{}).SetupWebhookWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create webhook ClusterInstance: %w", err)
-	}
-	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return fmt.Errorf("unable to set up health check: %w", err)
@@ -297,6 +245,69 @@ func run(metricsAddr, metricsCertDir, clusterInstanceWebhookCertDir, probeAddr s
 	if err := mgr.Start(ctx); err != nil {
 		return fmt.Errorf("encountered an error starting SiteConfig manager: %w", err)
 	}
+	return nil
+}
+
+func setupControllers(
+	mgr ctrl.Manager, logger *zap.Logger,
+	configStore *configuration.ConfigurationStore, namespace string,
+) error {
+	// Create configuration monitor controller to track SiteConfig Operator configuration change(s)
+	if err := (&controller.ConfigurationMonitor{
+		Client:      mgr.GetClient(),
+		Log:         logger.Named("ConfigurationMonitor"),
+		Scheme:      mgr.GetScheme(),
+		Namespace:   namespace,
+		ConfigStore: configStore,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create controller ConfigurationMonitor: %w", err)
+	}
+
+	// Create DeletionHandler for graceful deletion of rendered objects
+	deletionHandler := &deletion.DeletionHandler{
+		Client: mgr.GetClient(),
+		Logger: logger.Named("DeletionHandler"),
+	}
+
+	// Create ReinstallHandler
+	reinstallHandler := &reinstall.ReinstallHandler{
+		Client:             mgr.GetClient(),
+		Logger:             logger.Named("ReinstallHandler"),
+		ConfigStore:        configStore,
+		DeletionHandler:    deletionHandler,
+		SpokeClientFactory: &reinstall.DefaultSpokeClientFactory{},
+	}
+
+	// Create ClusterInstance controller for reconciling ClusterInstance CRs
+	clusterInstanceLogger := logger.Named("ClusterInstanceController")
+	if err := (&controller.ClusterInstanceReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Recorder:         mgr.GetEventRecorderFor("ClusterInstanceController"),
+		Log:              clusterInstanceLogger,
+		TmplEngine:       ci.NewTemplateEngine(),
+		ConfigStore:      configStore,
+		DeletionHandler:  deletionHandler,
+		ReinstallHandler: reinstallHandler,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create controller ClusterInstance: %w", err)
+	}
+
+	// Create ClusterDeployment controller for monitoring cluster provisioning progress
+	if err := (&controller.ClusterDeploymentReconciler{
+		Client: mgr.GetClient(),
+		Log:    logger.Named("ClusterDeploymentReconciler"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create controller ClusterDeploymentReconciler: %w", err)
+	}
+
+	// Create ClusterInstance validating admission webhook
+	if err := (&v1alpha1.ClusterInstance{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook ClusterInstance: %w", err)
+	}
+	//+kubebuilder:scaffold:builder
+
 	return nil
 }
 
