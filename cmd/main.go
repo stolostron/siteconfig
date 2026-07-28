@@ -216,12 +216,12 @@ func run(metricsAddr, metricsCertDir, clusterInstanceWebhookCertDir, probeAddr s
 	}
 
 	// Initialize the default install template ConfigMaps
-	if err := initConfigMapTemplates(context.TODO(), tmpClient, siteConfigNamespace, setupLog); err != nil {
+	if err := initConfigMapTemplates(ctx, tmpClient, siteConfigNamespace, setupLog); err != nil {
 		return fmt.Errorf("unable to initialize the default reference installation template ConfigMaps: %w", err)
 	}
 
 	// Initialize the SiteConfig Operator configuration store
-	sharedConfigStore, err := createConfigurationStore(context.TODO(), tmpClient, siteConfigNamespace, setupLog)
+	sharedConfigStore, err := createConfigurationStore(ctx, tmpClient, siteConfigNamespace, setupLog)
 	if err != nil {
 		return fmt.Errorf("failed to initialize the ConfigurationStore for the SiteConfig Operator: %w", err)
 	}
