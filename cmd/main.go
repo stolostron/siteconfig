@@ -45,7 +45,9 @@ import (
 
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 
+	configv1 "github.com/openshift/api/config/v1"
 	"github.com/openshift/assisted-service/api/v1beta1"
+	openshifttls "github.com/openshift/controller-runtime-common/pkg/tls"
 
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 
@@ -76,6 +78,7 @@ func init() {
 	utilruntime.Must(v1beta1.AddToScheme(scheme))
 	utilruntime.Must(clusterv1.Install(scheme))
 	utilruntime.Must(bmh_v1alpha1.AddToScheme(scheme))
+	utilruntime.Must(configv1.Install(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -111,6 +114,8 @@ func main() {
 
 	setupLog := siteconfigLogger.Named("SiteConfigSetup")
 
+	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
+
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
 	// prevent from being vulnerable to the HTTP/2 Stream Cancellation and
@@ -122,12 +127,29 @@ func main() {
 		c.NextProtos = []string{"http/1.1"}
 	}
 
-	tlsOpts := []func(*tls.Config){}
+	cfg := ctrl.GetConfigOrDie()
+
+	preMgrClient, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error("failed to create pre-manager client", zap.Error(err))
+		os.Exit(1)
+	}
+
+	tlsProfileSpec, err := openshifttls.FetchAPIServerTLSProfile(ctx, preMgrClient)
+	if err != nil {
+		setupLog.Error("failed to fetch cluster TLS security profile", zap.Error(err))
+		os.Exit(1)
+	}
+
+	profileTLSOpt, unsupportedCiphers := openshifttls.NewTLSConfigFromProfile(tlsProfileSpec)
+	if len(unsupportedCiphers) > 0 {
+		setupLog.Warn("TLS profile contains unrecognised cipher suites", zap.Strings("ciphers", unsupportedCiphers))
+	}
+
+	tlsOpts := []func(*tls.Config){profileTLSOpt}
 	if !enableHTTP2 {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
-
-	cfg := ctrl.GetConfigOrDie()
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
@@ -160,6 +182,20 @@ func main() {
 	if err != nil {
 		setupLog.Error("Unable to start manager", zap.Error(err))
 		os.Exit(1) // nolint:gocritic
+	}
+
+	if err := (&openshifttls.SecurityProfileWatcher{
+		Client:                mgr.GetClient(),
+		InitialTLSProfileSpec: tlsProfileSpec,
+		OnProfileChange: func(_ context.Context, _, _ configv1.TLSProfileSpec) {
+			setupLog.Info("cluster TLS security profile changed, restarting to apply new settings")
+			cancel()
+		},
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error("unable to create controller",
+			zap.String("controller", "SecurityProfileWatcher"),
+			zap.Error(err))
+		os.Exit(1)
 	}
 
 	// Check that the SiteConfig namespace value is defined
@@ -267,7 +303,8 @@ func main() {
 	}
 
 	setupLog.Info("Starting SiteConfig manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error("Encountered an error starting SiteConfig manager", zap.Error(err))
 		os.Exit(1)
 	}
