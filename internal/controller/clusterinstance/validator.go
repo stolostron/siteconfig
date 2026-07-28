@@ -81,7 +81,7 @@ func validateResources(ctx context.Context, c client.Client, clusterInstance *v1
 func validateTemplateRefs(ctx context.Context, c client.Client, clusterInstance *v1alpha1.ClusterInstance) error {
 
 	// Check the cluster-level template references are defined
-	if (clusterInstance.Spec.TemplateRefs == nil) || (len(clusterInstance.Spec.TemplateRefs) < 1) {
+	if len(clusterInstance.Spec.TemplateRefs) < 1 {
 		return fmt.Errorf("missing cluster-level TemplateRefs")
 	}
 
@@ -97,7 +97,7 @@ func validateTemplateRefs(ctx context.Context, c client.Client, clusterInstance 
 
 	for _, node := range clusterInstance.Spec.Nodes {
 		// Check the ref templates are defined
-		if (node.TemplateRefs == nil) || (len(node.TemplateRefs) < 1) {
+		if len(node.TemplateRefs) < 1 {
 			return fmt.Errorf("missing node-level template refs [Node: Hostname=%s]", node.HostName)
 		}
 		// Verify that the node-level TemplateRefs exist
