@@ -16,7 +16,7 @@ require (
 )
 
 require (
-	github.com/openshift/api v0.0.0-20260304122341-cf5d8996109f // indirect
+	github.com/openshift/api v0.0.0-20260304122341-cf5d8996109f
 	github.com/openshift/assisted-service/api v0.0.0
 	github.com/openshift/assisted-service/models v0.0.0 // indirect
 )
@@ -24,12 +24,13 @@ require (
 require (
 	github.com/go-task/slim-sprig v2.20.0+incompatible
 	github.com/metal3-io/baremetal-operator/apis v0.12.4
+	github.com/openshift/controller-runtime-common v0.0.0-20260305203102-d1c60045a455
 	github.com/stretchr/testify v1.11.1
 	github.com/wI2L/jsondiff v0.7.1
 	go.uber.org/mock v0.6.0
 	go.uber.org/zap v1.28.0
 	golang.org/x/exp v0.0.0-20250718183923-645b1fa84792
-	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
+	k8s.io/utils v0.0.0-20260108192941-914a6e750570
 	open-cluster-management.io/api v1.2.0
 	sigs.k8s.io/yaml v1.6.0
 )
@@ -96,6 +97,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oklog/ulid/v2 v2.1.1 // indirect
 	github.com/openshift/custom-resource-status v1.1.3-0.20220503160415-f2fdb4999d87 // indirect
+	github.com/openshift/library-go v0.0.0-20260213153706-03f1709971c5 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect

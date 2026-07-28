@@ -273,10 +273,14 @@ github.com/openshift/assisted-service/api v0.0.0-20251026193953-3266b6d73526 h1:
 github.com/openshift/assisted-service/api v0.0.0-20251026193953-3266b6d73526/go.mod h1:wA7MaLcf/KoUl7fhB1bHBdhRBLjWPih90sHpxOV6ZLE=
 github.com/openshift/assisted-service/models v0.0.0-20251026193953-3266b6d73526 h1:q2kwkDj0ASPDzKtkBpemCXzHoO/VtVrVH+fkg7k72/M=
 github.com/openshift/assisted-service/models v0.0.0-20251026193953-3266b6d73526/go.mod h1:5EkIueBSaLnt64HR8drgSewdm+GeuE7W5mr9pa2JXXk=
+github.com/openshift/controller-runtime-common v0.0.0-20260305203102-d1c60045a455 h1:ZpquGa7pP0vz1Mv0Fo8ATOXHQuniVy77+Z7aMlCNKZs=
+github.com/openshift/controller-runtime-common v0.0.0-20260305203102-d1c60045a455/go.mod h1:59nLF3/IfhAtoQZfUzlCyidTAdlVT6KiVeTicUi2wuA=
 github.com/openshift/custom-resource-status v1.1.3-0.20220503160415-f2fdb4999d87 h1:cHyxR+Y8rAMT6m1jQCaYGRwikqahI0OjjUDhFNf3ySQ=
 github.com/openshift/custom-resource-status v1.1.3-0.20220503160415-f2fdb4999d87/go.mod h1:DB/Mf2oTeiAmVVX1gN+NEqweonAPY0TKUwADizj8+ZA=
 github.com/openshift/hive/apis v0.0.0-20251117181851-acea5e9196a2 h1:xxJHYC6iqSuIXxAhGreMPihNYpPREwskYfn+n1t0bf4=
 github.com/openshift/hive/apis v0.0.0-20251117181851-acea5e9196a2/go.mod h1:B8r0x5pxVdoVmZNIiiTIonvarlstfasBleqXqpw2nP8=
+github.com/openshift/library-go v0.0.0-20260213153706-03f1709971c5 h1:9Pe6iVOMjt9CdA/vaKBNUSoEIjIe1po5Ha3ABRYXLJI=
+github.com/openshift/library-go v0.0.0-20260213153706-03f1709971c5/go.mod h1:K3FoNLgNBFYbFuG+Kr8usAnQxj1w84XogyUp2M8rK8k=
 github.com/pborman/getopt v0.0.0-20170112200414-7148bc3a4c30/go.mod h1:85jBQOZwpVEaDAr341tbn15RS4fCAsIst0qp7i8ex1o=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
@@ -563,8 +567,8 @@ k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912 h1:Y3gxNAuB0OBLImH611+UDZ
 k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912/go.mod h1:kdmbQkyfwUagLfXIad1y2TdrjPFWp2Q89B3qkRwf/pQ=
 k8s.io/utils v0.0.0-20210802155522-efc7438f0176/go.mod h1:jPW/WVKK9YHAvNhRxK0md/EJ228hCsBRufyofKtW8HA=
 k8s.io/utils v0.0.0-20211116205334-6203023598ed/go.mod h1:jPW/WVKK9YHAvNhRxK0md/EJ228hCsBRufyofKtW8HA=
-k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 h1:SjGebBtkBqHFOli+05xYbK8YF1Dzkbzn+gDM4X9T4Ck=
-k8s.io/utils v0.0.0-20251002143259-bc988d571ff4/go.mod h1:OLgZIPagt7ERELqWJFomSt595RzquPNLL48iOWgYOg0=
+k8s.io/utils v0.0.0-20260108192941-914a6e750570 h1:JT4W8lsdrGENg9W+YwwdLJxklIuKWdRm+BC+xt33FOY=
+k8s.io/utils v0.0.0-20260108192941-914a6e750570/go.mod h1:xDxuJ0whA3d0I4mf/C4ppKHxXynQ+fxnkmQH0vTHnuk=
 open-cluster-management.io/api v1.2.0 h1:+yeQgJiErrur5S4s205UM37EcZ2XbC9pFSm0xgV5/hU=
 open-cluster-management.io/api v1.2.0/go.mod h1:YcmA6SpGEekIMxdoeVIIyOaBhMA6ImWRLXP4g8n8T+4=
 sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.34.0 h1:hSfpvjjTQXQY2Fol2CS0QHMNs/WI1MOSGzCm1KhM5ec=

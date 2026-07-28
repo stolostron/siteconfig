@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -45,7 +46,9 @@ import (
 
 	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 
+	configv1 "github.com/openshift/api/config/v1"
 	"github.com/openshift/assisted-service/api/v1beta1"
+	openshifttls "github.com/openshift/controller-runtime-common/pkg/tls"
 
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 
@@ -76,6 +79,7 @@ func init() {
 	utilruntime.Must(v1beta1.AddToScheme(scheme))
 	utilruntime.Must(clusterv1.Install(scheme))
 	utilruntime.Must(bmh_v1alpha1.AddToScheme(scheme))
+	utilruntime.Must(configv1.Install(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -106,10 +110,23 @@ func main() {
 
 	ctrl.SetLogger(ctrlruntimezap.New(ctrlruntimezap.UseFlagOptions(&opts)))
 
+	if err := run(metricsAddr, metricsCertDir, clusterInstanceWebhookCertDir,
+		probeAddr, enableLeaderElection, enableHTTP2); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run(metricsAddr, metricsCertDir, clusterInstanceWebhookCertDir, probeAddr string,
+	enableLeaderElection, enableHTTP2 bool,
+) error {
 	siteconfigLogger := zap.Must(zap.NewDevelopment())
 	defer siteconfigLogger.Sync() //nolint:errcheck
 
 	setupLog := siteconfigLogger.Named("SiteConfigSetup")
+
+	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
+	defer cancel()
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -122,12 +139,30 @@ func main() {
 		c.NextProtos = []string{"http/1.1"}
 	}
 
-	tlsOpts := []func(*tls.Config){}
+	cfg := ctrl.GetConfigOrDie()
+
+	preMgrClient, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return fmt.Errorf("failed to create pre-manager client: %w", err)
+	}
+
+	fetchCtx, fetchCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer fetchCancel()
+
+	tlsProfileSpec, err := openshifttls.FetchAPIServerTLSProfile(fetchCtx, preMgrClient)
+	if err != nil {
+		return fmt.Errorf("failed to fetch cluster TLS security profile: %w", err)
+	}
+
+	profileTLSOpt, unsupportedCiphers := openshifttls.NewTLSConfigFromProfile(tlsProfileSpec)
+	if len(unsupportedCiphers) > 0 {
+		setupLog.Warn("TLS profile contains unrecognised cipher suites", zap.Strings("ciphers", unsupportedCiphers))
+	}
+
+	tlsOpts := []func(*tls.Config){profileTLSOpt}
 	if !enableHTTP2 {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
-
-	cfg := ctrl.GetConfigOrDie()
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
@@ -158,119 +193,122 @@ func main() {
 		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
-		setupLog.Error("Unable to start manager", zap.Error(err))
-		os.Exit(1) // nolint:gocritic
+		return fmt.Errorf("unable to start manager: %w", err)
+	}
+
+	if err := (&openshifttls.SecurityProfileWatcher{
+		Client:                mgr.GetClient(),
+		InitialTLSProfileSpec: tlsProfileSpec,
+		OnProfileChange: func(_ context.Context, _, _ configv1.TLSProfileSpec) {
+			setupLog.Info("cluster TLS security profile changed, restarting to apply new settings")
+			cancel()
+		},
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create controller SecurityProfileWatcher: %w", err)
 	}
 
 	// Check that the SiteConfig namespace value is defined
 	siteConfigNamespace := getSiteConfigNamespace(setupLog)
 	if siteConfigNamespace == "" {
-		setupLog.Error("Unable to retrieve the SiteConfig Operator namespace")
-		os.Exit(1)
+		return fmt.Errorf("unable to retrieve the SiteConfig Operator namespace")
 	}
 
 	// Create an uncached client to initialize ConfigMaps
 	tmpClient, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
-		setupLog.Error("Failed to create temporary client", zap.Error(err))
-		os.Exit(1)
+		return fmt.Errorf("failed to create temporary client: %w", err)
 	}
 
 	// Initialize the default install template ConfigMaps
-	if err := initConfigMapTemplates(context.TODO(), tmpClient, siteConfigNamespace, setupLog); err != nil {
-		setupLog.Error("Unable to initialize the default reference installation template ConfigMaps",
-			zap.Error(err))
-		os.Exit(1)
+	if err := initConfigMapTemplates(ctx, tmpClient, siteConfigNamespace, setupLog); err != nil {
+		return fmt.Errorf("unable to initialize the default reference installation template ConfigMaps: %w", err)
 	}
 
 	// Initialize the SiteConfig Operator configuration store
-	sharedConfigStore, err := createConfigurationStore(context.TODO(), tmpClient, siteConfigNamespace, setupLog)
+	sharedConfigStore, err := createConfigurationStore(ctx, tmpClient, siteConfigNamespace, setupLog)
 	if err != nil {
-		setupLog.Error("Failed to initialize the ConfigurationStore for the SiteConfig Operator")
-		os.Exit(1)
+		return fmt.Errorf("failed to initialize the ConfigurationStore for the SiteConfig Operator: %w", err)
 	}
 
+	if err := setupControllers(mgr, siteconfigLogger, sharedConfigStore, siteConfigNamespace); err != nil {
+		return err
+	}
+
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		return fmt.Errorf("unable to set up health check: %w", err)
+	}
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		return fmt.Errorf("unable to set up ready check: %w", err)
+	}
+
+	setupLog.Info("Starting SiteConfig manager")
+	if err := mgr.Start(ctx); err != nil {
+		return fmt.Errorf("encountered an error starting SiteConfig manager: %w", err)
+	}
+	return nil
+}
+
+func setupControllers(
+	mgr ctrl.Manager, logger *zap.Logger,
+	configStore *configuration.ConfigurationStore, namespace string,
+) error {
 	// Create configuration monitor controller to track SiteConfig Operator configuration change(s)
 	if err := (&controller.ConfigurationMonitor{
 		Client:      mgr.GetClient(),
-		Log:         siteconfigLogger.Named("ConfigurationMonitor"),
+		Log:         logger.Named("ConfigurationMonitor"),
 		Scheme:      mgr.GetScheme(),
-		Namespace:   siteConfigNamespace,
-		ConfigStore: sharedConfigStore,
+		Namespace:   namespace,
+		ConfigStore: configStore,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error("Unable to create controller",
-			zap.String("controller", "ConfigurationMonitor"),
-			zap.Error(err))
-		os.Exit(1)
+		return fmt.Errorf("unable to create controller ConfigurationMonitor: %w", err)
 	}
 
 	// Create DeletionHandler for graceful deletion of rendered objects
 	deletionHandler := &deletion.DeletionHandler{
 		Client: mgr.GetClient(),
-		Logger: siteconfigLogger.Named("DeletionHandler"),
+		Logger: logger.Named("DeletionHandler"),
 	}
 
 	// Create ReinstallHandler
 	reinstallHandler := &reinstall.ReinstallHandler{
 		Client:             mgr.GetClient(),
-		Logger:             siteconfigLogger.Named("ReinstallHandler"),
-		ConfigStore:        sharedConfigStore,
+		Logger:             logger.Named("ReinstallHandler"),
+		ConfigStore:        configStore,
 		DeletionHandler:    deletionHandler,
 		SpokeClientFactory: &reinstall.DefaultSpokeClientFactory{},
 	}
 
 	// Create ClusterInstance controller for reconciling ClusterInstance CRs
-	clusterInstanceLogger := siteconfigLogger.Named("ClusterInstanceController")
+	clusterInstanceLogger := logger.Named("ClusterInstanceController")
 	if err := (&controller.ClusterInstanceReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		Recorder:         mgr.GetEventRecorderFor("ClusterInstanceController"),
 		Log:              clusterInstanceLogger,
 		TmplEngine:       ci.NewTemplateEngine(),
-		ConfigStore:      sharedConfigStore,
+		ConfigStore:      configStore,
 		DeletionHandler:  deletionHandler,
 		ReinstallHandler: reinstallHandler,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error("Unable to create controller",
-			zap.String("controller", "ClusterInstance"),
-			zap.Error(err),
-		)
-		os.Exit(1)
+		return fmt.Errorf("unable to create controller ClusterInstance: %w", err)
 	}
 
 	// Create ClusterDeployment controller for monitoring cluster provisioning progress
 	if err := (&controller.ClusterDeploymentReconciler{
 		Client: mgr.GetClient(),
-		Log:    siteconfigLogger.Named("ClusterDeploymentReconciler"),
+		Log:    logger.Named("ClusterDeploymentReconciler"),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error("Unable to create controller",
-			zap.String("controller", "ClusterDeploymentReconciler"),
-			zap.Error(err))
-		os.Exit(1)
+		return fmt.Errorf("unable to create controller ClusterDeploymentReconciler: %w", err)
 	}
 
 	// Create ClusterInstance validating admission webhook
-	if err = (&v1alpha1.ClusterInstance{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error("Unable to create webhook", zap.String("webhook", "ClusterInstance"), zap.Error(err))
-		os.Exit(1)
+	if err := (&v1alpha1.ClusterInstance{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook ClusterInstance: %w", err)
 	}
 	//+kubebuilder:scaffold:builder
 
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error("Unable to set up health check", zap.Error(err))
-		os.Exit(1)
-	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error("Unable to set up ready check", zap.Error(err))
-		os.Exit(1)
-	}
-
-	setupLog.Info("Starting SiteConfig manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error("Encountered an error starting SiteConfig manager", zap.Error(err))
-		os.Exit(1)
-	}
+	return nil
 }
 
 // getSiteConfigNamespace retrieves the namespace where the SiteConfig Operator is running.
