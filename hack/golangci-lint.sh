@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="2.12.1"
+VERSION="2.11.4"
 
 rootdir=$(git rev-parse --show-toplevel)
 if [ -z "${rootdir}" ]; then
@@ -19,7 +19,7 @@ function get_tool {
 
     if [ $ret -ne 0 ]; then
         echo "Install from script failed. Trying go install"
-        go install "github.com/golangci/golangci-lint/cmd/golangci-lint@v${VERSION}"
+        go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v${VERSION}"
         ret=$?
         if [ $ret -ne 0 ]; then
             echo "Install of golangci-lint failed"
