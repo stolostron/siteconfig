@@ -1136,7 +1136,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    operators.operatorframework.io/builder: operator-sdk-v1.33.0
+    operators.operatorframework.io/builder: operator-sdk-v1.42.2
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
   name: siteconfig.v5.0.0
   namespace: placeholder
@@ -1144,11 +1144,12 @@ spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
     owned:
-    - description: ClusterInstance defines the desired configuration for provisioning
-        an OpenShift cluster. Based on the selected templateRefs and clusterType,
-        the controller renders and applies the Kubernetes resources needed for cluster
-        installation (e.g., ClusterDeployment, ManagedCluster, BareMetalHost, or HostedCluster
-        depending on the installation flow).
+    - description: |-
+        ClusterInstance defines the desired configuration for provisioning an
+        OpenShift cluster. Based on the selected templateRefs and clusterType,
+        the controller renders and applies the Kubernetes resources needed for
+        cluster installation (e.g., ClusterDeployment, ManagedCluster,
+        BareMetalHost, or HostedCluster depending on the installation flow).
       displayName: Cluster Instance
       kind: ClusterInstance
       name: clusterinstances.siteconfig.open-cluster-management.io
