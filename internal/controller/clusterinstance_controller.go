@@ -34,7 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -78,7 +78,7 @@ const (
 type ClusterInstanceReconciler struct {
 	client.Client
 	Scheme           *runtime.Scheme
-	Recorder         record.EventRecorder
+	Recorder         events.EventRecorder
 	Log              *zap.Logger
 	TmplEngine       *ci.TemplateEngine
 	ConfigStore      *configuration.ConfigurationStore
@@ -597,7 +597,7 @@ func applyObject(
 
 	// Apply using Server-Side Apply with field manager
 	log.Debug("Applying object using Server-Side Apply")
-	if err := c.Patch(ctx, preparedObj, client.Apply,
+	if err := c.Patch(ctx, preparedObj, client.Apply, //nolint:staticcheck // TODO: migrate to client.Client.Apply()
 		client.FieldOwner(ClusterInstanceFieldManager), client.ForceOwnership); err != nil {
 		return controllerutil.OperationResultNone, fmt.Errorf("failed to apply object using Server-Side Apply: %w", err)
 	}
@@ -858,7 +858,7 @@ func (r *ClusterInstanceReconciler) handleRenderTemplates(
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClusterInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.Recorder = mgr.GetEventRecorderFor("ClusterInstance")
+	r.Recorder = mgr.GetEventRecorder("ClusterInstance")
 
 	r.Log.Sugar().Infof("ClusterInstanceReconciler is configured to reconcile %d requests concurrently",
 		r.ConfigStore.GetMaxConcurrentReconciles())
