@@ -21,7 +21,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
@@ -100,7 +99,6 @@ var _ = Describe("ValidateUpdate", func() {
 	var (
 		ctx                                    context.Context
 		v                                      *clusterInstanceValidator
-		oldObj, newObj                         runtime.Object
 		oldClusterInstance, newClusterInstance *ClusterInstance
 	)
 
@@ -149,10 +147,9 @@ var _ = Describe("ValidateUpdate", func() {
 	Context("Normal Provisioning Flow (HoldInstallation disabled)", func() {
 		BeforeEach(func() {
 			oldClusterInstance.Spec.HoldInstallation = false
-			oldObj = oldClusterInstance
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
-			newObj = newClusterInstance
+
 		})
 
 		It("should block spec changes while provisioning is in-progress", func() {
@@ -165,7 +162,6 @@ var _ = Describe("ValidateUpdate", func() {
 					},
 				},
 			}
-			oldObj = oldClusterInstance
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
 			newClusterInstance.Spec.ExtraAnnotations = map[string]map[string]string{
@@ -173,9 +169,8 @@ var _ = Describe("ValidateUpdate", func() {
 					"foo": "bar",
 				},
 			}
-			newObj = newClusterInstance
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("spec update not allowed during provisioning"))
 		})
@@ -190,12 +185,10 @@ var _ = Describe("ValidateUpdate", func() {
 					},
 				},
 			}
-			oldObj = oldClusterInstance
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
-			newObj = newClusterInstance
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -209,7 +202,6 @@ var _ = Describe("ValidateUpdate", func() {
 					},
 				},
 			}
-			oldObj = oldClusterInstance
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
 			newClusterInstance.Spec.ClusterName = "new-name"
@@ -217,9 +209,8 @@ var _ = Describe("ValidateUpdate", func() {
 				"BareMetalHost": {"key": "value"},
 			}
 			newClusterInstance.Spec.Nodes[0].HostName = "new-hostname"
-			newObj = newClusterInstance
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("spec update not allowed during provisioning"))
 		})
@@ -236,15 +227,14 @@ var _ = Describe("ValidateUpdate", func() {
 					},
 				},
 			}
-			oldObj = oldClusterInstance
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
-			newObj = newClusterInstance
+
 		})
 
 		It("should return nil for no spec changes", func() {
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -254,7 +244,7 @@ var _ = Describe("ValidateUpdate", func() {
 					"foo": "bar",
 				},
 			}
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).ToNot(HaveOccurred())
 		})
 	})
@@ -271,15 +261,14 @@ var _ = Describe("ValidateUpdate", func() {
 					},
 				},
 			}
-			oldObj = oldClusterInstance
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
-			newObj = newClusterInstance
+
 		})
 
 		It("should return error for BootMACAddress changes with reinstall not requested", func() {
 			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-should-not-change"
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("detected unauthorized node modifications"))
 			Expect(err.Error()).To(ContainSubstring("unauthorized change to bootMACAddress"))
@@ -291,7 +280,7 @@ var _ = Describe("ValidateUpdate", func() {
 			}
 
 			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-is-allowed"
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -310,8 +299,8 @@ var _ = Describe("ValidateUpdate", func() {
 				Generation: "test-1",
 			}
 			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-is-not-allowed"
-			newObj = newClusterInstance
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("invalid spec changes detected"))
 		})
@@ -337,8 +326,8 @@ var _ = Describe("ValidateUpdate", func() {
 			}
 
 			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-is-not-allowed"
-			newObj = newClusterInstance
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("invalid reinstall fields: reinstall generation update is not allowed while a request is still active"))
 		})
@@ -353,7 +342,7 @@ var _ = Describe("ValidateUpdate", func() {
 			}
 
 			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-is-allowed"
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -361,17 +350,16 @@ var _ = Describe("ValidateUpdate", func() {
 	Context("HoldInstallation Toggle Validation", func() {
 		BeforeEach(func() {
 			oldClusterInstance.Status = ClusterInstanceStatus{}
-			oldObj = oldClusterInstance
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
-			newObj = newClusterInstance
+
 		})
 
 		It("should block HoldInstallation change from false to true", func() {
 			oldClusterInstance.Spec.HoldInstallation = false
 			newClusterInstance.Spec.HoldInstallation = true
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("holdInstallation can only be set to true during creation"))
 		})
@@ -380,7 +368,7 @@ var _ = Describe("ValidateUpdate", func() {
 			oldClusterInstance.Spec.HoldInstallation = true
 			newClusterInstance.Spec.HoldInstallation = false
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -388,7 +376,7 @@ var _ = Describe("ValidateUpdate", func() {
 			oldClusterInstance.Spec.HoldInstallation = true
 			newClusterInstance.Spec.HoldInstallation = true
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -396,7 +384,7 @@ var _ = Describe("ValidateUpdate", func() {
 			oldClusterInstance.Spec.HoldInstallation = false
 			newClusterInstance.Spec.HoldInstallation = false
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -415,7 +403,7 @@ var _ = Describe("ValidateUpdate", func() {
 			newClusterInstance.Spec.HoldInstallation = true
 			newClusterInstance.Status = oldClusterInstance.Status
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("holdInstallation can only be set to true during creation"))
 		})
@@ -435,7 +423,7 @@ var _ = Describe("ValidateUpdate", func() {
 			newClusterInstance.Spec.HoldInstallation = true
 			newClusterInstance.Status = oldClusterInstance.Status
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("holdInstallation can only be set to true during creation"))
 		})
@@ -453,10 +441,9 @@ var _ = Describe("ValidateUpdate", func() {
 					},
 				},
 			}
-			oldObj = oldClusterInstance
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
-			newObj = newClusterInstance
+
 		})
 
 		It("should allow all spec changes when HoldInstallation was true and provisioning not completed", func() {
@@ -469,7 +456,7 @@ var _ = Describe("ValidateUpdate", func() {
 				SerialNumber: "new-serial-number",
 			}
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -478,7 +465,7 @@ var _ = Describe("ValidateUpdate", func() {
 			newClusterInstance.Spec.ClusterName = "new-cluster-name"
 			newClusterInstance.Spec.BaseDomain = "new-domain.com"
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -492,7 +479,7 @@ var _ = Describe("ValidateUpdate", func() {
 			}
 			newClusterInstance.Spec.Nodes[0].BmcAddress = "fixed-bmc-address"
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -506,7 +493,7 @@ var _ = Describe("ValidateUpdate", func() {
 			}
 			newClusterInstance.Spec.ClusterName = "modified-cluster-name"
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -514,7 +501,7 @@ var _ = Describe("ValidateUpdate", func() {
 			// Remove required field to trigger validation error
 			newClusterInstance.Spec.TemplateRefs = nil
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("validation failed"))
 		})
@@ -532,10 +519,9 @@ var _ = Describe("ValidateUpdate", func() {
 					},
 				},
 			}
-			oldObj = oldClusterInstance
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
-			newObj = newClusterInstance
+
 		})
 
 		It("should fall back to SpecChangeBaseOnly when HoldInstallation was true but provisioning completed", func() {
@@ -544,7 +530,7 @@ var _ = Describe("ValidateUpdate", func() {
 				"BareMetalHost": {"foo": "bar"},
 			}
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -552,7 +538,7 @@ var _ = Describe("ValidateUpdate", func() {
 			// Try to change a field that requires reinstall
 			newClusterInstance.Spec.Nodes[0].BmcAddress = "should-not-change"
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("invalid spec changes detected"))
 		})
@@ -563,7 +549,7 @@ var _ = Describe("ValidateUpdate", func() {
 				"ManagedCluster": {"new-label": "value"},
 			}
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -580,10 +566,9 @@ var _ = Describe("ValidateUpdate", func() {
 					},
 				},
 			}
-			oldObj = oldClusterInstance
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
-			newObj = newClusterInstance
+
 		})
 
 		It("should allow reinstall field changes without HoldInstallation", func() {
@@ -592,7 +577,7 @@ var _ = Describe("ValidateUpdate", func() {
 			}
 			newClusterInstance.Spec.Nodes[0].BmcAddress = "new-bmc-for-reinstall"
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -604,7 +589,7 @@ var _ = Describe("ValidateUpdate", func() {
 			}
 			newClusterInstance.Spec.Nodes[0].BootMACAddress = "new-mac-for-reinstall"
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -617,13 +602,11 @@ var _ = Describe("ValidateUpdate", func() {
 				InProgressGeneration: "test-1",
 				ObservedGeneration:   "",
 			}
-			oldObj = oldClusterInstance
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
 			newClusterInstance.Spec.Nodes[0].BootMACAddress = "should-be-blocked"
-			newObj = newClusterInstance
 
-			_, err := v.ValidateUpdate(ctx, oldObj, newObj)
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("spec update not allowed during provisioning or cluster reinstalls"))
 		})
