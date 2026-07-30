@@ -302,6 +302,15 @@ func setupControllers(
 		return fmt.Errorf("unable to create controller ClusterDeploymentReconciler: %w", err)
 	}
 
+	// Create ManagedCluster controller for monitoring HostedControlPlane cluster status
+	if err := (&controller.ManagedClusterReconciler{
+		Client: mgr.GetClient(),
+		Log:    logger.Named("ManagedClusterReconciler"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create controller ManagedClusterReconciler: %w", err)
+	}
+
 	// Create ClusterInstance validating admission webhook
 	if err := (&v1alpha1.ClusterInstance{}).SetupWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create webhook ClusterInstance: %w", err)
