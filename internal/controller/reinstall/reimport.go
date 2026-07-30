@@ -437,6 +437,7 @@ func applyToSpoke(
 		client.FieldOwner("siteconfig-controller"),
 	}
 
+	//nolint:staticcheck // TODO: migrate to client.Client.Apply()
 	if err := spokeClient.Patch(ctx, objCopy, client.Apply, patchOpts...); err != nil {
 		return fmt.Errorf("failed to apply object %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
 	}

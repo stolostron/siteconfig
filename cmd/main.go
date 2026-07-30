@@ -283,7 +283,7 @@ func setupControllers(
 	if err := (&controller.ClusterInstanceReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
-		Recorder:         mgr.GetEventRecorderFor("ClusterInstanceController"),
+		Recorder:         mgr.GetEventRecorder("ClusterInstanceController"),
 		Log:              clusterInstanceLogger,
 		TmplEngine:       ci.NewTemplateEngine(),
 		ConfigStore:      configStore,
