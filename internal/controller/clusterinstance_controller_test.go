@@ -160,6 +160,9 @@ var _ = Describe("Reconcile", func() {
 				Name:       testParams.ClusterName,
 				Namespace:  testParams.ClusterNamespace,
 				Finalizers: []string{clusterInstanceFinalizer},
+				Annotations: map[string]string{
+					veleroRestoreStatusAnnotation: "true",
+				},
 			},
 			Spec: v1alpha1.ClusterInstanceSpec{
 				ClusterName:            testParams.ClusterName,
@@ -247,6 +250,91 @@ var _ = Describe("Reconcile", func() {
 
 			Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
 			Expect(clusterInstance.Status.Paused).To(BeNil())
+		})
+	})
+
+	Context("Velero Restore Detection", func() {
+		It("stops reconcile early when status is empty and restore name label is set", func() {
+			clusterInstance.ObjectMeta.Generation = 1
+			clusterInstance.ObjectMeta.Labels = map[string]string{
+				veleroRestoreNameLabel: "test-restore",
+			}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+			res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(ctrl.Result{}))
+
+			// Verify ObservedGeneration was set to match Generation (reconcile stopped early)
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+			Expect(clusterInstance.Status.ObservedGeneration).To(Equal(int64(1)))
+			// Verify the restore was marked as handled
+			Expect(clusterInstance.Annotations).To(HaveKeyWithValue(veleroRestoreHandledAnnotation, "test-restore"))
+			// Verify no conditions were set (no rendering occurred)
+			Expect(clusterInstance.Status.Conditions).To(BeEmpty())
+			Expect(clusterInstance.Status.ManifestsRendered).To(BeEmpty())
+		})
+
+		It("stops reconcile early when restore label is set and ObservedGeneration is stale", func() {
+			clusterInstance.ObjectMeta.Generation = 1
+			clusterInstance.ObjectMeta.Labels = map[string]string{
+				veleroRestoreNameLabel: "test-restore",
+			}
+			clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
+				ObservedGeneration: 5,
+			}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+			res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(ctrl.Result{}))
+
+			// Verify ObservedGeneration was updated to match the new Generation
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+			Expect(clusterInstance.Status.ObservedGeneration).To(Equal(int64(1)))
+			Expect(clusterInstance.Annotations).To(HaveKeyWithValue(veleroRestoreHandledAnnotation, "test-restore"))
+		})
+
+		It("proceeds with normal reconciliation after a restore-labeled ClusterInstance receives a spec change", func() {
+			clusterInstance.ObjectMeta.Generation = 1
+			clusterInstance.ObjectMeta.Labels = map[string]string{
+				veleroRestoreNameLabel: "test-restore",
+			}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+			// First reconcile: restore is detected and handled
+			res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(ctrl.Result{}))
+
+			// Simulate a spec change: Generation increments
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+			clusterInstance.ObjectMeta.Generation = 2
+			Expect(c.Update(ctx, clusterInstance)).To(Succeed())
+
+			// Second reconcile: restore label is still present but the restore was already handled,
+			// so the controller should proceed with normal reconciliation (which will fail at validation)
+			res, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+			Expect(err).To(HaveOccurred())
+			Expect(res).To(Equal(requeueWithDelay(DefaultValidationErrorDelay)))
+		})
+
+		It("sets restore status annotation on ClusterInstance during reconcile", func() {
+			// Remove the annotation that BeforeEach sets, to verify the controller adds it
+			delete(clusterInstance.Annotations, veleroRestoreStatusAnnotation)
+			clusterInstance.ObjectMeta.Generation = 1
+			clusterInstance.Status = v1alpha1.ClusterInstanceStatus{
+				ObservedGeneration: 1,
+			}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+			res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+			Expect(err).NotTo(HaveOccurred())
+			// Requeue to proceed after adding the annotation
+			Expect(res).To(Equal(ctrl.Result{Requeue: true}))
+
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+			Expect(clusterInstance.Annotations).To(HaveKeyWithValue(veleroRestoreStatusAnnotation, "true"))
 		})
 	})
 
@@ -1177,6 +1265,62 @@ var _ = Describe("handleFinalizer", func() {
 	})
 })
 
+var _ = Describe("ensureVeleroRestoreStatusAnnotation", func() {
+	var (
+		c          client.Client
+		r          *ClusterInstanceReconciler
+		ctx        = context.Background()
+		testLogger = zap.NewNop().Named("Test")
+	)
+
+	BeforeEach(func() {
+		c = fakeclient.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+			Build()
+
+		r = &ClusterInstanceReconciler{
+			Client: c,
+			Scheme: scheme.Scheme,
+			Log:    testLogger,
+		}
+	})
+
+	It("adds the restore-status annotation if not present", func() {
+		clusterInstance := &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      TestClusterInstanceName,
+				Namespace: TestClusterInstanceNamespace,
+			},
+		}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		res, err := r.ensureVeleroRestoreStatusAnnotation(ctx, testLogger, clusterInstance)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(res).To(Equal(ctrl.Result{Requeue: true}))
+
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed())
+		Expect(clusterInstance.Annotations).To(HaveKeyWithValue(veleroRestoreStatusAnnotation, "true"))
+	})
+
+	It("does nothing if the annotation is already present", func() {
+		clusterInstance := &v1alpha1.ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      TestClusterInstanceName,
+				Namespace: TestClusterInstanceNamespace,
+				Annotations: map[string]string{
+					veleroRestoreStatusAnnotation: "true",
+				},
+			},
+		}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		res, err := r.ensureVeleroRestoreStatusAnnotation(ctx, testLogger, clusterInstance)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(res).To(Equal(ctrl.Result{}))
+	})
+})
+
 var _ = Describe("pruneManifests", func() {
 
 	var (
@@ -1572,6 +1716,9 @@ var _ = Describe("pruneManifests", func() {
 				Namespace:  clusterInstanceKey.Namespace,
 				Finalizers: []string{clusterInstanceFinalizer},
 				Generation: generation,
+				Annotations: map[string]string{
+					veleroRestoreStatusAnnotation: "true",
+				},
 			},
 			Spec: v1alpha1.ClusterInstanceSpec{
 				PruneManifests: []v1alpha1.ResourceRef{
