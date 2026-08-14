@@ -62,20 +62,29 @@ spec:
         - protocol: TCP
           port: 6443
 
-    # Spoke cluster API servers — reinstall reimport via kubeconfig secrets (dynamic IPs)
+    # Spoke cluster API servers — reinstall reimport via kubeconfig secrets (dynamic IPs).
+    # Dual-stack: on IPv6 clusters the hub API service (kubernetes.default) also resolves
+    # here, since egress is evaluated against the post-DNAT endpoint (node IP on 6443).
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
+        - ipBlock:
+            cidr: "::/0"
       ports:
         - protocol: TCP
           port: 6443
 
-    # External HTTPS — OIDC/OAuth auth plugin for cloud provider authentication
+    # External HTTPS — OIDC/OAuth auth plugin for cloud provider authentication.
+    # except: link-local cloud metadata endpoints (IPv4 and IPv6).
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
             except:
               - 169.254.169.254/32
+        - ipBlock:
+            cidr: "::/0"
+            except:
+              - fd00:ec2::254/128
       ports:
         - protocol: TCP
           port: 443
