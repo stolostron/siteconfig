@@ -4,8 +4,8 @@ go 1.26.0
 
 require (
 	github.com/go-logr/logr v1.4.3
-	github.com/onsi/ginkgo/v2 v2.28.3
-	github.com/onsi/gomega v1.40.0
+	github.com/onsi/ginkgo/v2 v2.32.1
+	github.com/onsi/gomega v1.42.1
 	github.com/openshift/hive/apis v0.0.0-20260415205034-aa1db747a6ba
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.35.0
