@@ -3,7 +3,7 @@ module github.com/stolostron/siteconfig
 go 1.26.0
 
 require (
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/onsi/ginkgo/v2 v2.28.3
 	github.com/onsi/gomega v1.40.0
 	github.com/openshift/hive/apis v0.0.0-20260415205034-aa1db747a6ba
