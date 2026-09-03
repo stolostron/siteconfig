@@ -64,6 +64,12 @@ rules:
 - apiGroups:
   - cluster.open-cluster-management.io
   resources:
+  - managedclusters/status
+  verbs:
+  - get
+- apiGroups:
+  - cluster.open-cluster-management.io
+  resources:
   - managedclustersets/join
   verbs:
   - create
