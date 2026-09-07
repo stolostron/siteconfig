@@ -41,8 +41,6 @@ import (
 	"k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 	authorizationcel "k8s.io/apiserver/pkg/authorization/cel"
-	genericfeatures "k8s.io/apiserver/pkg/features"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/apiserver/pkg/util/webhook"
 	"k8s.io/apiserver/plugin/pkg/authorizer/webhook/metrics"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -82,8 +80,8 @@ type WebhookAuthorizer struct {
 }
 
 // NewFromInterface creates a WebhookAuthorizer using the given subjectAccessReview client
-func NewFromInterface(subjectAccessReview authorizationv1client.AuthorizationV1Interface, authorizedTTL, unauthorizedTTL time.Duration, retryBackoff wait.Backoff, decisionOnError authorizer.Decision, metrics metrics.AuthorizerMetrics) (*WebhookAuthorizer, error) {
-	return newWithBackoff(&subjectAccessReviewV1Client{subjectAccessReview.RESTClient()}, authorizedTTL, unauthorizedTTL, retryBackoff, decisionOnError, nil, metrics, "")
+func NewFromInterface(subjectAccessReview authorizationv1client.AuthorizationV1Interface, authorizedTTL, unauthorizedTTL time.Duration, retryBackoff wait.Backoff, decisionOnError authorizer.Decision, metrics metrics.AuthorizerMetrics, compiler authorizationcel.Compiler) (*WebhookAuthorizer, error) {
+	return newWithBackoff(&subjectAccessReviewV1Client{subjectAccessReview.RESTClient()}, authorizedTTL, unauthorizedTTL, retryBackoff, decisionOnError, nil, metrics, compiler, "")
 }
 
 // New creates a new WebhookAuthorizer from the provided kubeconfig file.
@@ -105,18 +103,18 @@ func NewFromInterface(subjectAccessReview authorizationv1client.AuthorizationV1I
 //
 // For additional HTTP configuration, refer to the kubeconfig documentation
 // https://kubernetes.io/docs/user-guide/kubeconfig-file/.
-func New(config *rest.Config, version string, authorizedTTL, unauthorizedTTL time.Duration, retryBackoff wait.Backoff, decisionOnError authorizer.Decision, matchConditions []apiserver.WebhookMatchCondition, name string, metrics metrics.AuthorizerMetrics) (*WebhookAuthorizer, error) {
+func New(config *rest.Config, version string, authorizedTTL, unauthorizedTTL time.Duration, retryBackoff wait.Backoff, decisionOnError authorizer.Decision, matchConditions []apiserver.WebhookMatchCondition, name string, metrics metrics.AuthorizerMetrics, compiler authorizationcel.Compiler) (*WebhookAuthorizer, error) {
 	subjectAccessReview, err := subjectAccessReviewInterfaceFromConfig(config, version, retryBackoff)
 	if err != nil {
 		return nil, err
 	}
-	return newWithBackoff(subjectAccessReview, authorizedTTL, unauthorizedTTL, retryBackoff, decisionOnError, matchConditions, metrics, name)
+	return newWithBackoff(subjectAccessReview, authorizedTTL, unauthorizedTTL, retryBackoff, decisionOnError, matchConditions, metrics, compiler, name)
 }
 
 // newWithBackoff allows tests to skip the sleep.
-func newWithBackoff(subjectAccessReview subjectAccessReviewer, authorizedTTL, unauthorizedTTL time.Duration, retryBackoff wait.Backoff, decisionOnError authorizer.Decision, matchConditions []apiserver.WebhookMatchCondition, am metrics.AuthorizerMetrics, name string) (*WebhookAuthorizer, error) {
+func newWithBackoff(subjectAccessReview subjectAccessReviewer, authorizedTTL, unauthorizedTTL time.Duration, retryBackoff wait.Backoff, decisionOnError authorizer.Decision, matchConditions []apiserver.WebhookMatchCondition, am metrics.AuthorizerMetrics, compiler authorizationcel.Compiler, name string) (*WebhookAuthorizer, error) {
 	// compile all expressions once in validation and save the results to be used for eval later
-	cm, fieldErr := apiservervalidation.ValidateAndCompileMatchConditions(matchConditions)
+	cm, fieldErr := apiservervalidation.ValidateAndCompileMatchConditions(compiler, matchConditions)
 	if err := fieldErr.ToAggregate(); err != nil {
 		return nil, err
 	}
@@ -204,21 +202,18 @@ func (w *WebhookAuthorizer) Authorize(ctx context.Context, attr authorizer.Attri
 			Verb: attr.GetVerb(),
 		}
 	}
-	// skipping match when feature is not enabled
-	if utilfeature.DefaultFeatureGate.Enabled(genericfeatures.StructuredAuthorizationConfiguration) {
-		// Process Match Conditions before calling the webhook
-		matches, err := w.match(ctx, r)
-		// If at least one matchCondition evaluates to an error (but none are FALSE):
-		// If failurePolicy=Deny, then the webhook rejects the request
-		// If failurePolicy=NoOpinion, then the error is ignored and the webhook is skipped
-		if err != nil {
-			return w.decisionOnError, "", err
-		}
-		// If at least one matchCondition successfully evaluates to FALSE,
-		// then the webhook is skipped.
-		if !matches {
-			return authorizer.DecisionNoOpinion, "", nil
-		}
+	// Process Match Conditions before calling the webhook
+	matches, err := w.match(ctx, r)
+	// If at least one matchCondition evaluates to an error (but none are FALSE):
+	// If failurePolicy=Deny, then the webhook rejects the request
+	// If failurePolicy=NoOpinion, then the error is ignored and the webhook is skipped
+	if err != nil {
+		return w.decisionOnError, "", err
+	}
+	// If at least one matchCondition successfully evaluates to FALSE,
+	// then the webhook is skipped.
+	if !matches {
+		return authorizer.DecisionNoOpinion, "", nil
 	}
 	// If all evaluated successfully and ALL matchConditions evaluate to TRUE,
 	// then the webhook is called.
@@ -298,6 +293,16 @@ func (w *WebhookAuthorizer) Authorize(ctx context.Context, attr authorizer.Attri
 
 }
 
+// ConditionsAwareAuthorize is not conditions-aware, converts the Authorize decision.
+func (w *WebhookAuthorizer) ConditionsAwareAuthorize(ctx context.Context, a authorizer.Attributes) authorizer.ConditionsAwareDecision {
+	return authorizer.ConditionsAwareDecisionFromParts(w.Authorize(ctx, a))
+}
+
+// EvaluateConditions is not supported by this authorizer.
+func (*WebhookAuthorizer) EvaluateConditions(_ context.Context, _ authorizer.ConditionsAwareDecision, _ authorizer.ConditionsData) (authorizer.Decision, string, error) {
+	return authorizer.DecisionDeny, "", authorizer.ErrorConditionEvaluationNotSupported
+}
+
 func resourceAttributesFrom(attr authorizer.Attributes) *authorizationv1.ResourceAttributes {
 	ret := &authorizationv1.ResourceAttributes{
 		Namespace:   attr.GetNamespace(),
@@ -309,19 +314,17 @@ func resourceAttributesFrom(attr authorizer.Attributes) *authorizationv1.Resourc
 		Name:        attr.GetName(),
 	}
 
-	if utilfeature.DefaultFeatureGate.Enabled(genericfeatures.AuthorizeWithSelectors) {
-		// If we are able to get any requirements while parsing selectors, use them, even if there's an error.
-		// This is because selectors only narrow, so if a subset of selector requirements are available, the request can be allowed.
-		if selectorRequirements, _ := fieldSelectorToAuthorizationAPI(attr); len(selectorRequirements) > 0 {
-			ret.FieldSelector = &authorizationv1.FieldSelectorAttributes{
-				Requirements: selectorRequirements,
-			}
+	// If we are able to get any requirements while parsing selectors, use them, even if there's an error.
+	// This is because selectors only narrow, so if a subset of selector requirements are available, the request can be allowed.
+	if selectorRequirements, _ := fieldSelectorToAuthorizationAPI(attr); len(selectorRequirements) > 0 {
+		ret.FieldSelector = &authorizationv1.FieldSelectorAttributes{
+			Requirements: selectorRequirements,
 		}
+	}
 
-		if selectorRequirements, _ := labelSelectorToAuthorizationAPI(attr); len(selectorRequirements) > 0 {
-			ret.LabelSelector = &authorizationv1.LabelSelectorAttributes{
-				Requirements: selectorRequirements,
-			}
+	if selectorRequirements, _ := labelSelectorToAuthorizationAPI(attr); len(selectorRequirements) > 0 {
+		ret.LabelSelector = &authorizationv1.LabelSelectorAttributes{
+			Requirements: selectorRequirements,
 		}
 	}
 
@@ -402,7 +405,7 @@ func labelSelectorToAuthorizationAPI(attr authorizer.Attributes) ([]metav1.Label
 }
 
 // TODO: need to finish the method to get the rules when using webhook mode
-func (w *WebhookAuthorizer) RulesFor(user user.Info, namespace string) ([]authorizer.ResourceRuleInfo, []authorizer.NonResourceRuleInfo, bool, error) {
+func (w *WebhookAuthorizer) RulesFor(ctx context.Context, user user.Info, namespace string) ([]authorizer.ResourceRuleInfo, []authorizer.NonResourceRuleInfo, bool, error) {
 	var (
 		resourceRules    []authorizer.ResourceRuleInfo
 		nonResourceRules []authorizer.NonResourceRuleInfo
