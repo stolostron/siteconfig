@@ -25,7 +25,7 @@ require (
 	github.com/go-task/slim-sprig v2.20.0+incompatible
 	github.com/metal3-io/baremetal-operator/apis v0.12.4
 	github.com/openshift/controller-runtime-common v0.0.0-20260305203102-d1c60045a455
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.1
 	github.com/wI2L/jsondiff v0.7.1
 	go.uber.org/mock v0.6.0
 	go.uber.org/zap v1.28.0
