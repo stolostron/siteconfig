@@ -64,6 +64,10 @@ const ClusterInstanceFieldManager = "siteconfig-controller"
 const (
 	acmBackupLabel      = "cluster.open-cluster-management.io/backup"
 	acmBackupLabelValue = ""
+
+	veleroRestoreNameLabel         = "velero.io/restore-name"
+	veleroRestoreStatusAnnotation  = "velero.io/restore-status"
+	veleroRestoreHandledAnnotation = "clusterinstance." + v1alpha1.Group + "/velero-restore-handled"
 )
 
 // Default Requeue delays
@@ -202,6 +206,43 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			log.Error("Encountered error while handling finalizer", zap.Error(err))
 		}
 		return res, err
+	}
+
+	if res, err := r.ensureVeleroRestoreStatusAnnotation(ctx, log, clusterInstance); !res.IsZero() || err != nil {
+		return res, err
+	}
+
+	// Check if this ClusterInstance was restored by Velero and skip re-rendering.
+	// When Velero restores a ClusterInstance, Kubernetes resets Generation while the
+	// restored ObservedGeneration (if status was restored) retains the old value — or
+	// is zero if status was not restored. Either way, the ObservedGeneration guard would
+	// fail and trigger a full Day-1 re-render against already-installed clusters.
+	// Setting ObservedGeneration = Generation prevents this and is self-stabilising:
+	// future reconciles skip via the existing guard.
+	if isBeingRestored(clusterInstance) {
+		restoreName := clusterInstance.Labels[veleroRestoreNameLabel]
+		log.Info("ClusterInstance was restored by Velero, skipping reconciliation to prevent re-rendering Day-1 manifests",
+			zap.String("velero-restore", restoreName))
+
+		// Update ObservedGeneration first — this is the critical safety operation that
+		// prevents Day-1 re-rendering. The annotation must be set second so that if this
+		// status patch fails, isBeingRestored still returns true on the next reconcile
+		// and the controller retries both operations.
+		statusPatch := client.MergeFrom(clusterInstance.DeepCopy())
+		clusterInstance.Status.ObservedGeneration = clusterInstance.Generation
+		if err := conditions.PatchCIStatus(ctx, r.Client, clusterInstance, statusPatch); err != nil {
+			return ctrl.Result{}, fmt.Errorf(
+				"failed to update ObservedGeneration for Velero-restored ClusterInstance: %w", err)
+		}
+
+		// Mark this restore as handled so future spec changes are not mistaken for new restores
+		metadataPatch := client.MergeFrom(clusterInstance.DeepCopy())
+		metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, veleroRestoreHandledAnnotation, restoreName)
+		if err := r.Patch(ctx, clusterInstance, metadataPatch); err != nil {
+			return ctrl.Result{}, fmt.Errorf(
+				"failed to set velero-restore-handled annotation on ClusterInstance: %w", err)
+		}
+		return doNotRequeue(), nil
 	}
 
 	// Check if ManagedCluster requires reimport (only during reinstalls)
@@ -485,6 +526,43 @@ func (r *ClusterInstanceReconciler) ensureFinalizer(
 	}
 
 	log.Info("Finalizer added successfully; requeuing reconciliation")
+	return ctrl.Result{Requeue: true}, nil
+}
+
+// isBeingRestored returns true when the ClusterInstance was restored by Velero
+// and has not yet been handled by this controller. A restore is considered
+// handled once the controller records the restore name in the velero-restore-handled
+// annotation, preventing subsequent spec changes from being mistakenly treated
+// as new restores.
+func isBeingRestored(ci *v1alpha1.ClusterInstance) bool {
+	restoreName, hasRestoreLabel := ci.Labels[veleroRestoreNameLabel]
+	if !hasRestoreLabel {
+		return false
+	}
+	return ci.Annotations[veleroRestoreHandledAnnotation] != restoreName
+}
+
+// ensureVeleroRestoreStatusAnnotation ensures the ClusterInstance has the velero.io/restore-status
+// annotation so that Velero includes the status subresource when backing up this resource.
+func (r *ClusterInstanceReconciler) ensureVeleroRestoreStatusAnnotation(
+	ctx context.Context,
+	log *zap.Logger,
+	clusterInstance *v1alpha1.ClusterInstance,
+) (ctrl.Result, error) {
+	if clusterInstance.Annotations[veleroRestoreStatusAnnotation] == "true" {
+		return ctrl.Result{}, nil
+	}
+
+	patch := client.MergeFrom(clusterInstance.DeepCopy())
+	metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, veleroRestoreStatusAnnotation, "true")
+
+	if err := r.Patch(ctx, clusterInstance, patch); err != nil {
+		log.Error("Failed to add Velero restore-status annotation", zap.Error(err))
+		return ctrl.Result{}, fmt.Errorf("failed to add Velero restore-status annotation to ClusterInstance %s/%s: %w",
+			clusterInstance.Namespace, clusterInstance.Name, err)
+	}
+
+	log.Info("Velero restore-status annotation added successfully; requeuing reconciliation")
 	return ctrl.Result{Requeue: true}, nil
 }
 
