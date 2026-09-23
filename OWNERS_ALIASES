@@ -1,0 +1,19 @@
+# See the OWNERS docs at https://go.k8s.io/owners
+
+aliases:
+  reviewers:
+    - sakhoury
+    - carbonin
+    - imiller0 
+    - fontivan
+    - cwilkers
+    - sabbir-47
+    - irinamihai
+    - Missxiaoguo
+  approvers:
+    - sakhoury
+    - carbonin
+    - imiller0 
+    - fontivan
+    - cwilkers
+    - sabbir-47
