@@ -175,6 +175,9 @@ spec:
   pullSecretRef:
     name: "{{ .Spec.PullSecretRef.Name }}"
   ignitionConfigOverride: '{{ .Spec.IgnitionConfigOverride }}'
+  # Wait before mapping host MACs to interfaces when applying static network config on the minimal ISO,
+  # giving slow-enumerating NICs time to appear before discovery.
+  networkDiscoveryDelaySeconds: 60
   nmStateConfigLabelSelector:
     matchLabels:
 {{ if .SpecialVars.CurrentNode.HostRef }}
