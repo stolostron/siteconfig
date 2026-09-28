@@ -30,12 +30,13 @@ func (a *redfishHTTPBootMediaAccessDetails) Type() string {
 	return a.bmcType
 }
 
-// NeedsMAC returns true when the host is going to need a separate
-// port created rather than having it discovered.
+// NeedsMAC returns false because the Redfish driver in Ironic can
+// pre-populate MAC addresses during inspection, so a BootMACAddress is not
+// required up front. When inspection is disabled a MAC is still required,
+// but that requirement is enforced by the callers via
+// host.InspectionDisabled(), not by this driver-level flag.
 func (a *redfishHTTPBootMediaAccessDetails) NeedsMAC() bool {
-	// For the inspection to work, we need a MAC address
-	// https://github.com/metal3-io/baremetal-operator/pull/284#discussion_r317579040
-	return true
+	return false
 }
 
 func (a *redfishHTTPBootMediaAccessDetails) Driver() string {
@@ -96,6 +97,10 @@ func (a *redfishHTTPBootMediaAccessDetails) VendorInterface() string {
 
 func (a *redfishHTTPBootMediaAccessDetails) SupportsSecureBoot() bool {
 	return true
+}
+
+func (a *redfishHTTPBootMediaAccessDetails) InspectInterface() string {
+	return redfish
 }
 
 func (a *redfishHTTPBootMediaAccessDetails) SupportsISOPreprovisioningImage() bool {

@@ -55,8 +55,12 @@ type AccessDetails interface {
 	// will be used to communicate with it.
 	Type() string
 
-	// NeedsMAC returns true when the host is going to need a separate
-	// port created rather than having it discovered.
+	// NeedsMAC returns true when the driver requires a BootMACAddress to be
+	// populated regardless of whether inspection is enabled, for example
+	// VirtualBMC where the MAC cannot be discovered. Drivers whose MAC can be
+	// discovered during inspection return false; for those, a MAC is only
+	// required when inspection is disabled, which the callers enforce
+	// separately via host.InspectionDisabled().
 	NeedsMAC() bool
 
 	// The name of the driver to instantiate the BMC with. This may differ
@@ -85,6 +89,11 @@ type AccessDetails interface {
 
 	// Whether the driver supports changing secure boot state.
 	SupportsSecureBoot() bool
+
+	// InspectInterface returns the Ironic inspect interface to use for
+	// out-of-band inspection (e.g. "redfish"). An empty string means
+	// the BMC type does not support out-of-band inspection.
+	InspectInterface() string
 
 	// Whether the driver supports booting a preprovisioning image in ISO format
 	SupportsISOPreprovisioningImage() bool
