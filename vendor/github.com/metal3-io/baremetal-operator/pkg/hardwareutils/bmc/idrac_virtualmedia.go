@@ -35,8 +35,10 @@ func (a *redfishiDracVirtualMediaAccessDetails) Type() string {
 }
 
 // NeedsMAC returns false for virtual media drivers since they can boot
-// from virtual media without requiring a pre-configured boot MAC address.
-// The MAC address can be populated after hardware inspection completes.
+// from virtual media without requiring a pre-configured boot MAC address,
+// and the MAC can be populated after hardware inspection completes. When
+// inspection is disabled a MAC is still required, but that requirement is
+// enforced by the callers via host.InspectionDisabled().
 func (a *redfishiDracVirtualMediaAccessDetails) NeedsMAC() bool {
 	return false
 }
@@ -69,6 +71,11 @@ func (a *redfishiDracVirtualMediaAccessDetails) BootInterface() string {
 }
 
 func (a *redfishiDracVirtualMediaAccessDetails) FirmwareInterface() string {
+	return redfish
+}
+
+func (a *redfishiDracVirtualMediaAccessDetails) InspectInterface() string {
+	// FIXME(dtantsur): this should be using idracRedfish, but it's not currently enabled in ironic-image.
 	return redfish
 }
 
