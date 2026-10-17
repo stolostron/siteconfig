@@ -685,6 +685,11 @@ type ClusterInstanceStatus struct {
 	// +optional
 	DeploymentConditions []hivev1.ClusterDeploymentCondition `json:"deploymentConditions,omitempty"`
 
+	// ManagedClusterRef references the ManagedCluster for clusters tracked via ManagedCluster status.
+	// Used for HostedControlPlane clusters.
+	// +optional
+	ManagedClusterRef *corev1.LocalObjectReference `json:"managedClusterRef,omitempty"`
+
 	// List of manifests that have been rendered along with their status.
 	// +optional
 	ManifestsRendered []ManifestReference `json:"manifestsRendered,omitempty"`
