@@ -123,6 +123,32 @@ var _ = Describe("Validate", func() {
 		Expect(err).To(MatchError(ContainSubstring("failed to validate Pull Secret")))
 	})
 
+	DescribeTable("successfully validates when pull secret is absent but ExternallyProvisionedPullSecretAnnotation is set",
+		func(annotationValue string) {
+			clusterInstance.Spec.PullSecretRef = corev1.LocalObjectReference{Name: doesNotExist}
+			clusterInstance.Annotations = map[string]string{
+				v1alpha1.ExternallyProvisionedPullSecretAnnotation: annotationValue,
+			}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+			Expect(Validate(ctx, c, clusterInstance)).To(Succeed())
+		},
+		Entry("when annotation value is empty", ""),
+		Entry("when annotation value is true", "true"),
+	)
+
+	It("fails validation when ExternallyProvisionedPullSecretAnnotation has an invalid value", func() {
+		clusterInstance.Spec.PullSecretRef = corev1.LocalObjectReference{Name: doesNotExist}
+		clusterInstance.Annotations = map[string]string{
+			v1alpha1.ExternallyProvisionedPullSecretAnnotation: "false",
+		}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		err := Validate(ctx, c, clusterInstance)
+		Expect(err).To(MatchError(ContainSubstring(
+			`annotation "clusterinstance.siteconfig.open-cluster-management.io/externally-provisioned-pull-secret" must be empty or "true"`)))
+	})
+
 	It("fails validation due to invalid cluster-level installConfigOverrides JSON-formatted strings", func() {
 		clusterInstance.Spec.InstallConfigOverrides = "foobar"
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
@@ -167,6 +193,32 @@ var _ = Describe("Validate", func() {
 
 		err := Validate(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("failed to validate BMC credentials")))
+	})
+
+	DescribeTable("successfully validates when BMC credential secret is absent but ExternallyProvisionedBmcSecretAnnotation is set",
+		func(annotationValue string) {
+			clusterInstance.Spec.Nodes[0].BmcCredentialsName = v1alpha1.BmcCredentialsName{Name: doesNotExist}
+			clusterInstance.Annotations = map[string]string{
+				v1alpha1.ExternallyProvisionedBmcSecretAnnotation: annotationValue,
+			}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+			Expect(Validate(ctx, c, clusterInstance)).To(Succeed())
+		},
+		Entry("when annotation value is empty", ""),
+		Entry("when annotation value is true", "true"),
+	)
+
+	It("fails validation when ExternallyProvisionedBmcSecretAnnotation has an invalid value", func() {
+		clusterInstance.Spec.Nodes[0].BmcCredentialsName = v1alpha1.BmcCredentialsName{Name: doesNotExist}
+		clusterInstance.Annotations = map[string]string{
+			v1alpha1.ExternallyProvisionedBmcSecretAnnotation: "false",
+		}
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		err := Validate(ctx, c, clusterInstance)
+		Expect(err).To(MatchError(ContainSubstring(
+			`annotation "clusterinstance.siteconfig.open-cluster-management.io/externally-provisioned-bmc-secret" must be empty or "true"`)))
 	})
 
 	It("fails validation due to missing BMC credential secret in referenced Node namespace", func() {
