@@ -127,7 +127,7 @@ func requeueForDeletion() ctrl.Result {
 //+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=hive.openshift.io,resources=clusterimagesets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=agent-install.openshift.io,resources=infraenvs,verbs=get;create;update;patch;delete
 //+kubebuilder:rbac:groups=agent-install.openshift.io,resources=nmstateconfigs,verbs=get;create;update;patch;delete
@@ -288,6 +288,12 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Validate ClusterInstance
 	if err := r.handleValidate(ctx, log, clusterInstance); err != nil {
+		return requeueWithErrorAfterDelay(err, DefaultValidationErrorDelay)
+	}
+
+	// Copy shared extra-manifest ConfigMaps into the ClusterInstance namespace.
+	// The template engine normalizes references without changing the original spec.
+	if err := r.handleCopySharedExtraManifests(ctx, log, clusterInstance); err != nil {
 		return requeueWithErrorAfterDelay(err, DefaultValidationErrorDelay)
 	}
 

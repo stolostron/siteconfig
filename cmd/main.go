@@ -224,6 +224,11 @@ func run(metricsAddr, metricsCertDir, clusterInstanceWebhookCertDir, probeAddr s
 		return fmt.Errorf("unable to initialize the default reference installation template ConfigMaps: %w", err)
 	}
 
+	// Ensure the shared-resources namespace exists for shared extra-manifest ConfigMaps
+	if err := controller.EnsureSharedResourcesNamespace(ctx, tmpClient); err != nil {
+		return fmt.Errorf("unable to ensure the shared-resources namespace: %w", err)
+	}
+
 	// Initialize the SiteConfig Operator configuration store
 	sharedConfigStore, err := createConfigurationStore(ctx, tmpClient, siteConfigNamespace, setupLog)
 	if err != nil {
@@ -261,6 +266,15 @@ func setupControllers(
 		ConfigStore: configStore,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create controller ConfigurationMonitor: %w", err)
+	}
+
+	// Create NamespaceMonitor controller to re-create the shared-resources namespace if it is deleted
+	if err := (&controller.NamespaceMonitor{
+		Client: mgr.GetClient(),
+		Log:    logger.Named("NamespaceMonitor"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create controller NamespaceMonitor: %w", err)
 	}
 
 	// Create DeletionHandler for graceful deletion of rendered objects
