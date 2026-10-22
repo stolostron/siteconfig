@@ -78,7 +78,7 @@ func TestTemplateEngineRender(t *testing.T) {
 				Type: "nbde",
 				Tang: []v1alpha1.TangConfig{{URL: "http://203.0.113.1:7500", Thumbprint: "1234567890"}}},
 			Proxy:              &aiv1beta1.Proxy{NoProxy: "foobar"},
-			ExtraManifestsRefs: []corev1.LocalObjectReference{{Name: "foobar1"}, {Name: "foobar2"}},
+			ExtraManifestsRefs: []v1alpha1.ExtraManifestReference{{Name: "foobar1"}, {Name: "foobar2"}},
 			TemplateRefs:       []v1alpha1.TemplateRef{{Name: "cluster-v1", Namespace: "site-sno-du-1"}},
 			Nodes: []v1alpha1.NodeSpec{{
 				BmcAddress:             "idrac-virtualmedia+https://198.51.100.0/redfish/v1/Systems/System.Embedded.1",
@@ -723,6 +723,39 @@ var _ = Describe("ProcessTemplates", func() {
 			},
 		}
 		TestClusterImageSet = GetMockClusterImageSet("openshift-test", "test-image")
+	})
+
+	It("renders local extra-manifest references without mutating source namespaces", func() {
+		TestClusterInstance.Spec.Nodes = nil
+		TestClusterInstance.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{
+			{Name: "common", Namespace: v1alpha1.SharedResourcesNamespace},
+			{Name: "local", Namespace: TestClusterInstance.Namespace},
+		}
+		original := TestClusterInstance.DeepCopy()
+		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "refs", Namespace: "test"},
+			Data: map[string]string{"refs": `apiVersion: test.io/v1
+kind: TestRefs
+metadata:
+  name: refs
+spec:
+  extraManifestsRefs:
+{{ .Spec.ExtraManifestsRefs | toYaml | indent 4 }}
+`}}
+		Expect(c.Create(ctx, cm)).To(Succeed())
+		Expect(c.Create(ctx, TestClusterImageSet)).To(Succeed())
+		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{{Name: "refs", Namespace: "test"}}
+		got, err := tmplEngine.ProcessTemplates(ctx, c, testLogger, TestClusterInstance)
+		Expect(err).NotTo(HaveOccurred())
+		objects := got.GetRenderObjects()
+		Expect(objects).To(HaveLen(1))
+		refs, found, err := unstructured.NestedSlice(objects[0].GetObject().Object, "spec", "extraManifestsRefs")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(found).To(BeTrue())
+		Expect(refs).To(Equal([]interface{}{
+			map[string]interface{}{"name": "common"},
+			map[string]interface{}{"name": "local"},
+		}))
+		Expect(TestClusterInstance.Spec.ExtraManifestsRefs).To(Equal(original.Spec.ExtraManifestsRefs))
 	})
 
 	It("fails to process cluster-level templates due to an erroneous cluster template", func() {
