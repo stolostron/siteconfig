@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
 	"text/template"
 	"unicode"
 
@@ -128,8 +129,13 @@ func (te *TemplateEngine) renderTemplates(
 			return renderedObjects, fmt.Errorf("failed to get ConfigMap %s/%s: %w", templateRef.Namespace, templateRef.Name, err)
 		}
 
-		// process Template ConfigMap
-		for templateKey, template := range templatesConfigMap.Data {
+		// Render in key order so the first error is stable across retries.
+		keys := make([]string, 0, len(templatesConfigMap.Data))
+		for key := range templatesConfigMap.Data {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, templateKey := range keys {
 
 			object, err := te.renderManifestFromTemplate(
 				ctx,
@@ -139,9 +145,14 @@ func (te *TemplateEngine) renderTemplates(
 				node,
 				templateRef.Name,
 				templateKey,
-				template)
+				templatesConfigMap.Data[templateKey])
 			if err != nil {
-				return renderedObjects, err
+				source := fmt.Sprintf("template ConfigMap %q, key %q",
+					templateRef.Namespace+"/"+templateRef.Name, templateKey)
+				if node != nil {
+					source = fmt.Sprintf("node %q, %s", node.HostName, source)
+				}
+				return renderedObjects, fmt.Errorf("%s: %w", source, err)
 			}
 			renderedObjects = append(renderedObjects, object)
 		}

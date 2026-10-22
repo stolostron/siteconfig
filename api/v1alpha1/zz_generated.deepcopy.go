@@ -24,7 +24,8 @@ import (
 	metal3_iov1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	"github.com/openshift/assisted-service/api/v1beta1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
-	"k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
@@ -185,7 +186,7 @@ func (in *ClusterInstanceSpec) DeepCopyInto(out *ClusterInstanceSpec) {
 	}
 	if in.ExtraManifestsRefs != nil {
 		in, out := &in.ExtraManifestsRefs, &out.ExtraManifestsRefs
-		*out = make([]v1.LocalObjectReference, len(*in))
+		*out = make([]corev1.LocalObjectReference, len(*in))
 		copy(*out, *in)
 	}
 	if in.SuppressedManifests != nil {
@@ -205,7 +206,7 @@ func (in *ClusterInstanceSpec) DeepCopyInto(out *ClusterInstanceSpec) {
 	}
 	if in.CaBundleRef != nil {
 		in, out := &in.CaBundleRef, &out.CaBundleRef
-		*out = new(v1.LocalObjectReference)
+		*out = new(corev1.LocalObjectReference)
 		**out = **in
 	}
 	if in.Nodes != nil {
@@ -244,7 +245,7 @@ func (in *ClusterInstanceStatus) DeepCopyInto(out *ClusterInstanceStatus) {
 	}
 	if in.ClusterDeploymentRef != nil {
 		in, out := &in.ClusterDeploymentRef, &out.ClusterDeploymentRef
-		*out = new(v1.LocalObjectReference)
+		*out = new(corev1.LocalObjectReference)
 		**out = **in
 	}
 	if in.DeploymentConditions != nil {
@@ -382,6 +383,13 @@ func (in *NodeSpec) DeepCopyInto(out *NodeSpec) {
 		in, out := &in.NodeNetwork, &out.NodeNetwork
 		*out = new(v1beta1.NMStateConfigSpec)
 		(*in).DeepCopyInto(*out)
+	}
+	if in.TemplateData != nil {
+		in, out := &in.TemplateData, &out.TemplateData
+		*out = make(map[string]v1.JSON, len(*in))
+		for key, val := range *in {
+			(*out)[key] = *val.DeepCopy()
+		}
 	}
 	if in.NodeLabels != nil {
 		in, out := &in.NodeLabels, &out.NodeLabels
