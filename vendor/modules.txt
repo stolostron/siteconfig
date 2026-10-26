@@ -85,7 +85,7 @@ github.com/go-openapi/loads
 # github.com/go-openapi/spec v1.0.1
 ## explicit; go 1.26.0
 github.com/go-openapi/spec
-# github.com/go-openapi/strfmt v0.27.3
+# github.com/go-openapi/strfmt v0.27.4
 ## explicit; go 1.26.0
 github.com/go-openapi/strfmt
 github.com/go-openapi/strfmt/internal/bsonlite
@@ -129,8 +129,8 @@ github.com/go-openapi/swag/typeutils
 # github.com/go-openapi/swag/yamlutils v0.29.2
 ## explicit; go 1.26.0
 github.com/go-openapi/swag/yamlutils
-# github.com/go-openapi/validate v0.26.5
-## explicit; go 1.25.0
+# github.com/go-openapi/validate v1.0.1
+## explicit; go 1.26.0
 github.com/go-openapi/validate
 # github.com/go-task/slim-sprig v2.20.0+incompatible
 ## explicit
