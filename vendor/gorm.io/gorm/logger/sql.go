@@ -34,6 +34,19 @@ var convertibleTypes = []reflect.Type{reflect.TypeOf(time.Time{}), reflect.TypeO
 // RegEx matches only numeric values
 var numericPlaceholderRe = regexp.MustCompile(`\$\d+\$`)
 
+func isNumeric(k reflect.Kind) bool {
+	switch k {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return true
+	case reflect.Float32, reflect.Float64:
+		return true
+	default:
+		return false
+	}
+}
+
 // ExplainSQL generate SQL string with given parameters, the generated SQL is expected to be used in logger, execute it might introduce a SQL injection vulnerability
 func ExplainSQL(sql string, numericPlaceholder *regexp.Regexp, escaper string, avars ...interface{}) string {
 	var (
@@ -72,12 +85,14 @@ func ExplainSQL(sql string, numericPlaceholder *regexp.Regexp, escaper string, a
 		case fmt.Stringer:
 			reflectValue := reflect.ValueOf(v)
 			switch reflectValue.Kind() {
-			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-				vars[idx] = fmt.Sprintf("%d", reflectValue.Interface())
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+				vars[idx] = strconv.FormatInt(reflectValue.Int(), 10)
+			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+				vars[idx] = strconv.FormatUint(reflectValue.Uint(), 10)
 			case reflect.Float32, reflect.Float64:
-				vars[idx] = fmt.Sprintf("%.6f", reflectValue.Interface())
+				vars[idx] = strconv.FormatFloat(reflectValue.Float(), 'f', 6, 64)
 			case reflect.Bool:
-				vars[idx] = fmt.Sprintf("%t", reflectValue.Interface())
+				vars[idx] = strconv.FormatBool(reflectValue.Bool())
 			case reflect.String:
 				vars[idx] = escaper + strings.ReplaceAll(fmt.Sprintf("%v", v), escaper, escaper+escaper) + escaper
 			default:
@@ -110,6 +125,15 @@ func ExplainSQL(sql string, numericPlaceholder *regexp.Regexp, escaper string, a
 				convertParams(v, idx)
 			} else if rv.Kind() == reflect.Ptr && !rv.IsZero() {
 				convertParams(reflect.Indirect(rv).Interface(), idx)
+			} else if isNumeric(rv.Kind()) {
+				switch {
+				case rv.CanInt():
+					vars[idx] = strconv.FormatInt(rv.Int(), 10)
+				case rv.CanUint():
+					vars[idx] = strconv.FormatUint(rv.Uint(), 10)
+				default:
+					vars[idx] = strconv.FormatFloat(rv.Float(), 'f', 6, 64)
+				}
 			} else {
 				for _, t := range convertibleTypes {
 					if rv.Type().ConvertibleTo(t) {
