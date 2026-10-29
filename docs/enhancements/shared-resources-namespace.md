@@ -723,8 +723,15 @@ rather than annotations. `source-resource-version` only advances when
 propagation writes, and propagation deliberately does not write when a source
 edit touched metadata alone, so comparing that annotation against the source's
 live `resourceVersion` reports staleness that does not exist. It also fails the
-other way: if propagation is lagging or skipped the namespace because the copy
-was missing, the annotation and the copy agree while the content does not.
+other way: when propagation is lagging, an existing copy still carries the
+annotation the controller last wrote while its content sits behind the source.
+
+A missing copy is a third state rather than a stale one. There is no
+annotation and no content to compare, so neither test applies; it is unhealthy
+by definition, and only the referencing ClusterInstance's `extraManifestsRefs`
+reveals that the copy should exist at all. Health reporting must therefore
+distinguish three cases — present and current, present and lagging, and
+absent — rather than folding the last into staleness.
 
 The annotations remain useful as provenance, and for the coarser question in
 the third row — whether the source object has been written at all since this
@@ -962,7 +969,7 @@ shared ConfigMap itself — was rejected; see
 | Shared namespace hidden in the console by default | `openshift-`-prefixed namespaces are classed as system projects, so administrators must enable "Show default projects" to see it. Accepted cost of the prefix; covered in user-facing documentation. |
 | Updated copy does not match the running spoke cluster | After propagation the cluster-namespace ConfigMap holds the new content while the installed cluster still runs the old manifests until the ACM policy and TALM reconcile it. `provisioned-resource-version` distinguishes the two, and the gap is documented so it is not mistaken for a siteconfig bug. |
 | Copies not garbage-collected when deletion is paused | ownerReference GC only runs once the ClusterInstance object is removed, which the finalizer gates. On deletion timeout the reconciler applies the pause annotation and the object persists, so its copies persist with it until an administrator intervenes. |
-| Shared ConfigMaps and copies are absent from ACM hub backup | `applyACMBackupLabelToInstallTemplates` labels only `TemplateRefs` ConfigMaps, so neither the sources nor the copies carry the backup label. After a hub restore the copies are missing and the `ObservedGeneration` pre-empt stops the reconciler recreating them. Extending the label to shared ConfigMaps is required before this ships. |
+| Shared ConfigMaps and copies are absent from ACM hub backup | `applyACMBackupLabelToInstallTemplates` labels only `TemplateRefs` ConfigMaps. After a restore the copies are missing and the `ObservedGeneration` pre-empt stops the reconciler recreating them. Labelling the shared ConfigMaps restores the inputs but not the copies, so it is necessary and not sufficient; see Open Question 5. |
 | Downstream CRD incompatibility | Controller copies ConfigMaps locally and strips `namespace` before template rendering, so downstream CRDs see only `name` — identical to current behavior. |
 | ownerReference pattern inconsistency | Scoped to this one use case (copied ConfigMaps). Documented in code. Label-based ownership remains the pattern for template-rendered objects. |
 | Shared ConfigMap updated after provisioning — copy is stale | `SharedManifestSync` propagates the update to every referencing cluster namespace. `source-resource-version` records the version last propagated; `provisioned-resource-version` preserves the install-time value. |
@@ -1034,7 +1041,10 @@ shared ConfigMap itself — was rejected; see
    creation in the `ClusterInstanceReconciler`. The alternative is a periodic
    resync, which is simpler but costs a full comparison pass per interval at
    fleet scale. This should be settled before `implementable`, because the
-   single-source-of-truth goal is not fully met without one of them.
+   single-source-of-truth goal is not fully met without one of them. ACM hub
+   restore is the sharpest case: a restored ClusterInstance comes back with
+   `ObservedGeneration == Generation`, so without one of these mechanisms its
+   copies are never recreated and the day-2 policy has nothing to read.
 6. **Does an `openshift-`-prefixed namespace work on managed OpenShift?** Two
    sub-questions, neither answerable from this repository: whether the
    managed-cluster validating webhook on ROSA/OSD permits the operator's
