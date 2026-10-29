@@ -1,5 +1,14 @@
 # Troubleshooting Guide
 
+## Custom network template parameters
+
+For `RenderedTemplates=False`, inspect the condition message for the node hostname,
+template ConfigMap namespace/name, template key, and parameter error. Check
+`spec.nodes[].templateData` and `templateRefs`, and correct them while updates are
+allowed. Default templates ignore these parameters. See the
+[custom network guide](custom-node-network-templates.md) for parameter semantics,
+update restrictions and recovery.
+
 ## Paused Annotation in ClusterInstance
 
 The `paused` annotation in a `ClusterInstance` is used to pause reconciliation when an irrecoverable

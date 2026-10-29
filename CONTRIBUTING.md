@@ -102,6 +102,7 @@ You can also run individual targets during development:
 - `make vet` - Run go vet
 - `make golangci-lint` - Run linter
 - `make unittest` - Run unit tests
+- `make test-integration` - Test CRDs with a local API server and etcd
 - `make test-coverage` - Generate coverage report
 - `make generate` - Generate code
 - `make manifests` - Generate CRDs and RBAC manifests
@@ -168,6 +169,10 @@ All code changes must include appropriate unit tests. When adding new functional
    ```
 
 ### Test Organization
+
+`make test-integration` runs `test/integration` against an isolated local API server
+and etcd, without an existing cluster. It downloads pinned binaries under `bin/`;
+set `KUBEBUILDER_ASSETS` to a compatible binary directory for offline execution.
 
 - Place unit tests in `*_test.go` files alongside the code they test
 - Use table-driven tests where appropriate for better test coverage

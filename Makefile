@@ -164,6 +164,21 @@ test-coverage:
 	awk 'NR==1{print; next} {print | "sort -u"}' test-coverage.out > sorted-coverage.out
 	mv sorted-coverage.out test-coverage.out
 
+# Run an isolated API server and etcd; this never uses the current kubeconfig.
+.PHONY: test-integration-deps
+test-integration-deps: setup-envtest ## Download the pinned local API-server test binaries.
+	@if [ -z "$(KUBEBUILDER_ASSETS)" ]; then \
+		$(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN)/k8s -p path; \
+	fi
+
+.PHONY: test-integration
+test-integration: test-integration-deps ## Test generated CRD persistence and validation in a local API server.
+	@assets="$(KUBEBUILDER_ASSETS)"; \
+	if [ -z "$$assets" ]; then \
+		assets=$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN)/k8s -i -p path); \
+	fi; \
+	KUBEBUILDER_ASSETS="$$assets" go test -tags=integration -count=1 -v ./test/integration/...
+
 .PHONY: ci-test-unit
 ci-test-unit:
 	gotestsum --jsonfile-timing-events=$(unit_test_json_output) --format short-verbose -- -p 1 -v $(TESTFLAGS) \
@@ -229,11 +244,14 @@ KUBECTL ?= kubectl
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 MOCKGEN ?= $(LOCALBIN)/mockgen
+SETUP_ENVTEST ?= $(LOCALBIN)/setup-envtest
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.4.3
 CONTROLLER_TOOLS_VERSION ?= v0.20.0
 MOCKGEN_VERSION ?= v0.6.0
+SETUP_ENVTEST_VERSION ?= v0.0.0-20260305142021-f9589b9f2b9d
+ENVTEST_K8S_VERSION ?= 1.35.0
 
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 
@@ -268,6 +286,12 @@ controller-gen: ## Download controller-gen locally if necessary.
 .PHONY: mockgen
 mockgen: ## Download mockgen locally if necessary.
 	$(call go-get-tool,$(MOCKGEN),go.uber.org/mock/mockgen@$(MOCKGEN_VERSION))
+
+.PHONY: setup-envtest
+setup-envtest: ## Download the pinned envtest setup tool if test assets are not supplied.
+ifeq ($(strip $(KUBEBUILDER_ASSETS)),)
+	$(call go-get-tool,$(SETUP_ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION))
+endif
 
 
 .PHONY: operator-sdk

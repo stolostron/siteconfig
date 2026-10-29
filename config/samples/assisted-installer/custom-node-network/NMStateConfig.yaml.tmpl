@@ -1,0 +1,49 @@
+{{/*
+Parameters required when nodeNetwork is provided:
+  nodeIp, gwIp, dnsServer: strings
+  prefixLength: integer
+Optional parameters: none. No parameter defaults are provided.
+MAC mappings come from nodeNetwork.interfaces.
+*/}}
+{{ if .SpecialVars.CurrentNode.NodeNetwork }}
+{{- $node := .SpecialVars.CurrentNode }}
+apiVersion: agent-install.openshift.io/v1beta1
+kind: NMStateConfig
+metadata:
+  annotations:
+    siteconfig.open-cluster-management.io/sync-wave: "1"
+{{ if .SpecialVars.CurrentNode.HostRef }}
+  name: {{ .SpecialVars.CurrentNode.HostRef.Name | quote }}
+  namespace: {{ .SpecialVars.CurrentNode.HostRef.Namespace | quote }}
+  labels:
+    nmstate-label: {{ .SpecialVars.CurrentNode.HostRef.Name | quote }}
+{{ else }}
+  name: {{ .SpecialVars.CurrentNode.HostName | quote }}
+  namespace: {{ .Spec.ClusterName | quote }}
+  labels:
+    nmstate-label: {{ .SpecialVars.CurrentNode.HostName | quote }}
+{{ end }}
+spec:
+  config:
+    interfaces:
+    - name: eno1
+      type: ethernet
+      state: up
+      ipv4:
+        enabled: true
+        address:
+        - ip: {{ templateVar $node "nodeIp" | quote }}
+          prefix-length: {{ templateVar $node "prefixLength" | toJson }}
+        dhcp: false
+    dns-resolver:
+      config:
+        server:
+        - {{ templateVar $node "dnsServer" | quote }}
+    routes:
+      config:
+      - destination: "0.0.0.0/0"
+        next-hop-address: {{ templateVar $node "gwIp" | quote }}
+        next-hop-interface: eno1
+  interfaces:
+{{ $node.NodeNetwork.Interfaces | toYaml | indent 4 }}
+{{ end }}
