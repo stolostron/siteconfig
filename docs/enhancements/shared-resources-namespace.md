@@ -128,9 +128,9 @@ editable after a cluster has been installed.
   Template failures split across three conditions: `RenderedTemplates` for
   rendering failures, `RenderedTemplatesValidated` for dry-run rejection, and
   `RenderedTemplatesApplied` for apply failures. Propagation health is
-  observable through the
-  `provenance` annotations on each copy (comparing
-  `source-resource-version` on the copy against the live source) and through
+  observable by comparing each copy's
+  `data`/`binaryData` against its source, by the `provenance` annotations for
+  the install-time audit trail, and through
   controller-runtime's standard per-controller metrics
   (`controller_runtime_reconcile_errors_total{controller="SharedManifestSync"}`).
 - **Remediation**: If the shared namespace is deleted, the `NamespaceMonitor`
@@ -714,15 +714,22 @@ precisely because propagation makes them diverge:
 
 | Question | Annotation |
 |---|---|
-| Is this copy up to date with the shared ConfigMap? | `source-resource-version` vs. the source's live `resourceVersion` |
+| Is this copy up to date with the shared ConfigMap? | Compare the copy's `data`/`binaryData` against the source's — the same test propagation uses |
 | Which version was this copy first created from? | `provisioned-resource-version` — equal to the install-time version only if the reference has not been repointed since |
-| Has the shared ConfigMap changed since this copy was created? | `provisioned-resource-version` vs. the source's **live** `resourceVersion` |
+| Has the source been written since this copy was created? | `provisioned-resource-version` vs. the source's **live** `resourceVersion` |
 
-The third comparison deliberately uses the live source rather than
-`source-resource-version`. The latter only advances when propagation succeeds,
-so if propagation is lagging, blocked, or skipped the namespace because the
-copy was missing, the two annotations agree and would report "unchanged since
-creation" at exactly the moment the operator needs to know otherwise.
+Freshness is a content question, which is why the first row compares content
+rather than annotations. `source-resource-version` only advances when
+propagation writes, and propagation deliberately does not write when a source
+edit touched metadata alone, so comparing that annotation against the source's
+live `resourceVersion` reports staleness that does not exist. It also fails the
+other way: if propagation is lagging or skipped the namespace because the copy
+was missing, the annotation and the copy agree while the content does not.
+
+The annotations remain useful as provenance, and for the coarser question in
+the third row — whether the source object has been written at all since this
+copy was created — which the live comparison answers correctly because
+`provisioned-resource-version` never moves.
 
 Note: `resourceVersion` is opaque and is not comparable across different
 objects, but it is valid for tracking a single object (the source ConfigMap)
@@ -955,17 +962,17 @@ shared ConfigMap itself — was rejected; see
 | Shared namespace hidden in the console by default | `openshift-`-prefixed namespaces are classed as system projects, so administrators must enable "Show default projects" to see it. Accepted cost of the prefix; covered in user-facing documentation. |
 | Updated copy does not match the running spoke cluster | After propagation the cluster-namespace ConfigMap holds the new content while the installed cluster still runs the old manifests until the ACM policy and TALM reconcile it. `provisioned-resource-version` distinguishes the two, and the gap is documented so it is not mistaken for a siteconfig bug. |
 | Copies not garbage-collected when deletion is paused | ownerReference GC only runs once the ClusterInstance object is removed, which the finalizer gates. On deletion timeout the reconciler applies the pause annotation and the object persists, so its copies persist with it until an administrator intervenes. |
-| Shared ConfigMaps and copies are absent from ACM hub backup | `applyACMBackupLabelToInstallTemplates` labels only `TemplateRefs` ConfigMaps, so neither the shared sources nor the copies carry the backup label today. After a hub restore the copies are missing and the `ObservedGeneration` pre-empt stops the reconciler recreating them, leaving the day-2 policy without its source. Extending the backup label to shared ConfigMaps is required before this ships. |
+| Shared ConfigMaps and copies are absent from ACM hub backup | `applyACMBackupLabelToInstallTemplates` labels only `TemplateRefs` ConfigMaps, so neither the sources nor the copies carry the backup label. After a hub restore the copies are missing and the `ObservedGeneration` pre-empt stops the reconciler recreating them. Extending the label to shared ConfigMaps is required before this ships. |
 | Downstream CRD incompatibility | Controller copies ConfigMaps locally and strips `namespace` before template rendering, so downstream CRDs see only `name` — identical to current behavior. |
 | ownerReference pattern inconsistency | Scoped to this one use case (copied ConfigMaps). Documented in code. Label-based ownership remains the pattern for template-rendered objects. |
 | Shared ConfigMap updated after provisioning — copy is stale | `SharedManifestSync` propagates the update to every referencing cluster namespace. `source-resource-version` records the version last propagated; `provisioned-resource-version` preserves the install-time value. |
 | Propagation burst at fleet scale (3,500 writes from one edit) | Separate controller with its own `MaxConcurrentReconciles`, so it cannot starve `ClusterInstanceReconciler`. No new informer is added (a cluster-wide ConfigMap informer already exists). Steady-state cost is zero; bursts are expected a few times per release. |
 | Shared ConfigMap edited while a referencing cluster is mid-install | Accepted race, documented. The cluster may install with mixed content; the day-2 policy reconcile converges it afterwards. Staged rollout via a new ConfigMap name avoids the race entirely. |
-| Downstream CRD rejects an in-place manifest-reference update on a repoint | **Unresolved** — see [Open Questions](#open-questions). Failure mode is nothing applied at all, because the dry-run gate precedes every apply, with exponential-backoff retries growing towards a ~16-minute interval (the 30s delay constant is discarded, because it is returned with a non-nil error). Must be settled by live-cluster test before `implementable`. Reinstall is the guaranteed-safe fallback. |
+| Downstream CRD rejects an in-place manifest-reference update on a repoint | **Unresolved** — see [Open Questions](#open-questions). Nothing is applied at all, because the dry-run gate precedes every apply, and retries back off towards ~16 minutes. Must be settled by live-cluster test before `implementable`; reinstall is the safe fallback. |
 | Repoint re-applies all manifests with `ForceOwnership`, reverting drift | Pre-existing behaviour for all ten currently-allowed day-N paths, not introduced here. Fields siteconfig does not render are not owned and so are not affected; `BareMetalHost.spec.online` and `automatedCleaningMode` are re-asserted. |
 | Copy inherits a preservation label and collides with the reinstall preservation flow | Copies are constructed from `data`/`binaryData` only; preservation labels are explicitly stripped rather than deep-copied. |
 | Orphaned `v1` copies accumulate after a staged rollout | Reconciler deletes managed copies in the ClusterInstance namespace that the current `extraManifestsRefs` no longer names. |
-| Two controllers writing the same ConfigMap | Creation and ownership belong solely to `ClusterInstanceReconciler`; `SharedManifestSync` only updates objects that already exist **and** pass the ownership check, and only `data`/`binaryData`/`source-resource-version`. Writes use an explicit `Get`-then-`Update` rather than `controllerutil.CreateOrUpdate` (which would create on `NotFound`) and avoid SSA, so they cannot replace the field set owned by the `siteconfig-controller` manager. |
+| Two controllers writing the same ConfigMap | Creation and ownership belong solely to `ClusterInstanceReconciler`. `SharedManifestSync` only updates objects that exist and pass the ownership check, and only `data`/`binaryData`/`source-resource-version`. It uses `Get`-then-`Update`, not `CreateOrUpdate`, and avoids SSA, so it cannot replace the `siteconfig-controller` field set. |
 
 ### Drawbacks
 
