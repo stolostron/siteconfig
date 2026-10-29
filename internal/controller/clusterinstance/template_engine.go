@@ -50,6 +50,13 @@ func (te *TemplateEngine) ProcessTemplates(
 	clusterInstance v1alpha1.ClusterInstance,
 ) (RenderedObjectCollection, error) {
 
+	// Normalize only a deep copy: callers retain source namespaces for spec snapshots
+	// and future reconciliation, while downstream installers receive local references.
+	clusterInstance = *clusterInstance.DeepCopy()
+	for i := range clusterInstance.Spec.ExtraManifestsRefs {
+		clusterInstance.Spec.ExtraManifestsRefs[i].Namespace = ""
+	}
+
 	log = log.Named("ProcessTemplates")
 
 	var renderedObjects RenderedObjectCollection

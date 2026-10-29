@@ -47,10 +47,25 @@ func validateResources(ctx context.Context, c client.Client, clusterInstance *v1
 			key.Name, key.Namespace, err)
 	}
 
-	// If extraManifests are defined - check that they exist
+	// If extraManifests are defined - check that they exist in their referenced namespace.
+	// A reference may target the ClusterInstance's own namespace (default when unspecified) or the
+	// shared-resources namespace.
 	if len(clusterInstance.Spec.ExtraManifestsRefs) > 0 {
 		for _, extraManifestRef := range clusterInstance.Spec.ExtraManifestsRefs {
-			key = types.NamespacedName{Name: extraManifestRef.Name, Namespace: clusterInstance.Namespace}
+			namespace := extraManifestRef.Namespace
+			if namespace == "" {
+				namespace = clusterInstance.Namespace
+			}
+
+			// Defense-in-depth: reject references to namespaces other than the ClusterInstance's own
+			// namespace or the shared-resources namespace, even if the webhook was bypassed.
+			if namespace != clusterInstance.Namespace && namespace != v1alpha1.SharedResourcesNamespace {
+				return fmt.Errorf(
+					"extra manifest %s references disallowed namespace %s: must be the ClusterInstance namespace %s or %s",
+					extraManifestRef.Name, namespace, clusterInstance.Namespace, v1alpha1.SharedResourcesNamespace)
+			}
+
+			key = types.NamespacedName{Name: extraManifestRef.Name, Namespace: namespace}
 			cm := &corev1.ConfigMap{}
 			if err := c.Get(ctx, key, cm); err != nil {
 				return fmt.Errorf("failed to retrieve ExtraManifest: %s in namespace %s, err: %w",

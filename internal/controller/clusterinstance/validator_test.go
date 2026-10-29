@@ -138,7 +138,7 @@ var _ = Describe("Validate", func() {
 	})
 
 	It("fails validation when an ExtraManifest reference does not exist", func() {
-		clusterInstance.Spec.ExtraManifestsRefs = []corev1.LocalObjectReference{{Name: doesNotExist}}
+		clusterInstance.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{{Name: doesNotExist}}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 		err := Validate(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("failed to retrieve ExtraManifest")))

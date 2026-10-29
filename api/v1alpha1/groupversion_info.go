@@ -28,6 +28,10 @@ const (
 	Group               = "siteconfig.open-cluster-management.io"
 	Version             = "v1alpha1"
 	ClusterInstanceKind = "ClusterInstance"
+
+	// SharedResourcesNamespace is the dedicated namespace managed by the SiteConfig operator
+	// for holding ConfigMaps that are referenced as extra-manifests by many ClusterInstances.
+	SharedResourcesNamespace = "siteconfig-shared-resources"
 )
 
 var (
