@@ -1030,21 +1030,29 @@ shared ConfigMap itself — was rejected; see
    approach could be extended to Secrets.
 4. Should the shared namespace be added to the ACM/MCE must-gather collection
    scripts? The `openshift-` prefix does not cause collection on its own.
-5. **Should `SharedManifestSync` watch the copies, so that deleting or
-   hand-editing one is corrected?** Today a deleted copy is never recreated for
-   an already-provisioned cluster, and a hand-edited copy is repaired only when
-   the source next changes (see
-   [Change detection and convergence](#change-detection-and-convergence)). A
-   watch on objects carrying the managed-copy label closes both, reusing the
-   existing informer and field index, but it would make `SharedManifestSync` a
-   creator of copies and so weakens the single-ownership rule that keeps
-   creation in the `ClusterInstanceReconciler`. The alternative is a periodic
-   resync, which is simpler but costs a full comparison pass per interval at
-   fleet scale. This should be settled before `implementable`, because the
-   single-source-of-truth goal is not fully met without one of them. ACM hub
-   restore is the sharpest case: a restored ClusterInstance comes back with
-   `ObservedGeneration == Generation`, so without one of these mechanisms its
-   copies are never recreated and the day-2 policy has nothing to read.
+5. **How should a missing or drifted copy be recovered?** Today a deleted
+   copy is never recreated for an already-provisioned cluster, and a
+   hand-edited copy is repaired only when the source next changes (see
+   [Change detection and convergence](#change-detection-and-convergence)).
+
+   Recovery has to be driven from desired state — the ClusterInstance
+   reference set, reachable through the field index — rather than from events
+   on the copies themselves. A watch on objects carrying the managed-copy
+   label handles deletion while the operator is running, and hand edits, but
+   it cannot detect a copy that is already absent when the operator starts:
+   there is no object, so there is no event. That is exactly the ACM hub
+   restore case, where a restored ClusterInstance comes back with
+   `ObservedGeneration == Generation`, nothing recreates its copies, and the
+   day-2 policy has nothing to read.
+
+   The candidates are therefore a periodic resync, or a startup pass that
+   lists ClusterInstances carrying shared references and verifies each copy
+   exists — with a copy watch as an optimisation on top of either, not as an
+   alternative to them. Driving recovery from the ClusterInstance side has the
+   further advantage of keeping copy creation in `ClusterInstanceReconciler`,
+   so the single-ownership rule survives. This should be settled before
+   `implementable`, because the single-source-of-truth goal is not met
+   without it.
 6. **Does an `openshift-`-prefixed namespace work on managed OpenShift?** Two
    sub-questions, neither answerable from this repository: whether the
    managed-cluster validating webhook on ROSA/OSD permits the operator's
@@ -1166,6 +1174,12 @@ shared ConfigMap itself — was rejected; see
 - Staged rollout across a batch: repoint a subset of ClusterInstances to `v2`,
   confirm the unrepointed ones still reference `v1`, and confirm orphaned `v1`
   copies are reclaimed in the repointed namespaces only.
+- **Hub restore ([Open Question 5](#open-questions)):** restore a hub whose
+  ClusterInstances reference shared ConfigMaps but whose cluster-namespace
+  copies are absent, and confirm the copies are recreated **without** any
+  ClusterInstance generation change — that is, with
+  `Status.ObservedGeneration == Generation` throughout. A copy watch alone
+  cannot satisfy this, since there is no object to generate an event.
 
 **Scale testing:**
 
@@ -1186,6 +1200,9 @@ shared ConfigMap itself — was rejected; see
   capability built on top of it.
 - [ ] Implementation merged with adequate test coverage
 - [ ] Propagation validated at fleet scale
+- [ ] **[Open Question 5](#open-questions) resolved**: a recovery path chosen
+  and a hub-restore test confirming copies return without a ClusterInstance
+  generation change
 - [ ] Documented in user-facing operator documentation covering shared
   namespace setup, `ExtraManifestsRefs` namespace field usage, the staged
   rollout workflow, the interaction with the extra-manifests ACM policy, and
