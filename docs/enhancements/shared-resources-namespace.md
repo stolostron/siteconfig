@@ -1178,8 +1178,18 @@ shared ConfigMap itself — was rejected; see
   ClusterInstances reference shared ConfigMaps but whose cluster-namespace
   copies are absent, and confirm the copies are recreated **without** any
   ClusterInstance generation change — that is, with
-  `Status.ObservedGeneration == Generation` throughout. A copy watch alone
-  cannot satisfy this, since there is no object to generate an event.
+  `Status.ObservedGeneration == Generation` throughout. Generation equality
+  is not sufficient on its own: it shows only that the spec did not change,
+  not that template rendering and Server-Side Apply were skipped. Also assert
+  that every object listed in `Status.ManifestsRendered` keeps its
+  `resourceVersion`, and that only the absent copies are created while copies
+  that still exist keep theirs. A copy watch alone cannot satisfy this test,
+  since an absent object generates no event.
+- **Drift with no source event ([Open Question 5](#open-questions)):**
+  hand-edit a cluster-namespace copy, leave the shared ConfigMap untouched,
+  and confirm the chosen recovery path repairs it. The propagation tests above
+  only cover repair triggered by a later source change, which is a different
+  path and does not exercise this one.
 
 **Scale testing:**
 
@@ -1201,8 +1211,10 @@ shared ConfigMap itself — was rejected; see
 - [ ] Implementation merged with adequate test coverage
 - [ ] Propagation validated at fleet scale
 - [ ] **[Open Question 5](#open-questions) resolved**: a recovery path chosen
-  and a hub-restore test confirming copies return without a ClusterInstance
-  generation change
+  that covers both failure modes it names — a hub-restore test confirming
+  absent copies return without a ClusterInstance generation change, and a
+  test confirming a hand-edited copy is repaired with no source-ConfigMap
+  event
 - [ ] Documented in user-facing operator documentation covering shared
   namespace setup, `ExtraManifestsRefs` namespace field usage, the staged
   rollout workflow, the interaction with the extra-manifests ACM policy, and
