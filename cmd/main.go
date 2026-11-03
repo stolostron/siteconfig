@@ -277,6 +277,16 @@ func setupControllers(
 		return fmt.Errorf("unable to create controller NamespaceMonitor: %w", err)
 	}
 
+	// Create SharedManifestSync controller to propagate shared ConfigMap updates to managed copies
+	if err := (&controller.SharedManifestSync{
+		Client:   mgr.GetClient(),
+		Log:      logger.Named("SharedManifestSync"),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorder("SharedManifestSync"),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create controller SharedManifestSync: %w", err)
+	}
+
 	// Create DeletionHandler for graceful deletion of rendered objects
 	deletionHandler := &deletion.DeletionHandler{
 		Client: mgr.GetClient(),

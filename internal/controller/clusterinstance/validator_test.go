@@ -137,6 +137,26 @@ var _ = Describe("Validate", func() {
 		Expect(err).To(MatchError(ContainSubstring("cluster-level ignitionConfigOverride is not a valid JSON-formatted string")))
 	})
 
+	It("validates shared sources and rejects a destination collision", func() {
+		cm := &corev1.ConfigMap{}
+		cm.Name = "shared"
+		cm.Namespace = v1alpha1.SharedResourcesNamespace
+		Expect(c.Create(ctx, cm)).To(Succeed())
+		clusterInstance.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{{Name: cm.Name, Namespace: cm.Namespace}}
+		Expect(Validate(ctx, c, clusterInstance)).To(Succeed())
+		local := cm.DeepCopy()
+		local.ResourceVersion = ""
+		local.Namespace = clusterInstance.Namespace
+		Expect(c.Create(ctx, local)).To(Succeed())
+		Expect(Validate(ctx, c, clusterInstance)).To(MatchError(ContainSubstring("name collision")))
+	})
+
+	It("rejects shared references with a mismatching cluster name", func() {
+		clusterInstance.Spec.ClusterName = "other"
+		clusterInstance.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{{Name: "shared", Namespace: v1alpha1.SharedResourcesNamespace}}
+		Expect(Validate(ctx, c, clusterInstance)).To(MatchError(ContainSubstring("spec.clusterName")))
+	})
+
 	It("fails validation when an ExtraManifest reference does not exist", func() {
 		clusterInstance.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{{Name: doesNotExist}}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())

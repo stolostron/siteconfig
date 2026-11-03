@@ -152,6 +152,16 @@ var _ = Describe("ValidateUpdate", func() {
 
 		})
 
+		It("blocks changing shared references during active provisioning", func() {
+			oldClusterInstance.Status.Conditions = []metav1.Condition{{
+				Type: string(ClusterProvisioned), Status: metav1.ConditionFalse, Reason: string(InProgress),
+			}}
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.ExtraManifestsRefs = []ExtraManifestReference{{Name: "v2", Namespace: SharedResourcesNamespace}}
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
+			Expect(err).To(MatchError(ContainSubstring("spec update not allowed during provisioning")))
+		})
+
 		It("should block spec changes while provisioning is in-progress", func() {
 			oldClusterInstance.Status = ClusterInstanceStatus{
 				Conditions: []metav1.Condition{
@@ -230,6 +240,30 @@ var _ = Describe("ValidateUpdate", func() {
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
 
+		})
+
+		It("allows changing, adding, and removing extra-manifest references after installation", func() {
+			for _, refs := range [][]ExtraManifestReference{
+				{{Name: "common-v2", Namespace: SharedResourcesNamespace}},
+				{{Name: "common-v2", Namespace: SharedResourcesNamespace}, {Name: "local"}},
+				{},
+			} {
+				newClusterInstance = oldClusterInstance.DeepCopy()
+				newClusterInstance.Spec.ExtraManifestsRefs = refs
+				_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
+				Expect(err).NotTo(HaveOccurred())
+			}
+		})
+
+		It("still rejects unrelated namespace and immutable spec changes after installation", func() {
+			newClusterInstance.Spec.ExtraManifestsRefs = []ExtraManifestReference{{Name: "common", Namespace: "other"}}
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
+			Expect(err).To(HaveOccurred())
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.ExtraManifestsRefs = []ExtraManifestReference{{Name: "common", Namespace: SharedResourcesNamespace}}
+			newClusterInstance.Spec.BaseDomain = "changed.example.com"
+			_, err = v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
+			Expect(err).To(HaveOccurred())
 		})
 
 		It("should return nil for no spec changes", func() {

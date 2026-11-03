@@ -1,0 +1,170 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"go.uber.org/zap"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+
+	"github.com/onsi/gomega"
+	"github.com/stolostron/siteconfig/api/v1alpha1"
+)
+
+func TestSharedManifestSync(t *testing.T) {
+	for _, scenario := range []string{"fanout", "metadata-only", "unmanaged", "wrong-owner", "wrong-source", "missing-copy", "missing-source", "retry", "staged-rollout", "cleanup"} {
+		t.Run(scenario, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			ctx := context.Background()
+			scheme := runtime.NewScheme()
+			g.Expect(corev1.AddToScheme(scheme)).To(gomega.Succeed())
+			g.Expect(v1alpha1.AddToScheme(scheme)).To(gomega.Succeed())
+			source := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "common", Namespace: v1alpha1.SharedResourcesNamespace}, Data: map[string]string{"manifest": "new"}, BinaryData: map[string][]byte{"binary": {1, 2}}}
+			instances := []*v1alpha1.ClusterInstance{}
+			objects := []client.Object{source}
+			for _, name := range []string{"a", "b"} {
+				ci := &v1alpha1.ClusterInstance{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: name, UID: types.UID(name), Generation: 3}, Spec: v1alpha1.ClusterInstanceSpec{ClusterName: name, ExtraManifestsRefs: []v1alpha1.ExtraManifestReference{{Name: "common", Namespace: v1alpha1.SharedResourcesNamespace}}}, Status: v1alpha1.ClusterInstanceStatus{ObservedGeneration: 3, Conditions: []metav1.Condition{{Type: string(v1alpha1.ClusterProvisioned), Status: metav1.ConditionTrue, Reason: string(v1alpha1.Completed)}}}}
+				instances = append(instances, ci)
+				objects = append(objects, ci)
+			}
+			failUpdate := false
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&v1alpha1.ClusterInstance{}).
+				WithIndex(&v1alpha1.ClusterInstance{}, SharedExtraManifestRefIndexKey, func(obj client.Object) []string {
+					var names []string
+					for _, ref := range obj.(*v1alpha1.ClusterInstance).Spec.ExtraManifestsRefs {
+						if ref.Namespace == v1alpha1.SharedResourcesNamespace {
+							names = append(names, ref.Name)
+						}
+					}
+					return names
+				}).WithInterceptorFuncs(interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+				if failUpdate && obj.GetNamespace() == "a" {
+					return fmt.Errorf("injected write failure")
+				}
+				return c.Update(ctx, obj, opts...)
+			}}).Build()
+			copier := &ClusterInstanceReconciler{Client: c, Scheme: scheme, Log: zap.NewNop()}
+			for _, ci := range instances {
+				g.Expect(copier.copySharedExtraManifests(ctx, zap.NewNop(), ci)).To(gomega.Succeed())
+			}
+			getCopy := func(ns string) *corev1.ConfigMap {
+				cm := &corev1.ConfigMap{}
+				g.Expect(c.Get(ctx, client.ObjectKey{Name: "common", Namespace: ns}, cm)).To(gomega.Succeed())
+				return cm
+			}
+			original := getCopy("a")
+			g.Expect(c.Get(ctx, client.ObjectKeyFromObject(source), source)).To(gomega.Succeed())
+			source.Data = map[string]string{"manifest": "updated"}
+			source.BinaryData = map[string][]byte{"binary": {3}}
+			if scenario == "metadata-only" {
+				source.Data = original.Data
+				source.BinaryData = original.BinaryData
+				source.Annotations = map[string]string{"note": "changed"}
+			}
+			g.Expect(c.Update(ctx, source)).To(gomega.Succeed())
+			switch scenario {
+			case "unmanaged", "wrong-owner", "wrong-source":
+				cm := getCopy("a")
+				if scenario == "unmanaged" {
+					cm.Labels = nil
+				}
+				if scenario == "wrong-owner" {
+					cm.OwnerReferences[0].UID = "someone-else"
+				}
+				if scenario == "wrong-source" {
+					cm.Annotations[SourceNamespaceAnnotation] = "other"
+				}
+				g.Expect(c.Update(ctx, cm)).To(gomega.Succeed())
+			case "missing-copy":
+				g.Expect(c.Delete(ctx, original)).To(gomega.Succeed())
+			case "missing-source":
+				g.Expect(c.Delete(ctx, source)).To(gomega.Succeed())
+			case "retry":
+				failUpdate = true
+			case "staged-rollout", "cleanup":
+				ci := instances[0]
+				ci.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{{Name: "v2", Namespace: v1alpha1.SharedResourcesNamespace}}
+				g.Expect(c.Update(ctx, ci)).To(gomega.Succeed())
+				v2 := source.DeepCopy()
+				v2.Name = "v2"
+				v2.ResourceVersion = ""
+				v2.UID = ""
+				g.Expect(c.Create(ctx, v2)).To(gomega.Succeed())
+				g.Expect(copier.copySharedExtraManifests(ctx, zap.NewNop(), ci)).To(gomega.Succeed())
+			}
+			syncer := &SharedManifestSync{Client: c, Log: zap.NewNop(), Scheme: scheme, Recorder: events.NewFakeRecorder(20)}
+			_, err := syncer.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(source)})
+			if scenario == "retry" {
+				g.Expect(err).To(gomega.HaveOccurred())
+				g.Expect(getCopy("b").Data).To(gomega.Equal(source.Data))
+				failUpdate = false
+				_, err = syncer.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(source)})
+			}
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			switch scenario {
+			case "missing-copy":
+				g.Expect(c.Get(ctx, client.ObjectKeyFromObject(original), &corev1.ConfigMap{})).To(gomega.MatchError(gomega.ContainSubstring("not found")))
+			case "unmanaged", "wrong-owner", "wrong-source", "missing-source", "staged-rollout":
+				g.Expect(getCopy("a").Data).To(gomega.Equal(original.Data))
+			case "metadata-only":
+				g.Expect(getCopy("a").ResourceVersion).To(gomega.Equal(original.ResourceVersion))
+			case "cleanup":
+				// A copy controlled by another instance and a user ConfigMap must survive the sweep.
+				foreign := original.DeepCopy()
+				foreign.Name = "foreign"
+				foreign.ResourceVersion = ""
+				foreign.UID = ""
+				foreign.OwnerReferences[0].UID = "other"
+				g.Expect(c.Create(ctx, foreign)).To(gomega.Succeed())
+				local := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "local", Namespace: "a"}}
+				g.Expect(c.Create(ctx, local)).To(gomega.Succeed())
+				g.Expect(copier.cleanupSharedExtraManifests(ctx, instances[0])).To(gomega.Succeed())
+				g.Expect(c.Get(ctx, client.ObjectKeyFromObject(original), &corev1.ConfigMap{})).To(gomega.MatchError(gomega.ContainSubstring("not found")))
+				for _, name := range []string{"v2", "foreign", "local"} {
+					g.Expect(c.Get(ctx, client.ObjectKey{Name: name, Namespace: "a"}, &corev1.ConfigMap{})).To(gomega.Succeed())
+				}
+				g.Expect(getCopy("b").Data).To(gomega.Equal(source.Data))
+			default:
+				for _, ns := range []string{"a", "b"} {
+					cm := getCopy(ns)
+					g.Expect(cm.Data).To(gomega.Equal(source.Data))
+					g.Expect(cm.BinaryData).To(gomega.Equal(source.BinaryData))
+					g.Expect(cm.Annotations[ProvisionedResourceVersionAnnotation]).To(gomega.Equal(original.Annotations[ProvisionedResourceVersionAnnotation]))
+					g.Expect(cm.Annotations[SourceResourceVersionAnnotation]).To(gomega.Equal(source.ResourceVersion))
+				}
+			}
+			// Sync does not change the ClusterInstance spec/status or trigger re-render by changing generation.
+			for _, ci := range instances {
+				actual := &v1alpha1.ClusterInstance{}
+				g.Expect(c.Get(ctx, client.ObjectKeyFromObject(ci), actual)).To(gomega.Succeed())
+				g.Expect(actual.Spec).To(gomega.Equal(ci.Spec))
+				g.Expect(actual.Status).To(gomega.Equal(ci.Status))
+			}
+		})
+	}
+}

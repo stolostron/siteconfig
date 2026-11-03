@@ -102,3 +102,57 @@ After updating the ConfigMap or restarting the pod:
 - If the ConfigMap is missing, the SiteConfig Operator will recreate it with default values.
 Check the Operator logs for relevant messages.
 - Ensure the ConfigMap name is **`siteconfig-operator-configuration`** and is located in the correct namespace.
+
+## Shared extra-manifest ConfigMaps (proposal implementation)
+
+The operator creates `openshift-siteconfig-resources` for extra-manifest ConfigMaps
+shared by multiple ClusterInstances. Create the source ConfigMaps there and refer
+to them explicitly:
+
+```yaml
+spec:
+  extraManifestsRefs:
+    - name: common-manifests-v1
+      namespace: openshift-siteconfig-resources
+    - name: cluster-specific-manifests
+```
+
+A reference without a namespace remains local to the ClusterInstance namespace.
+Shared references require `spec.clusterName` to equal the ClusterInstance namespace.
+The operator creates an owned copy of each shared ConfigMap in that namespace;
+installer templates consume the local copy. Existing user-owned ConfigMaps with
+the same name are rejected rather than overwritten.
+
+The `SharedManifestSync` controller propagates source `data` and `binaryData`
+changes to existing managed copies, including after provisioning. It does not
+change ClusterInstance generation or render/apply installer resources. Metadata-only
+source edits do not rewrite identical copies. The `source-resource-version`
+annotation records the last content propagation; `provisioned-resource-version`
+records copy creation and is preserved by sync. A copy first created after
+installation does not describe what was installed originally.
+
+The webhook permits changing `extraManifestsRefs` after provisioning, but continues
+to block spec changes during active provisioning. To stage a change, create a
+separate `common-manifests-v2` and repoint selected ClusterInstances. This runs the
+normal validation/render/dry-run/apply path. Obsolete copies are deleted only after
+successful application, with label, owner UID, source namespace, and deletion
+precondition checks. A managed shared copy cannot be reused as a local reference;
+create a distinct user-owned local ConfigMap for that transition.
+
+This is an implementation of the provisional [EP #1056](https://github.com/stolostron/siteconfig/pull/1056).
+In-place reference changes after installation still require live validation against
+both installer webhooks. Do not assume they are accepted solely because SiteConfig
+admission accepts the change. A rejected render/apply leaves the existing copies
+in place. Sync stops at the hub copy: ACM policy/TALM must drive changes to an
+already-installed spoke.
+
+A missing shared source leaves existing copies intact and emits warning events.
+The sync controller does not watch or recreate missing destination copies; an
+eligible ClusterInstance reconciliation is required to create them. Recovery after
+copy deletion/hub restore and namespace usability on ROSA/OSD remain EP questions.
+Sync currently uses one worker; configurable fleet-scale concurrency remains a
+follow-up before claiming full EP coverage.
+
+The earlier PoC used `siteconfig-shared-resources`. That name is not an alias for
+the new namespace. PoC users must explicitly migrate their shared sources and
+references; this change does not move or delete objects in the old namespace.

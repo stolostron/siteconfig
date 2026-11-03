@@ -29,9 +29,15 @@ var _ = Describe("validateExtraManifestReferences", func() {
 	newClusterInstance := func(refs ...ExtraManifestReference) *ClusterInstance {
 		return &ClusterInstance{
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-1", Namespace: clusterNamespace},
-			Spec:       ClusterInstanceSpec{ExtraManifestsRefs: refs},
+			Spec:       ClusterInstanceSpec{ClusterName: clusterNamespace, ExtraManifestsRefs: refs},
 		}
 	}
+
+	It("rejects a shared reference when clusterName differs from the copy namespace", func() {
+		ci := newClusterInstance(ExtraManifestReference{Name: "cm", Namespace: SharedResourcesNamespace})
+		ci.Spec.ClusterName = "different"
+		Expect(validateExtraManifestReferences(ci)).To(MatchError(ContainSubstring("spec.clusterName")))
+	})
 
 	It("accepts a reference with an empty namespace", func() {
 		ci := newClusterInstance(ExtraManifestReference{Name: "cm"})

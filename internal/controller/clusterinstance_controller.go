@@ -305,7 +305,7 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Only update the ObservedGeneration when all the above processes have been successfully executed
 	if clusterInstance.Status.ObservedGeneration != clusterInstance.Generation {
-		if err := r.updateObservedStatus(ctx, log, clusterInstance); err != nil {
+		if err := r.completeSharedManifestReconciliation(ctx, log, clusterInstance); err != nil {
 			return ctrl.Result{}, fmt.Errorf("encountered an error updating observed ClusterInstance status: %w", err)
 		}
 	}

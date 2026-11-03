@@ -140,7 +140,8 @@ var (
 		"/suppressedManifests",
 		"/pruneManifests",
 		"/clusterImageSetNameRef",
-		"/holdInstallation", // Allow toggling HoldInstallation (only true→false is valid, enforced in webhook)
+		"/holdInstallation",   // Allow toggling HoldInstallation (only true→false is valid, enforced in webhook)
+		"/extraManifestsRefs", // Allow repointing extra-manifest references post-install for staged fleet rollouts
 	}
 
 	// Node-level path patterns (always allowed)
@@ -210,6 +211,9 @@ func ValidateClusterInstance(clusterInstance *ClusterInstance) error {
 // shared-resources namespace.
 func validateExtraManifestReferences(clusterInstance *ClusterInstance) error {
 	for _, ref := range clusterInstance.Spec.ExtraManifestsRefs {
+		if ref.Namespace == SharedResourcesNamespace && clusterInstance.Spec.ClusterName != clusterInstance.Namespace {
+			return fmt.Errorf("shared extra-manifest references require spec.clusterName to equal the ClusterInstance namespace")
+		}
 		switch ref.Namespace {
 		case "", clusterInstance.Namespace, SharedResourcesNamespace:
 			// allowed

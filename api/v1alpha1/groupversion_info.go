@@ -31,7 +31,7 @@ const (
 
 	// SharedResourcesNamespace is the dedicated namespace managed by the SiteConfig operator
 	// for holding ConfigMaps that are referenced as extra-manifests by many ClusterInstances.
-	SharedResourcesNamespace = "siteconfig-shared-resources"
+	SharedResourcesNamespace = "openshift-siteconfig-resources"
 )
 
 var (

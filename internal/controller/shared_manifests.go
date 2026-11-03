@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,10 +45,15 @@ const (
 	// SourceNamespaceAnnotation records the namespace a managed copy was copied from.
 	SourceNamespaceAnnotation = v1alpha1.Group + "/source-namespace"
 
-	// SourceResourceVersionAnnotation records the resourceVersion of the source ConfigMap at the
-	// time the managed copy was made. It provides provenance for debugging which version of a shared
-	// ConfigMap a cluster was provisioned with.
+	// SourceResourceVersionAnnotation records the resourceVersion of the source ConfigMap as of the
+	// most recent propagation. It is updated on every propagation (install-time copy and subsequent
+	// SharedManifestSync updates) when content is propagated; metadata-only source edits need not advance it.
 	SourceResourceVersionAnnotation = v1alpha1.Group + "/source-resource-version"
+
+	// ProvisionedResourceVersionAnnotation records the resourceVersion of the source ConfigMap at the
+	// time the managed copy was first created. It is set once and never updated, providing a
+	// copy-creation audit trail. For post-install reference changes this is not the installation version.
+	ProvisionedResourceVersionAnnotation = v1alpha1.Group + "/provisioned-resource-version"
 )
 
 // handleCopySharedExtraManifests copies shared extra-manifest ConfigMaps into the ClusterInstance
@@ -151,6 +157,12 @@ func (r *ClusterInstanceReconciler) copySharedExtraManifest(
 		copy.Annotations[SourceNamespaceAnnotation] = v1alpha1.SharedResourcesNamespace
 		copy.Annotations[SourceResourceVersionAnnotation] = source.ResourceVersion
 
+		// provisioned-resource-version is set once at creation and never updated, preserving an
+		// copy-creation audit trail even as SharedManifestSync advances source-resource-version.
+		if _, ok := copy.Annotations[ProvisionedResourceVersionAnnotation]; !ok {
+			copy.Annotations[ProvisionedResourceVersionAnnotation] = source.ResourceVersion
+		}
+
 		// ownerReference enables automatic garbage collection when the ClusterInstance is deleted.
 		if err := controllerutil.SetControllerReference(clusterInstance, copy, r.Scheme); err != nil {
 			return fmt.Errorf("failed to set ownerReference on copied ConfigMap %s/%s: %w",
@@ -169,4 +181,44 @@ func (r *ClusterInstanceReconciler) copySharedExtraManifest(
 	}
 
 	return nil
+}
+
+// cleanupSharedExtraManifests removes obsolete owned copies only after the new rendered resources
+// have been applied successfully. Source and ownership checks protect unrelated ConfigMaps.
+func (r *ClusterInstanceReconciler) cleanupSharedExtraManifests(ctx context.Context,
+	clusterInstance *v1alpha1.ClusterInstance) error {
+	copies := &corev1.ConfigMapList{}
+	if err := r.List(ctx, copies, client.InNamespace(clusterInstance.Namespace),
+		client.MatchingLabels{ManagedCopyLabel: ManagedCopyLabelValue}); err != nil {
+		return fmt.Errorf("failed to list shared extra-manifest copies: %w", err)
+	}
+	referenced := map[string]bool{}
+	for _, ref := range clusterInstance.Spec.ExtraManifestsRefs {
+		if ref.Namespace == v1alpha1.SharedResourcesNamespace {
+			referenced[ref.Name] = true
+		}
+	}
+	for i := range copies.Items {
+		cm := &copies.Items[i]
+		if referenced[cm.Name] || !metav1.IsControlledBy(cm, clusterInstance) ||
+			cm.Annotations[SourceNamespaceAnnotation] != v1alpha1.SharedResourcesNamespace {
+			continue
+		}
+		err := r.Delete(ctx, cm, client.Preconditions{UID: &cm.UID, ResourceVersion: &cm.ResourceVersion})
+		if err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete obsolete shared copy %s/%s: %w", cm.Namespace, cm.Name, err)
+		}
+	}
+	return nil
+}
+
+// completeSharedManifestReconciliation runs only after successful render/apply and cleans using
+// that applied reference set before updateObservedStatus can re-fetch the ClusterInstance.
+func (r *ClusterInstanceReconciler) completeSharedManifestReconciliation(
+	ctx context.Context, log *zap.Logger, clusterInstance *v1alpha1.ClusterInstance,
+) error {
+	if err := r.cleanupSharedExtraManifests(ctx, clusterInstance); err != nil {
+		return err
+	}
+	return r.updateObservedStatus(ctx, log, clusterInstance)
 }
