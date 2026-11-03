@@ -1,0 +1,7 @@
+# Fragment only; merge into each complete ClusterInstance before installation.
+# Preserve any other required entries in extraManifestsRefs.
+# For shared references, spec.clusterName must equal metadata.namespace.
+spec:
+  extraManifestsRefs:
+    - name: common-manifests-v1
+      namespace: openshift-siteconfig-resources

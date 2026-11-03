@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: common-manifests-v1
+  namespace: openshift-siteconfig-resources
+data:
+  00-proof.yaml: |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: shared-manifests-proof
+      namespace: default
+    data:
+      version: v1

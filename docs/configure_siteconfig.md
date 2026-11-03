@@ -122,8 +122,11 @@ Check the Operator logs for relevant messages.
 ## Shared extra-manifest ConfigMaps (proposal implementation)
 
 The operator creates `openshift-siteconfig-resources` for extra-manifest ConfigMaps
-shared by multiple ClusterInstances. Create the source ConfigMaps there and refer
-to them explicitly:
+shared by multiple ClusterInstances. The namespace is created even when no
+ClusterInstance uses it; users create the shared ConfigMaps themselves. See the
+[two-cluster sample](../config/samples/shared-extra-manifests/README.md) for YAML,
+verification commands, and the distinction between hub copies and spoke resources.
+Create the source ConfigMaps there and refer to them explicitly:
 
 ```yaml
 spec:
@@ -148,18 +151,23 @@ records copy creation and is preserved by sync. A copy first created after
 installation does not describe what was installed originally.
 
 The webhook permits changing `extraManifestsRefs` after provisioning, but continues
-to block spec changes during active provisioning. To stage a change, create a
-separate `common-manifests-v2` and repoint selected ClusterInstances. This runs the
+to block spec changes during active provisioning. The proposed staged workflow
+uses a separate `common-manifests-v2` and repoints selected ClusterInstances, but
+depends on downstream installer support (see the limitation below). This runs the
 normal validation/render/dry-run/apply path. Obsolete copies are deleted only after
 successful application, with label, owner UID, source namespace, and deletion
 precondition checks. A managed shared copy cannot be reused as a local reference;
 create a distinct user-owned local ConfigMap for that transition.
 
 This is an implementation of the provisional [EP #1056](https://github.com/stolostron/siteconfig/pull/1056).
-In-place reference changes after installation still require live validation against
-both installer webhooks. Do not assume they are accepted solely because SiteConfig
-admission accepts the change. A rejected render/apply leaves the existing copies
-in place. Sync stops at the hub copy: ACM policy/TALM must drive changes to an
+Live validation on 2026-11-03 found that the tested Assisted Installer webhook
+rejects changing `AgentClusterInstall.spec.manifestsConfigMapRefs` names after
+installation starts. SiteConfig admission accepts the post-install reference
+change, but downstream dry-run validation fails with
+`RenderedTemplatesValidated=False`; the installer retains its original reference.
+Do not treat staged post-install reference switching as supported on that installer.
+Post-install Image Based Installer reference switching remains untested. A rejected
+render/apply leaves the existing copies in place. Sync stops at the hub copy: ACM policy/TALM must drive changes to an
 already-installed spoke.
 
 A missing shared source leaves existing copies intact and emits warning events.
