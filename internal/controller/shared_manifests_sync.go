@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	"github.com/stolostron/siteconfig/internal/controller/configuration"
 )
 
 // SharedExtraManifestRefIndexKey is the field-index key mapping a ClusterInstance to the names of the
@@ -51,9 +52,10 @@ const SharedExtraManifestRefIndexKey = ".spec.extraManifestsRefs.shared"
 // provenance annotation.
 type SharedManifestSync struct {
 	client.Client
-	Log      *zap.Logger
-	Scheme   *runtime.Scheme
-	Recorder events.EventRecorder
+	Log         *zap.Logger
+	Scheme      *runtime.Scheme
+	Recorder    events.EventRecorder
+	ConfigStore *configuration.ConfigurationStore
 }
 
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
@@ -174,6 +176,14 @@ func (r *SharedManifestSync) propagate(
 // SetupWithManager registers the shared-extra-manifest field index and configures the controller to
 // watch ConfigMaps in the shared-resources namespace.
 func (r *SharedManifestSync) SetupWithManager(mgr ctrl.Manager) error {
+	if r.ConfigStore == nil {
+		return fmt.Errorf("shared manifest sync configuration is required")
+	}
+	concurrency := r.ConfigStore.GetSharedManifestSyncMaxConcurrentReconciles()
+	if concurrency < 1 {
+		return fmt.Errorf("shared manifest sync concurrency must be positive")
+	}
+	r.Log.Info("Configuring shared manifest sync workers", zap.Int("maxConcurrentReconciles", concurrency))
 	if err := mgr.GetFieldIndexer().IndexField(
 		context.Background(),
 		&v1alpha1.ClusterInstance{},
@@ -210,7 +220,7 @@ func (r *SharedManifestSync) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("SharedManifestSync").
 		For(&corev1.ConfigMap{}).
-		WithOptions(ctrlruntime.Options{MaxConcurrentReconciles: 1}).
+		WithOptions(ctrlruntime.Options{MaxConcurrentReconciles: concurrency}).
 		WithEventFilter(sharedConfigMapPredicate).
 		Complete(r)
 }

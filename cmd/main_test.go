@@ -165,6 +165,14 @@ var _ = Describe("initConfigMapTemplates", func() {
 
 		Expect(configStore.GetAllowReinstalls()).To(BeTrue())
 		Expect(configStore.GetMaxConcurrentReconciles()).To(Equal(10))
+		Expect(configStore.GetSharedManifestSyncMaxConcurrentReconciles()).To(Equal(4))
+
+		cm.Data[configuration.SharedManifestSyncMaxConcurrentReconcilesKey] = "8"
+		Expect(c.Update(ctx, cm)).To(Succeed())
+		configStore, err = createConfigurationStore(ctx, c, testNamespace, testLogger)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(configStore.GetSharedManifestSyncMaxConcurrentReconciles()).To(Equal(8))
+		Expect(configStore.GetMaxConcurrentReconciles()).To(Equal(10))
 	})
 
 	It("exits when encounters an error with the configuration object", func() {

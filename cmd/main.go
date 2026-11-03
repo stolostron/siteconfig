@@ -279,10 +279,11 @@ func setupControllers(
 
 	// Create SharedManifestSync controller to propagate shared ConfigMap updates to managed copies
 	if err := (&controller.SharedManifestSync{
-		Client:   mgr.GetClient(),
-		Log:      logger.Named("SharedManifestSync"),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorder("SharedManifestSync"),
+		Client:      mgr.GetClient(),
+		Log:         logger.Named("SharedManifestSync"),
+		Scheme:      mgr.GetScheme(),
+		Recorder:    mgr.GetEventRecorder("SharedManifestSync"),
+		ConfigStore: configStore,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create controller SharedManifestSync: %w", err)
 	}
@@ -432,7 +433,7 @@ func createConfigurationStore(
 	}
 
 	// Parse configuration from the retrieved data
-	config := &configuration.Configuration{}
+	config := configuration.NewDefaultConfiguration()
 	if err := config.FromMap(data); err != nil {
 		log.Error("Failed to parse SiteConfig Operator configuration", zap.Error(err))
 		return nil, fmt.Errorf("failed to parse SiteConfig Operator configuration: %w", err)

@@ -13,7 +13,12 @@ This ConfigMap must reside in the same namespace where the SiteConfig Operator i
 Key configuration options include:
 - **`allowReinstalls`**: Specifies whether reinstallation operations are permitted.
 - **`maxConcurrentReconciles`**: Determines the maximum number of concurrent reconcile operations.
-**Note**: Changing this value requires restarting the SiteConfig manager pod.
+- **`sharedManifestSyncMaxConcurrentReconciles`**: Maximum number of shared ConfigMaps reconciled
+  concurrently by `SharedManifestSync`. Defaults to `4`; must be a positive integer.
+  This setting is independent of the ClusterInstance worker count. Updates to the copies
+  of any one source are still sequential.
+
+**Note**: Changing either concurrency value requires restarting the SiteConfig manager pod.
 
 ---
 
@@ -37,6 +42,7 @@ If the configuration ConfigMap does not already exist, follow these steps to cre
    data:
      allowReinstalls: "false"
      maxConcurrentReconciles: "1"
+     sharedManifestSyncMaxConcurrentReconciles: "4"
    EOF
    ```
 
@@ -71,7 +77,17 @@ To modify the configuration, use the `oc patch` command to update the ConfigMap:
 
 ## Restarting the SiteConfig manager pod
 
-To apply changes to `maxConcurrentReconciles`, restart the SiteConfig Operator pod:
+To configure sync workers on an existing configuration ConfigMap (including one without the new key):
+
+```sh
+oc patch configmap siteconfig-operator-configuration -n "$NAMESPACE" --type=merge \
+  -p '{"data":{"sharedManifestSyncMaxConcurrentReconciles":"8"}}'
+```
+
+If the key is absent at startup, the operator uses `4`. Invalid values are rejected;
+use a positive integer. A running controller retains its startup worker count until restarted.
+
+To apply either concurrency change, restart the SiteConfig Operator pod:
 
    ```sh
    oc rollout restart deployment -n $NAMESPACE siteconfig-controller-manager
@@ -150,8 +166,8 @@ A missing shared source leaves existing copies intact and emits warning events.
 The sync controller does not watch or recreate missing destination copies; an
 eligible ClusterInstance reconciliation is required to create them. Recovery after
 copy deletion/hub restore and namespace usability on ROSA/OSD remain EP questions.
-Sync currently uses one worker; configurable fleet-scale concurrency remains a
-follow-up before claiming full EP coverage.
+Sync uses `sharedManifestSyncMaxConcurrentReconciles` from the operator configuration
+ConfigMap (default `4`); large-fleet throughput still needs live validation.
 
 The earlier PoC used `siteconfig-shared-resources`. That name is not an alias for
 the new namespace. PoC users must explicitly migrate their shared sources and
