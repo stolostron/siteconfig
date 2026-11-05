@@ -187,7 +187,7 @@ func GetMockSNOClusterInstance(testParams *TestParams) *v1alpha1.ClusterInstance
 			SSHPublicKey:           "test-ssh",
 			BaseDomain:             "abcd",
 			ClusterType:            v1alpha1.ClusterTypeSNO,
-			ExtraManifestsRefs:     []corev1.LocalObjectReference{{Name: testParams.ExtraManifestName}},
+			ExtraManifestsRefs:     []v1alpha1.ExtraManifestReference{{Name: testParams.ExtraManifestName}},
 			TemplateRefs: []v1alpha1.TemplateRef{
 				{Name: testParams.ClusterTemplateRef, Namespace: testParams.ClusterNamespace}},
 			InstallConfigOverrides: installConfigOverrides,

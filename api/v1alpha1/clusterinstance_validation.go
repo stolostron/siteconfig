@@ -141,6 +141,13 @@ var (
 		"/pruneManifests",
 		"/clusterImageSetNameRef",
 		"/holdInstallation", // Allow toggling HoldInstallation (only true→false is valid, enforced in webhook)
+		// NOTE: extraManifestsRefs is intentionally NOT listed here. In-place repointing after
+		// provisioning is rejected by the Assisted Installer webhook (ManifestsConfigMapRefs.Name is
+		// immutable once installation starts), so admitting it at the SiteConfig layer would only leave
+		// the cluster stuck at RenderedTemplatesValidated=False (EP #1056, Open Question 1). Switching a
+		// provisioned cluster between shared manifests must go through a reinstall; the change is
+		// permitted only via ReinstallClusterPaths below. Shared-manifest content propagation does not
+		// change this field and is unaffected.
 	}
 
 	// Node-level path patterns (always allowed)
@@ -154,6 +161,11 @@ var (
 	// Additional cluster-level paths allowed during reinstall
 	ReinstallClusterPaths = []string{
 		"/reinstall",
+		// Switching a provisioned cluster between shared extra-manifests (e.g. common-v1 -> common-v2)
+		// is only permitted as part of a reinstall, since the downstream installer treats the manifest
+		// reference as immutable once installation starts (EP #1056, Open Question 1). Downstream
+		// acceptance on reinstall still requires live validation.
+		"/extraManifestsRefs",
 	}
 )
 
@@ -196,6 +208,33 @@ func ValidateClusterInstance(clusterInstance *ClusterInstance) error {
 		return fmt.Errorf("control-plane agent validation failed: %w", err)
 	}
 
+	// Validate extra-manifest ConfigMap references.
+	if err := validateExtraManifestReferences(clusterInstance); err != nil {
+		return fmt.Errorf("extra-manifest reference validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// validateExtraManifestReferences ensures that each extra-manifest ConfigMap reference targets an
+// allowed namespace. A reference namespace is allowed when it is empty (defaults to the
+// ClusterInstance's own namespace), equals the ClusterInstance's namespace, or equals the
+// shared-resources namespace.
+func validateExtraManifestReferences(clusterInstance *ClusterInstance) error {
+	for _, ref := range clusterInstance.Spec.ExtraManifestsRefs {
+		if ref.Namespace == SharedResourcesNamespace && clusterInstance.Spec.ClusterName != clusterInstance.Namespace {
+			return fmt.Errorf("shared extra-manifest references require spec.clusterName to equal the ClusterInstance namespace")
+		}
+		switch ref.Namespace {
+		case "", clusterInstance.Namespace, SharedResourcesNamespace:
+			// allowed
+		default:
+			return fmt.Errorf(
+				"extraManifestsRefs entry %q references disallowed namespace %q: "+
+					"namespace must be empty, the ClusterInstance namespace %q, or %q",
+				ref.Name, ref.Namespace, clusterInstance.Namespace, SharedResourcesNamespace)
+		}
+	}
 	return nil
 }
 

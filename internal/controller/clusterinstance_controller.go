@@ -42,7 +42,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
@@ -109,12 +111,6 @@ func requeueWithError(err error) (ctrl.Result, error) {
 	return ctrl.Result{}, err
 }
 
-// requeueWithErrorAfterDelay returns a ctrl.Result and error, requeueing the request after a specified delay.
-// Use this when reconciliation encounters a recoverable error but requires a delay before retrying.
-func requeueWithErrorAfterDelay(err error, delay time.Duration) (ctrl.Result, error) {
-	return requeueWithDelay(delay), err
-}
-
 // requeueForDeletion returns a ctrl.Result to requeue the request after the default deletion requeue delay.
 // This is used when the reconciliation loop is waiting for resource deletion processes to complete.
 func requeueForDeletion() ctrl.Result {
@@ -127,7 +123,7 @@ func requeueForDeletion() ctrl.Result {
 //+kubebuilder:rbac:groups=siteconfig.open-cluster-management.io,resources=clusterinstances/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=hive.openshift.io,resources=clusterimagesets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=agent-install.openshift.io,resources=infraenvs,verbs=get;create;update;patch;delete
 //+kubebuilder:rbac:groups=agent-install.openshift.io,resources=nmstateconfigs,verbs=get;create;update;patch;delete
@@ -209,8 +205,7 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		return res, err
 	}
-
-	if res, err := r.ensureVeleroRestoreStatusAnnotation(ctx, log, clusterInstance); !res.IsZero() || err != nil {
+	if res, err := r.prepareSharedRecovery(ctx, log, clusterInstance); !res.IsZero() || err != nil {
 		return res, err
 	}
 
@@ -251,7 +246,7 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if reinstallStatus := clusterInstance.Status.Reinstall; reinstallStatus != nil {
 		result, reimportNeeded, err := r.ReinstallHandler.EnsureClusterIsReimported(ctx, log, clusterInstance)
 		if err != nil {
-			return requeueWithErrorAfterDelay(err, DefaultReimportErrorDelay)
+			return requeueWithDelay(DefaultReimportErrorDelay), err
 		}
 		if reimportNeeded {
 			log.Info("Cluster reimport still in progress, requeuing")
@@ -288,13 +283,19 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Validate ClusterInstance
 	if err := r.handleValidate(ctx, log, clusterInstance); err != nil {
-		return requeueWithErrorAfterDelay(err, DefaultValidationErrorDelay)
+		return requeueWithDelay(DefaultValidationErrorDelay), err
+	}
+
+	// Copy shared extra-manifest ConfigMaps into the ClusterInstance namespace.
+	// The template engine normalizes references without changing the original spec.
+	if err := r.handleCopySharedExtraManifests(ctx, log, clusterInstance); err != nil {
+		return requeueWithDelay(DefaultValidationErrorDelay), err
 	}
 
 	// Render, validate and apply templates
 	if ok, err := r.handleRenderTemplates(ctx, log, clusterInstance); err != nil {
 		// Encountered an error, requeue the request
-		return requeueWithErrorAfterDelay(err, DefaultTemplateRenderingErrorDelay)
+		return requeueWithDelay(DefaultTemplateRenderingErrorDelay), err
 	} else if !ok {
 		// no error, however requeue required (e.g. wait for manifests to be pruned)
 		log.Info("Could not complete rendering templates, will try again",
@@ -305,7 +306,7 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Only update the ObservedGeneration when all the above processes have been successfully executed
 	if clusterInstance.Status.ObservedGeneration != clusterInstance.Generation {
-		if err := r.updateObservedStatus(ctx, log, clusterInstance); err != nil {
+		if err := r.completeSharedManifestReconciliation(ctx, log, clusterInstance); err != nil {
 			return ctrl.Result{}, fmt.Errorf("encountered an error updating observed ClusterInstance status: %w", err)
 		}
 	}
@@ -988,6 +989,14 @@ func (r *ClusterInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	//nolint:wrapcheck
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.ClusterInstance{}).
+		WatchesRawSource(source.Kind(mgr.GetCache(), &corev1.ConfigMap{},
+			handler.TypedEnqueueRequestsFromMapFunc(sharedCopyOwnerRequests),
+			predicate.TypedFuncs[*corev1.ConfigMap]{
+				CreateFunc:  func(event.TypedCreateEvent[*corev1.ConfigMap]) bool { return false },
+				UpdateFunc:  func(event.TypedUpdateEvent[*corev1.ConfigMap]) bool { return false },
+				GenericFunc: func(event.TypedGenericEvent[*corev1.ConfigMap]) bool { return false },
+				DeleteFunc:  func(event.TypedDeleteEvent[*corev1.ConfigMap]) bool { return true },
+			})).
 		WithEventFilter(predicate.Or(
 			predicate.GenerationChangedPredicate{},
 			predicate.LabelChangedPredicate{},

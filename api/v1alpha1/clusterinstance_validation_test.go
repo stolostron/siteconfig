@@ -132,7 +132,7 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 				NetworkType:            "OVNKubernetes",
 				ExtraLabels:            map[string]map[string]string{"ManagedCluster": {"group-du-sno": "test", "common": "true", "sites": "site-sno-du-1"}},
 				InstallConfigOverrides: "{\"capabilities\":{\"baselineCapabilitySet\": \"None\", \"additionalEnabledCapabilities\": [ \"marketplace\", \"NodeTuning\" ] }}",
-				ExtraManifestsRefs:     []corev1.LocalObjectReference{{Name: "foobar1"}, {Name: "foobar2"}},
+				ExtraManifestsRefs:     []ExtraManifestReference{{Name: "foobar1"}, {Name: "foobar2"}},
 				TemplateRefs:           []TemplateRef{{Name: "cluster-v1", Namespace: "site-sno-du-1"}},
 				Nodes: []NodeSpec{
 					{

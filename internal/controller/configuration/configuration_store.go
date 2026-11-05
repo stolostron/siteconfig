@@ -76,6 +76,7 @@ func (s *ConfigurationStore) GetMaxConcurrentReconciles() int {
 // Supported keys are:
 // - "allowReinstalls": A boolean string value (true/false) indicating whether reinstallation operations are allowed.
 // - "maxConcurrentReconciles": An integer string value specifying the maximum number of concurrent reconciles.
+// - "sharedManifestSyncMaxConcurrentReconciles": A positive integer limiting concurrent shared-source reconciles.
 //
 // Returns an error if any value cannot be parsed or if an unsupported key is provided.
 func (s *ConfigurationStore) UpdateConfiguration(data map[string]string) error {
@@ -99,9 +100,26 @@ func (s *ConfigurationStore) UpdateConfiguration(data map[string]string) error {
 				s.SetMaxConcurrentReconciles(maxConcurrentReconciles)
 			}
 
+		case SharedManifestSyncMaxConcurrentReconcilesKey:
+			count, err := parseSyncConcurrency(value)
+			if err != nil {
+				return err
+			}
+			s.mu.Lock()
+			s.configuration.sharedManifestSyncMaxConcurrentReconciles = count
+			s.mu.Unlock()
+
 		default:
 			return fmt.Errorf("unsupported key in input map: %q", key)
 		}
 	}
 	return nil
+}
+
+// GetSharedManifestSyncMaxConcurrentReconciles returns the configured sync worker count.
+// The controller reads this at startup; updating the store does not resize a running controller.
+func (s *ConfigurationStore) GetSharedManifestSyncMaxConcurrentReconciles() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.configuration.sharedManifestSyncMaxConcurrentReconciles
 }
