@@ -56,6 +56,7 @@ import (
 	"github.com/stolostron/siteconfig/internal/controller/mocks"
 	"github.com/stolostron/siteconfig/internal/controller/reinstall"
 	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
+	hcp_templates "github.com/stolostron/siteconfig/internal/templates/hosted-cluster"
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -3670,6 +3671,10 @@ var _ = Describe("applyACMBackupLabelToInstallTemplates", func() {
 						Namespace: siteConfigNamespace,
 					},
 					{
+						Name:      hcp_templates.ClusterLevelInstallTemplates,
+						Namespace: siteConfigNamespace,
+					},
+					{
 						Name:      ibi_templates.ClusterLevelInstallTemplates,
 						Namespace: siteConfigNamespace,
 					},
@@ -3679,6 +3684,10 @@ var _ = Describe("applyACMBackupLabelToInstallTemplates", func() {
 						TemplateRefs: []v1alpha1.TemplateRef{
 							{
 								Name:      ai_templates.NodeLevelInstallTemplates,
+								Namespace: siteConfigNamespace,
+							},
+							{
+								Name:      hcp_templates.NodeLevelInstallTemplates,
 								Namespace: siteConfigNamespace,
 							},
 							{
@@ -3705,6 +3714,15 @@ var _ = Describe("applyACMBackupLabelToInstallTemplates", func() {
 			},
 			{
 				ObjectMeta: metav1.ObjectMeta{
+					Name:      hcp_templates.ClusterLevelInstallTemplates,
+					Namespace: siteConfigNamespace,
+				},
+				Data: map[string]string{
+					"ClusterDeployment": "foo: bar",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
 					Name:      ibi_templates.ClusterLevelInstallTemplates,
 					Namespace: siteConfigNamespace,
 				},
@@ -3715,6 +3733,15 @@ var _ = Describe("applyACMBackupLabelToInstallTemplates", func() {
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      ai_templates.NodeLevelInstallTemplates,
+					Namespace: siteConfigNamespace,
+				},
+				Data: map[string]string{
+					"BareMetalHost": "foo: bar",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      hcp_templates.NodeLevelInstallTemplates,
 					Namespace: siteConfigNamespace,
 				},
 				Data: map[string]string{
