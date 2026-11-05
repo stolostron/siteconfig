@@ -161,31 +161,33 @@ If the source changes after the copy is created, the installer may consume newer
 content than `initial-resource-version` records. This is expected behavior; that
 annotation is not proof of the content installed on the spoke.
 
-The webhook rejects changing `extraManifestsRefs` after provisioning completes, and
+The webhook rejects a normal post-provisioning change to `extraManifestsRefs` and
 continues to block all spec changes during active provisioning. In-place repointing
 (the proposed staged workflow of a separate `common-manifests-v2` with selected
-ClusterInstances moved to it) is not supported, because the downstream installer
-treats the manifest reference as immutable once installation starts (see the
-limitation below); admitting the edit would only wedge the cluster at
-`RenderedTemplatesValidated=False`. Switching a provisioned cluster between shared
-manifests must go through a reinstall. When a reference is set at provisioning or
-reinstall time, obsolete copies are deleted only after successful application, with
-label, owner UID, source namespace, and deletion precondition checks. A managed
-shared copy cannot be reused as a local reference; create a distinct user-owned
-local ConfigMap for that transition.
+ClusterInstances moved to it) is rejected at admission, because the downstream
+installer treats the manifest reference as immutable once installation starts (see
+the limitation below); admitting the edit would only wedge the cluster at
+`RenderedTemplatesValidated=False`. The `extraManifestsRefs` change is admitted only
+as part of a reinstall request. Whether the downstream installer accepts the switched
+reference on reinstall has not yet been validated on a live cluster. When a reference
+is set at provisioning or reinstall time, obsolete copies are deleted only after
+successful application, with label, owner UID, source namespace, and deletion
+precondition checks. A managed shared copy cannot be reused as a local reference;
+create a distinct user-owned local ConfigMap for that transition.
 
 This is an implementation of the provisional [EP #1056](https://github.com/stolostron/siteconfig/pull/1056).
 This resolves EP Open Question 1 for the Assisted Installer: live validation on
 2026-11-03 confirmed the tested Assisted Installer webhook rejects changing
 `AgentClusterInstall.spec.manifestsConfigMapRefs` names after installation starts.
-A SiteConfig-only change cannot override that restriction, so SiteConfig now blocks
-the post-install `extraManifestsRefs` change at admission rather than letting the
-cluster wedge at `RenderedTemplatesValidated=False`. Staged post-install reference
-switching is therefore not supported in place on that installer; the EP's
-reinstall-based switching is the supported path and is tracked as a follow-up.
-Post-install Image Based Installer reference switching is untested and out of scope
-here, since it is only relevant to the (now blocked) in-place repoint; IBI content
-propagation is unaffected. Sync stops at the hub copy: ACM policy/TALM must drive changes to an
+A SiteConfig-only change cannot override that restriction, so SiteConfig blocks a
+normal post-provisioning `extraManifestsRefs` change at admission rather than letting
+the cluster wedge at `RenderedTemplatesValidated=False`. In-place staged reference
+switching is therefore not supported on that installer. The `extraManifestsRefs`
+change is admitted only as part of a reinstall request, following the EP's
+reinstall-based switching approach; downstream acceptance on reinstall still requires
+live validation and is tracked as a follow-up. Image Based Installer reference
+switching is untested; its scope relative to this EP is not yet confirmed with
+reviewers. Sync stops at the hub copy: ACM policy/TALM must drive changes to an
 already-installed spoke. In the intended workflow, the policy runs in inform mode
 and TALM controls progressive enforcement. Whether the extra-manifests policy
 reports missing copies as non-compliant and follows the ClusterInstance reference

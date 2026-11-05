@@ -145,8 +145,9 @@ var (
 		// provisioning is rejected by the Assisted Installer webhook (ManifestsConfigMapRefs.Name is
 		// immutable once installation starts), so admitting it at the SiteConfig layer would only leave
 		// the cluster stuck at RenderedTemplatesValidated=False (EP #1056, Open Question 1). Switching a
-		// provisioned cluster between shared manifests must go through a reinstall. Shared-manifest
-		// content propagation does not change this field and is unaffected.
+		// provisioned cluster between shared manifests must go through a reinstall; the change is
+		// permitted only via ReinstallClusterPaths below. Shared-manifest content propagation does not
+		// change this field and is unaffected.
 	}
 
 	// Node-level path patterns (always allowed)
@@ -160,6 +161,11 @@ var (
 	// Additional cluster-level paths allowed during reinstall
 	ReinstallClusterPaths = []string{
 		"/reinstall",
+		// Switching a provisioned cluster between shared extra-manifests (e.g. common-v1 -> common-v2)
+		// is only permitted as part of a reinstall, since the downstream installer treats the manifest
+		// reference as immutable once installation starts (EP #1056, Open Question 1). Downstream
+		// acceptance on reinstall still requires live validation.
+		"/extraManifestsRefs",
 	}
 )
 

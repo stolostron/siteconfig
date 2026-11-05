@@ -322,6 +322,19 @@ var _ = Describe("ValidateUpdate", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
+		It("should allow switching extra-manifest references when reinstall is requested", func() {
+			// Switching a provisioned cluster between shared manifests is permitted only via reinstall,
+			// since the downstream installer rejects an in-place change (EP #1056, Open Question 1).
+			newClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "test-1",
+			}
+			newClusterInstance.Spec.ExtraManifestsRefs = []ExtraManifestReference{
+				{Name: "common-v2", Namespace: SharedResourcesNamespace},
+			}
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
 		It("should return an error for BootMACAddress changes when reinstall is not requested", func() {
 			oldClusterInstance.Spec.Reinstall = &ReinstallSpec{
 				Generation: "test-1",

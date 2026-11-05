@@ -106,13 +106,14 @@ This does **not** apply v2 to the already-installed spokes. Day-2 spoke changes
 require a separate mechanism such as ACM policy/TALM. Restore the sample payload
 and reapply it when finished testing.
 
-Changing a reference to a different ConfigMap name after provisioning completes is
-now rejected by the SiteConfig webhook ("unauthorized changes in immutable fields").
-The tested Assisted Installer treats the downstream reference as immutable once
+Changing a reference to a different ConfigMap name during normal post-provisioning is
+rejected by the SiteConfig webhook ("unauthorized changes in immutable fields"). The
+tested Assisted Installer treats the downstream reference as immutable once
 installation starts, so in-place staged rollout cannot work; SiteConfig blocks it at
-admission instead of leaving the cluster at `RenderedTemplatesValidated=False`.
-Switch a provisioned cluster between shared manifests via reinstall. Post-install IBI
-reference switching is out of scope (only relevant to the blocked in-place repoint).
+admission instead of leaving the cluster at `RenderedTemplatesValidated=False`. The
+change is admitted only as part of a reinstall request; whether the installer accepts
+the switched reference on reinstall still needs live validation. IBI reference
+switching is untested and its scope relative to the EP is not yet confirmed.
 
 Source deletion retains existing copies. Managed copy deletion triggers targeted recovery; startup also checks for missing
 copies. Edited copy content is repaired by the sync controller. This implements

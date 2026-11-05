@@ -193,3 +193,81 @@ func TestSharedManifestSync(t *testing.T) {
 		})
 	}
 }
+
+// TestSharedCopyReferenceReordering verifies that changing only the order of extraManifestsRefs is a
+// no-op for the managed copies: no copy is recreated and none is garbage-collected. The copier is
+// name-keyed and cleanup uses an order-independent referenced set, so reordering must not churn copies.
+func TestSharedCopyReferenceReordering(t *testing.T) {
+	g := gomega.NewWithT(t)
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	g.Expect(corev1.AddToScheme(scheme)).To(gomega.Succeed())
+	g.Expect(v1alpha1.AddToScheme(scheme)).To(gomega.Succeed())
+
+	srcA := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: v1alpha1.SharedResourcesNamespace}, Data: map[string]string{"k": "a"}}
+	srcB := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: v1alpha1.SharedResourcesNamespace}, Data: map[string]string{"k": "b"}}
+	ci := &v1alpha1.ClusterInstance{ObjectMeta: metav1.ObjectMeta{Name: "cluster", Namespace: "cluster", UID: types.UID("ci")}, Spec: v1alpha1.ClusterInstanceSpec{ClusterName: "cluster", ExtraManifestsRefs: []v1alpha1.ExtraManifestReference{{Name: "a", Namespace: v1alpha1.SharedResourcesNamespace}, {Name: "b", Namespace: v1alpha1.SharedResourcesNamespace}}}}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(srcA, srcB, ci).Build()
+	r := &ClusterInstanceReconciler{Client: c, Scheme: scheme, Log: zap.NewNop()}
+	g.Expect(r.copySharedExtraManifests(ctx, zap.NewNop(), ci)).To(gomega.Succeed())
+	g.Expect(r.cleanupSharedExtraManifests(ctx, ci)).To(gomega.Succeed())
+
+	getCopy := func(name string) *corev1.ConfigMap {
+		cm := &corev1.ConfigMap{}
+		g.Expect(c.Get(ctx, client.ObjectKey{Name: name, Namespace: "cluster"}, cm)).To(gomega.Succeed())
+		return cm
+	}
+	aBefore, bBefore := getCopy("a"), getCopy("b")
+
+	// Reorder the references and re-run the copy + cleanup path.
+	ci.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{{Name: "b", Namespace: v1alpha1.SharedResourcesNamespace}, {Name: "a", Namespace: v1alpha1.SharedResourcesNamespace}}
+	g.Expect(c.Update(ctx, ci)).To(gomega.Succeed())
+	g.Expect(r.copySharedExtraManifests(ctx, zap.NewNop(), ci)).To(gomega.Succeed())
+	g.Expect(r.cleanupSharedExtraManifests(ctx, ci)).To(gomega.Succeed())
+
+	aAfter, bAfter := getCopy("a"), getCopy("b")
+	g.Expect(aAfter.UID).To(gomega.Equal(aBefore.UID))
+	g.Expect(bAfter.UID).To(gomega.Equal(bBefore.UID))
+	g.Expect(aAfter.ResourceVersion).To(gomega.Equal(aBefore.ResourceVersion))
+	g.Expect(bAfter.ResourceVersion).To(gomega.Equal(bBefore.ResourceVersion))
+	g.Expect(sharedManifestNames(ci)).To(gomega.ConsistOf("a", "b"))
+}
+
+// TestSharedCopyEditTriggersRepair verifies the full drift-repair path: editing a managed copy maps
+// (via sharedCopySourceRequests) to a reconcile request for its source, and reconciling that request
+// repairs the copy. This closes the gap where the drift scenario only exercised a manual reconcile.
+func TestSharedCopyEditTriggersRepair(t *testing.T) {
+	g := gomega.NewWithT(t)
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	g.Expect(corev1.AddToScheme(scheme)).To(gomega.Succeed())
+	g.Expect(v1alpha1.AddToScheme(scheme)).To(gomega.Succeed())
+
+	source := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "common", Namespace: v1alpha1.SharedResourcesNamespace}, Data: map[string]string{"k": "source"}}
+	ci := &v1alpha1.ClusterInstance{ObjectMeta: metav1.ObjectMeta{Name: "cluster", Namespace: "cluster", UID: types.UID("ci")}, Spec: v1alpha1.ClusterInstanceSpec{ClusterName: "cluster", ExtraManifestsRefs: []v1alpha1.ExtraManifestReference{{Name: "common", Namespace: v1alpha1.SharedResourcesNamespace}}}}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(source, ci).
+		WithIndex(&v1alpha1.ClusterInstance{}, SharedExtraManifestRefIndexKey, sharedManifestNames).Build()
+	r := &ClusterInstanceReconciler{Client: c, Scheme: scheme, Log: zap.NewNop()}
+	g.Expect(r.copySharedExtraManifests(ctx, zap.NewNop(), ci)).To(gomega.Succeed())
+
+	// Hand-edit the copy without touching the source.
+	copy := &corev1.ConfigMap{}
+	g.Expect(c.Get(ctx, client.ObjectKey{Name: "common", Namespace: "cluster"}, copy)).To(gomega.Succeed())
+	copy.Data = map[string]string{"k": "hand-edited"}
+	g.Expect(c.Update(ctx, copy)).To(gomega.Succeed())
+
+	// The copy edit must map to a reconcile request for the source.
+	reqs := sharedCopySourceRequests(ctx, copy)
+	g.Expect(reqs).To(gomega.Equal([]ctrl.Request{{NamespacedName: client.ObjectKey{Namespace: v1alpha1.SharedResourcesNamespace, Name: "common"}}}))
+
+	// Reconciling that mapped request repairs the copy back to the source content.
+	syncer := &SharedManifestSync{Client: c, Log: zap.NewNop(), Scheme: scheme, Recorder: events.NewFakeRecorder(10)}
+	for _, req := range reqs {
+		_, err := syncer.Reconcile(ctx, req)
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+	}
+	g.Expect(c.Get(ctx, client.ObjectKey{Name: "common", Namespace: "cluster"}, copy)).To(gomega.Succeed())
+	g.Expect(copy.Data).To(gomega.Equal(source.Data))
+}
