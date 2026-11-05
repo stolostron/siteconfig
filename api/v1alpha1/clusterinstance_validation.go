@@ -140,8 +140,13 @@ var (
 		"/suppressedManifests",
 		"/pruneManifests",
 		"/clusterImageSetNameRef",
-		"/holdInstallation",   // Allow toggling HoldInstallation (only true→false is valid, enforced in webhook)
-		"/extraManifestsRefs", // Allow repointing extra-manifest references post-install for staged fleet rollouts
+		"/holdInstallation", // Allow toggling HoldInstallation (only true→false is valid, enforced in webhook)
+		// NOTE: extraManifestsRefs is intentionally NOT listed here. In-place repointing after
+		// provisioning is rejected by the Assisted Installer webhook (ManifestsConfigMapRefs.Name is
+		// immutable once installation starts), so admitting it at the SiteConfig layer would only leave
+		// the cluster stuck at RenderedTemplatesValidated=False (EP #1056, Open Question 1). Switching a
+		// provisioned cluster between shared manifests must go through a reinstall. Shared-manifest
+		// content propagation does not change this field and is unaffected.
 	}
 
 	// Node-level path patterns (always allowed)

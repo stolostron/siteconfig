@@ -37,13 +37,16 @@ for recovery behavior and limitations.
 
 ## Outstanding validation
 
-Post-install reference-name switching failed against the tested Assisted Installer:
-SiteConfig admitted the change, but downstream validation reported
-`ManifestsConfigMapRefs.Name` immutable after installation starts, leaving
-`RenderedTemplatesValidated=False`. IBI switching remains untested. On a dedicated
-installed test cluster, save the full reference list before reproducing this case,
-record installer versions and conditions, and restore the original references
-immediately afterward. Do not bypass the installer webhook.
+Post-install reference-name switching is resolved for the Assisted Installer (EP
+Open Question 1): it is rejected downstream (`ManifestsConfigMapRefs.Name` is
+immutable after installation starts). A SiteConfig-only change cannot override this,
+so the webhook now blocks a post-provisioning `extraManifestsRefs` change at
+admission with "unauthorized changes in immutable fields". In-place staged rollout
+is therefore not supported; switching a provisioned cluster between shared manifests
+is done via reinstall (the EP's fallback), tracked as a follow-up. Verify the
+admission rejection, and that a reinstall-based switch converges. IBI in-place
+switching is out of scope (only relevant to the blocked in-place repoint); IBI
+content propagation should still be verified.
 
 A real ACM/Velero restore and representative fleet-load testing remain required.
 For restore, verify absent copies recover without a generation change or rendering;

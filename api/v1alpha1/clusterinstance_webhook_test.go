@@ -242,7 +242,11 @@ var _ = Describe("ValidateUpdate", func() {
 
 		})
 
-		It("allows changing, adding, and removing extra-manifest references after installation", func() {
+		It("blocks changing, adding, and removing extra-manifest references after installation", func() {
+			// In-place repointing is rejected downstream by the Assisted Installer (manifest refs are
+			// immutable once installation starts, EP #1056 Open Question 1), so SiteConfig rejects it at
+			// admission rather than letting the cluster wedge at RenderedTemplatesValidated=False.
+			// Switching a provisioned cluster between shared manifests requires a reinstall.
 			for _, refs := range [][]ExtraManifestReference{
 				{{Name: "common-v2", Namespace: SharedResourcesNamespace}},
 				{{Name: "common-v2", Namespace: SharedResourcesNamespace}, {Name: "local"}},
@@ -251,7 +255,7 @@ var _ = Describe("ValidateUpdate", func() {
 				newClusterInstance = oldClusterInstance.DeepCopy()
 				newClusterInstance.Spec.ExtraManifestsRefs = refs
 				_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(err).To(MatchError(ContainSubstring("unauthorized changes in immutable fields")))
 			}
 		})
 
