@@ -37,7 +37,7 @@ import (
 )
 
 func TestSharedManifestSync(t *testing.T) {
-	for _, scenario := range []string{"fanout", "metadata-only", "unmanaged", "wrong-owner", "wrong-source", "missing-copy", "missing-source", "retry", "aggregate", "drift", "staged-rollout", "cleanup"} {
+	for _, scenario := range []string{"fanout", "metadata-only", "unmanaged", "wrong-owner", "wrong-source", "missing-copy", "missing-source", "retry", "aggregate", "drift", "hand-edit-only", "staged-rollout", "cleanup"} {
 		t.Run(scenario, func(t *testing.T) {
 			g := gomega.NewWithT(t)
 			ctx := context.Background()
@@ -103,6 +103,17 @@ func TestSharedManifestSync(t *testing.T) {
 				cm.Data = map[string]string{"manifest": "hand-edited"}
 				cm.Annotations[SourceResourceVersionAnnotation] = source.ResourceVersion
 				g.Expect(c.Update(ctx, cm)).To(gomega.Succeed())
+			case "hand-edit-only":
+				// The source is unchanged relative to the copies; only one copy is hand-edited.
+				// This isolates drift repair from source propagation: reconcile must still restore
+				// the copy to match the source purely on a content diff, driven by the copy-edit
+				// event mapping rather than a source change.
+				source.Data = original.Data
+				source.BinaryData = original.BinaryData
+				g.Expect(c.Update(ctx, source)).To(gomega.Succeed())
+				cm := getCopy("a")
+				cm.Data = map[string]string{"manifest": "hand-edited"}
+				g.Expect(c.Update(ctx, cm)).To(gomega.Succeed())
 			case "staged-rollout", "cleanup":
 				ci := instances[0]
 				ci.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{{Name: "v2", Namespace: v1alpha1.SharedResourcesNamespace}}
@@ -142,6 +153,11 @@ func TestSharedManifestSync(t *testing.T) {
 				g.Expect(getCopy("a").Data).To(gomega.Equal(original.Data))
 			case "metadata-only":
 				g.Expect(getCopy("a").ResourceVersion).To(gomega.Equal(original.ResourceVersion))
+			case "hand-edit-only":
+				// The hand-edited copy is repaired back to the source content even though the
+				// source itself never changed, and the untouched copy keeps matching the source.
+				g.Expect(getCopy("a").Data).To(gomega.Equal(source.Data))
+				g.Expect(getCopy("b").Data).To(gomega.Equal(source.Data))
 			case "cleanup":
 				// A copy controlled by another instance and a user ConfigMap must survive the sweep.
 				foreign := original.DeepCopy()

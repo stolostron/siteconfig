@@ -116,6 +116,12 @@ func TestMissingSharedCopyRecovery(t *testing.T) {
 			g.Expect(after).To(gomega.Equal(before))
 			copy := &corev1.ConfigMap{}
 			g.Expect(c.Get(ctx, client.ObjectKey{Name: "common", Namespace: "cluster"}, copy)).To(gomega.Succeed())
+			if scenario == "restore" {
+				// Hub-restore guarantee: recovering a missing shared copy must not re-render or
+				// otherwise touch already-rendered manifests, so their resourceVersion is preserved
+				// and GitOps consumers see no spurious change.
+				g.Expect(after.ResourceVersion).To(gomega.Equal(before.ResourceVersion))
+			}
 			if scenario == "startup" || scenario == "restore" {
 				g.Expect(copy.Data).To(gomega.Equal(source.Data))
 				g.Expect(metav1.IsControlledBy(copy, ci)).To(gomega.BeTrue())
