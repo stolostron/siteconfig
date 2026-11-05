@@ -5,6 +5,9 @@ ClusterInstances. The operator creates `siteconfig-shared-resources` at startup;
 users add their shared ConfigMaps there. Only ClusterInstances that explicitly
 reference a shared ConfigMap receive an owned copy in their own hub namespace.
 
+For recovery, lifecycle, and installer coverage, use the
+[QE checklist](../../../docs/shared-extra-manifests-testing.md).
+
 ## Prepare the source and references
 
 Install the operator and matching ClusterInstance CRD with shared-resource support.

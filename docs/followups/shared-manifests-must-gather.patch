@@ -1,7 +1,0 @@
---- a/collection-scripts/gather_hub_logs
-+++ b/collection-scripts/gather_hub_logs
-@@ -76,2 +76,4 @@
- # SiteConfig Operator CRs
- run_inspect clusterinstances.siteconfig.open-cluster-management.io --all-namespaces
-+run_inspect ns/siteconfig-shared-resources
-+run_inspect configmaps --namespace siteconfig-shared-resources
