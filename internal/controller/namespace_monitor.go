@@ -46,6 +46,8 @@ const SharedResourcesNamespaceManagedByLabel = "app.kubernetes.io/managed-by"
 // namespace.
 const SharedResourcesNamespaceManagedByValue = "siteconfig-operator"
 
+const sharedNamespaceEnforceLabel = "pod-security.kubernetes.io/enforce"
+
 // NamespaceMonitor watches for deletion of the shared-resources namespace and re-creates it.
 type NamespaceMonitor struct {
 	client.Client
@@ -70,7 +72,10 @@ func (r *NamespaceMonitor) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	ns := &corev1.Namespace{}
 	err := r.Get(ctx, types.NamespacedName{Name: req.Name}, ns)
 	if err == nil {
-		// Namespace exists (or is terminating); nothing to do.
+		if !ns.DeletionTimestamp.IsZero() {
+			return ctrl.Result{RequeueAfter: RequeueDelay}, nil
+		}
+		// Label reconciliation is performed at startup, not on runtime updates.
 		return ctrl.Result{}, nil
 	}
 	if !errors.IsNotFound(err) {
@@ -129,17 +134,27 @@ func EnsureSharedResourcesNamespace(ctx context.Context, c client.Client) error 
 					Name: v1alpha1.SharedResourcesNamespace,
 					Labels: map[string]string{
 						SharedResourcesNamespaceManagedByLabel: SharedResourcesNamespaceManagedByValue,
+						sharedNamespaceEnforceLabel:            "restricted",
 					},
 				},
 			}
-			if err := client.IgnoreAlreadyExists(c.Create(ctx, ns)); err != nil {
+			if err := c.Create(ctx, ns); err != nil {
+				if errors.IsAlreadyExists(err) {
+					// Re-read the winner of a creation race; it may still be terminating.
+					return errors.NewConflict(corev1.Resource("namespaces"), ns.Name, err)
+				}
 				return fmt.Errorf("failed to create namespace %s: %w", v1alpha1.SharedResourcesNamespace, err)
 			}
 			return nil
 		}
 
-		// Namespace exists; reconcile the managed-by label if missing.
-		if ns.Labels[SharedResourcesNamespaceManagedByLabel] == SharedResourcesNamespaceManagedByValue {
+		if !ns.DeletionTimestamp.IsZero() {
+			return errors.NewServiceUnavailable("shared-resources namespace is terminating")
+		}
+
+		// Reconcile both operator-owned labels, preserving unrelated metadata.
+		if ns.Labels[SharedResourcesNamespaceManagedByLabel] == SharedResourcesNamespaceManagedByValue &&
+			ns.Labels[sharedNamespaceEnforceLabel] == "restricted" {
 			return nil
 		}
 
@@ -148,6 +163,7 @@ func EnsureSharedResourcesNamespace(ctx context.Context, c client.Client) error 
 			ns.Labels = map[string]string{}
 		}
 		ns.Labels[SharedResourcesNamespaceManagedByLabel] = SharedResourcesNamespaceManagedByValue
+		ns.Labels[sharedNamespaceEnforceLabel] = "restricted"
 		if err := c.Patch(ctx, ns, patch); err != nil {
 			return fmt.Errorf("failed to patch labels on namespace %s: %w", v1alpha1.SharedResourcesNamespace, err)
 		}

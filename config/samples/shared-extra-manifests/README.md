@@ -1,7 +1,7 @@
 # Shared extra-manifest ConfigMaps sample
 
 Use one ConfigMap on the hub to supply the same extra manifests to two
-ClusterInstances. The operator creates `openshift-siteconfig-resources` at startup;
+ClusterInstances. The operator creates `siteconfig-shared-resources` at startup;
 users add their shared ConfigMaps there. Only ClusterInstances that explicitly
 reference a shared ConfigMap receive an owned copy in their own hub namespace.
 
@@ -11,7 +11,7 @@ Install the operator and matching ClusterInstance CRD with shared-resource suppo
 Use `oc` with your **hub** kubeconfig. From the repository root:
 
 ```sh
-oc get namespace openshift-siteconfig-resources
+oc get namespace siteconfig-shared-resources
 oc apply -f config/samples/shared-extra-manifests/shared-configmap.yaml
 ```
 
@@ -31,7 +31,7 @@ Merge the [reference fragment](clusterinstance-fragment.yaml) into each definiti
 spec:
   extraManifestsRefs:
     - name: common-manifests-v1
-      namespace: openshift-siteconfig-resources
+      namespace: siteconfig-shared-resources
 ```
 
 The fragment is not a standalone ClusterInstance. Apply your complete definitions
@@ -49,7 +49,7 @@ oc get clusterinstance "$CI_A" -n "$NS_A" \
   -o jsonpath='{.spec.extraManifestsRefs}{"\n"}'
 oc get clusterinstance "$CI_B" -n "$NS_B" \
   -o jsonpath='{.spec.extraManifestsRefs}{"\n"}'
-oc get configmap common-manifests-v1 -n openshift-siteconfig-resources -o yaml
+oc get configmap common-manifests-v1 -n siteconfig-shared-resources -o yaml
 oc get configmap common-manifests-v1 -n "$NS_A" -o yaml
 oc get configmap common-manifests-v1 -n "$NS_B" -o yaml
 ```
@@ -57,14 +57,14 @@ oc get configmap common-manifests-v1 -n "$NS_B" -o yaml
 Expected reference output (illustrative, not captured output):
 
 ```json
-[{"name":"common-manifests-v1","namespace":"openshift-siteconfig-resources"}]
+[{"name":"common-manifests-v1","namespace":"siteconfig-shared-resources"}]
 ```
 
 After reconciliation, both local copies must have matching source `data` and
 `binaryData`, a `siteconfig.open-cluster-management.io/managed-copy: "true"` label,
 and an ownerReference matching the local ClusterInstance UID. Their
 `siteconfig.open-cluster-management.io/source-namespace` annotation must be
-`openshift-siteconfig-resources`. Inspect the CI UID with:
+`siteconfig-shared-resources`. Inspect the CI UID with:
 
 ```sh
 oc get clusterinstance "$CI_A" -n "$NS_A" -o jsonpath='{.metadata.uid}{"\n"}'
@@ -96,7 +96,7 @@ After provisioning, change `version: v1` to `version: v2` inside
 `shared-configmap.yaml` and apply it again. Both existing managed hub copies should
 converge to the new content without changing ClusterInstance generation/spec or
 installer specs. Record those fields before the edit to compare them afterward.
-Copy UIDs and `provisioned-resource-version` stay unchanged;
+Copy UIDs and `initial-resource-version` stay unchanged;
 `source-resource-version` advances when the new content propagates.
 
 This does **not** apply v2 to the already-installed spokes. Day-2 spoke changes
@@ -110,7 +110,7 @@ as immutable, even though SiteConfig accepts the CI edit. Expect
 staged rollout based on API admission alone. Post-install IBI reference switching
 remains untested.
 
-Source deletion retains existing copies. Sync alone does not recreate a deleted
-destination copy. Recovery behavior and ROSA/OSD namespace support remain EP
-questions. See the [operator guide](../../../docs/configure_siteconfig.md#shared-extra-manifest-configmaps-proposal-implementation)
+Source deletion retains existing copies. Managed copy deletion triggers targeted recovery; startup also checks for missing
+copies. Edited copy content is repaired by the sync controller. This implements
+the proposed recovery design, still subject to EP review. See the [operator guide](../../../docs/configure_siteconfig.md#shared-extra-manifest-configmaps-proposal-implementation)
 for synchronization settings, provenance and the provisional EP status.

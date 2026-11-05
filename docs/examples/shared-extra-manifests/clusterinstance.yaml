@@ -1,0 +1,70 @@
+# Assisted Installer SNO example: replace all lab-specific values before use.
+# Create namespace qe-spoke-a and its pull/BMC Secrets before applying this CR.
+apiVersion: siteconfig.open-cluster-management.io/v1alpha1
+kind: ClusterInstance
+metadata:
+  name: qe-spoke-a
+  namespace: qe-spoke-a
+spec:
+  clusterName: qe-spoke-a
+  baseDomain: example.com
+  # Keep installation held until the rendered resources have been inspected.
+  holdInstallation: true
+  clusterImageSetNameRef: replace-with-your-clusterimageset
+  pullSecretRef:
+    name: assisted-deployment-pull-secret
+  sshPublicKey: "ssh-ed25519 REPLACE_WITH_YOUR_PUBLIC_KEY"
+  networkType: OVNKubernetes
+  clusterNetwork:
+    - cidr: 10.128.0.0/14
+      hostPrefix: 23
+  serviceNetwork:
+    - cidr: 172.30.0.0/16
+  machineNetwork:
+    - cidr: 192.0.2.0/24
+  extraManifestsRefs:
+    - name: qe-shared-manifests-v1
+      namespace: siteconfig-shared-resources
+  templateRefs:
+    - name: ai-cluster-templates-v1
+      namespace: siteconfig-operator
+  nodes:
+    - hostName: node0.qe-spoke-a.example.com
+      role: master
+      bmcAddress: "redfish-virtualmedia+https://bmc.example.com/redfish/v1/Systems/1"
+      bmcCredentialsName:
+        name: qe-spoke-a-bmc-secret
+      bootMACAddress: "02:00:00:00:00:01"
+      bootMode: UEFI
+      rootDeviceHints:
+        deviceName: /dev/sda
+      nodeNetwork:
+        interfaces:
+          - name: eno1
+            macAddress: "02:00:00:00:00:01"
+        config:
+          interfaces:
+            - name: eno1
+              type: ethernet
+              state: up
+              ipv4:
+                enabled: true
+                dhcp: false
+                address:
+                  - ip: 192.0.2.10
+                    prefix-length: 24
+              ipv6:
+                enabled: false
+          dns-resolver:
+            config:
+              server:
+                - 192.0.2.53
+          routes:
+            config:
+              - destination: 0.0.0.0/0
+                next-hop-interface: eno1
+                next-hop-address: 192.0.2.1
+                table-id: 254
+      templateRefs:
+        - name: ai-node-templates-v1
+          namespace: siteconfig-operator

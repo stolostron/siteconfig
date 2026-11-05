@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -33,7 +34,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlruntime "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	"github.com/stolostron/siteconfig/internal/controller/configuration"
@@ -99,19 +102,22 @@ func (r *SharedManifestSync) Reconcile(ctx context.Context, req ctrl.Request) (c
 			req.Namespace, req.Name, err)
 	}
 
-	var firstErr error
+	if len(ciList.Items) > 0 {
+		if err := ensureSharedSourceBackup(ctx, r.Client, source); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	var propagationErrors []error
 	for i := range ciList.Items {
 		ci := &ciList.Items[i]
 		if err := r.propagate(ctx, log, ci, source); err != nil {
 			log.Sugar().Errorf("Failed to propagate shared ConfigMap %s to namespace %s: %v",
 				req.Name, ci.Namespace, err)
-			if firstErr == nil {
-				firstErr = err
-			}
+			propagationErrors = append(propagationErrors, err)
 		}
 	}
-	if firstErr != nil {
-		return ctrl.Result{RequeueAfter: RequeueDelay}, firstErr
+	if err := stderrors.Join(propagationErrors...); err != nil {
+		return ctrl.Result{}, fmt.Errorf("shared manifest propagation failed: %w", err)
 	}
 
 	return ctrl.Result{}, nil
@@ -161,8 +167,8 @@ func (r *SharedManifestSync) propagate(
 	if copy.Annotations == nil {
 		copy.Annotations = map[string]string{}
 	}
-	// Advance the propagation provenance only; provisioned-resource-version is install-time and
-	// intentionally left untouched.
+	// Advance the propagation provenance only; initial-resource-version records copy creation
+	// and is intentionally left untouched.
 	copy.Annotations[SourceResourceVersionAnnotation] = source.ResourceVersion
 
 	if err := r.Update(ctx, copy); err != nil {
@@ -188,19 +194,7 @@ func (r *SharedManifestSync) SetupWithManager(mgr ctrl.Manager) error {
 		context.Background(),
 		&v1alpha1.ClusterInstance{},
 		SharedExtraManifestRefIndexKey,
-		func(obj client.Object) []string {
-			ci, ok := obj.(*v1alpha1.ClusterInstance)
-			if !ok {
-				return nil
-			}
-			var names []string
-			for _, ref := range ci.Spec.ExtraManifestsRefs {
-				if ref.Namespace == v1alpha1.SharedResourcesNamespace {
-					names = append(names, ref.Name)
-				}
-			}
-			return names
-		},
+		sharedManifestNames,
 	); err != nil {
 		return fmt.Errorf("failed to set up shared-extra-manifest field index: %w", err)
 	}
@@ -220,7 +214,23 @@ func (r *SharedManifestSync) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("SharedManifestSync").
 		For(&corev1.ConfigMap{}).
+		WatchesRawSource(source.Kind(mgr.GetCache(), &corev1.ConfigMap{},
+			handler.TypedEnqueueRequestsFromMapFunc(sharedCopySourceRequests))).
 		WithOptions(ctrlruntime.Options{MaxConcurrentReconciles: concurrency}).
 		WithEventFilter(sharedConfigMapPredicate).
 		Complete(r)
+}
+
+func sharedManifestNames(obj client.Object) []string {
+	ci, ok := obj.(*v1alpha1.ClusterInstance)
+	if !ok {
+		return nil
+	}
+	var names []string
+	for _, ref := range ci.Spec.ExtraManifestsRefs {
+		if ref.Namespace == v1alpha1.SharedResourcesNamespace {
+			names = append(names, ref.Name)
+		}
+	}
+	return names
 }

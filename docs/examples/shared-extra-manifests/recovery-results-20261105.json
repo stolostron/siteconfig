@@ -1,0 +1,26 @@
+{
+  "image": "quay.io/aabugosh/siteconfig-poc@sha256:20e3292134cb69d73002c5a38d42ab7680b82b076f2a4fb2e863ab076faa338f",
+  "scope": "Updated branch deployment; ConfigMap-only templates, no spoke installation",
+  "checks": {
+    "initial_copy": true,
+    "ownership": true,
+    "no_gitops_metadata": true,
+    "initial_resource_version_recorded": true,
+    "initial_resource_version_preserved": true,
+    "source_update_sync_within_45_seconds": true,
+    "ci_spec_and_generation_unchanged": true,
+    "sync_does_not_render": true,
+    "namespace_restricted": true,
+    "source_backed_up": true,
+    "copies_not_backed_up": true,
+    "held_install_release": true,
+    "hold_release_preserves_initial_version": true,
+    "deletion_recovered": true,
+    "recovery_does_not_render": true,
+    "recovery_leaves_existing_copy": true,
+    "drift_repaired_without_source_event": true,
+    "startup_recovery_without_render": true,
+    "startup_preserves_existing_copy": true
+  },
+  "cleanup_errors": []
+}

@@ -37,7 +37,7 @@ import (
 )
 
 func TestSharedManifestSync(t *testing.T) {
-	for _, scenario := range []string{"fanout", "metadata-only", "unmanaged", "wrong-owner", "wrong-source", "missing-copy", "missing-source", "retry", "staged-rollout", "cleanup"} {
+	for _, scenario := range []string{"fanout", "metadata-only", "unmanaged", "wrong-owner", "wrong-source", "missing-copy", "missing-source", "retry", "aggregate", "drift", "staged-rollout", "cleanup"} {
 		t.Run(scenario, func(t *testing.T) {
 			g := gomega.NewWithT(t)
 			ctx := context.Background()
@@ -54,17 +54,9 @@ func TestSharedManifestSync(t *testing.T) {
 			}
 			failUpdate := false
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&v1alpha1.ClusterInstance{}).
-				WithIndex(&v1alpha1.ClusterInstance{}, SharedExtraManifestRefIndexKey, func(obj client.Object) []string {
-					var names []string
-					for _, ref := range obj.(*v1alpha1.ClusterInstance).Spec.ExtraManifestsRefs {
-						if ref.Namespace == v1alpha1.SharedResourcesNamespace {
-							names = append(names, ref.Name)
-						}
-					}
-					return names
-				}).WithInterceptorFuncs(interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
-				if failUpdate && obj.GetNamespace() == "a" {
-					return fmt.Errorf("injected write failure")
+				WithIndex(&v1alpha1.ClusterInstance{}, SharedExtraManifestRefIndexKey, sharedManifestNames).WithInterceptorFuncs(interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+				if failUpdate && (obj.GetNamespace() == "a" || scenario == "aggregate") {
+					return fmt.Errorf("injected write failure in %s", obj.GetNamespace())
 				}
 				return c.Update(ctx, obj, opts...)
 			}}).Build()
@@ -104,8 +96,13 @@ func TestSharedManifestSync(t *testing.T) {
 				g.Expect(c.Delete(ctx, original)).To(gomega.Succeed())
 			case "missing-source":
 				g.Expect(c.Delete(ctx, source)).To(gomega.Succeed())
-			case "retry":
+			case "retry", "aggregate":
 				failUpdate = true
+			case "drift":
+				cm := getCopy("a")
+				cm.Data = map[string]string{"manifest": "hand-edited"}
+				cm.Annotations[SourceResourceVersionAnnotation] = source.ResourceVersion
+				g.Expect(c.Update(ctx, cm)).To(gomega.Succeed())
 			case "staged-rollout", "cleanup":
 				ci := instances[0]
 				ci.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{{Name: "v2", Namespace: v1alpha1.SharedResourcesNamespace}}
@@ -117,8 +114,13 @@ func TestSharedManifestSync(t *testing.T) {
 				g.Expect(c.Create(ctx, v2)).To(gomega.Succeed())
 				g.Expect(copier.copySharedExtraManifests(ctx, zap.NewNop(), ci)).To(gomega.Succeed())
 			}
-			syncer := &SharedManifestSync{Client: c, Log: zap.NewNop(), Scheme: scheme, Recorder: events.NewFakeRecorder(20)}
+			recorder := events.NewFakeRecorder(20)
+			syncer := &SharedManifestSync{Client: c, Log: zap.NewNop(), Scheme: scheme, Recorder: recorder}
 			_, err := syncer.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(source)})
+			if scenario == "aggregate" {
+				g.Expect(err).To(gomega.MatchError(gomega.And(gomega.ContainSubstring("failure in a"), gomega.ContainSubstring("failure in b"))))
+				return
+			}
 			if scenario == "retry" {
 				g.Expect(err).To(gomega.HaveOccurred())
 				g.Expect(getCopy("b").Data).To(gomega.Equal(source.Data))
@@ -130,6 +132,13 @@ func TestSharedManifestSync(t *testing.T) {
 			case "missing-copy":
 				g.Expect(c.Get(ctx, client.ObjectKeyFromObject(original), &corev1.ConfigMap{})).To(gomega.MatchError(gomega.ContainSubstring("not found")))
 			case "unmanaged", "wrong-owner", "wrong-source", "missing-source", "staged-rollout":
+				if scenario != "staged-rollout" {
+					expected := "SharedExtraManifestNotManaged"
+					if scenario == "missing-source" {
+						expected = "SharedExtraManifestDeleted"
+					}
+					g.Expect(recorder.Events).To(gomega.Receive(gomega.ContainSubstring(expected)))
+				}
 				g.Expect(getCopy("a").Data).To(gomega.Equal(original.Data))
 			case "metadata-only":
 				g.Expect(getCopy("a").ResourceVersion).To(gomega.Equal(original.ResourceVersion))
@@ -154,7 +163,7 @@ func TestSharedManifestSync(t *testing.T) {
 					cm := getCopy(ns)
 					g.Expect(cm.Data).To(gomega.Equal(source.Data))
 					g.Expect(cm.BinaryData).To(gomega.Equal(source.BinaryData))
-					g.Expect(cm.Annotations[ProvisionedResourceVersionAnnotation]).To(gomega.Equal(original.Annotations[ProvisionedResourceVersionAnnotation]))
+					g.Expect(cm.Annotations[InitialResourceVersionAnnotation]).To(gomega.Equal(original.Annotations[InitialResourceVersionAnnotation]))
 					g.Expect(cm.Annotations[SourceResourceVersionAnnotation]).To(gomega.Equal(source.ResourceVersion))
 				}
 			}

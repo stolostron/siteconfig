@@ -63,7 +63,7 @@ var _ = Describe("copySharedExtraManifests", func() {
 
 	createSharedCM := func(data map[string]string) *corev1.ConfigMap {
 		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: sharedCMName, Namespace: v1alpha1.SharedResourcesNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: sharedCMName, Namespace: v1alpha1.SharedResourcesNamespace, Labels: map[string]string{acmBackupLabel: acmBackupLabelValue}},
 			Data:       data,
 		}
 		Expect(c.Create(ctx, cm)).To(Succeed())
@@ -91,6 +91,7 @@ var _ = Describe("copySharedExtraManifests", func() {
 		Expect(copy.Labels).To(HaveKeyWithValue(ManagedCopyLabel, ManagedCopyLabelValue))
 		Expect(copy.Annotations).To(HaveKeyWithValue(SourceNamespaceAnnotation, v1alpha1.SharedResourcesNamespace))
 		Expect(copy.Annotations).To(HaveKeyWithValue(SourceResourceVersionAnnotation, source.ResourceVersion))
+		Expect(copy.Annotations).To(HaveKeyWithValue(InitialResourceVersionAnnotation, source.ResourceVersion))
 
 		Expect(copy.OwnerReferences).To(HaveLen(1))
 		Expect(copy.OwnerReferences[0].Kind).To(Equal(v1alpha1.ClusterInstanceKind))
@@ -124,6 +125,36 @@ var _ = Describe("copySharedExtraManifests", func() {
 		Expect(c.Get(ctx, clusterKey, copy)).To(Succeed())
 		Expect(copy.Data).To(Equal(source.Data))
 		Expect(copy.Annotations).To(HaveKeyWithValue(SourceResourceVersionAnnotation, source.ResourceVersion))
+	})
+
+	It("does not propagate GitOps tracking metadata during creation, re-copy, or sync", func() {
+		source := createSharedCM(map[string]string{"foo": "initial"})
+		source.Labels = map[string]string{"argocd.argoproj.io/instance": "shared-config", acmBackupLabel: acmBackupLabelValue, v1alpha1.Group + "/preserve": "All", v1alpha1.Group + "/preserve.internal": "true"}
+		source.Annotations = map[string]string{"argocd.argoproj.io/tracking-id": "shared-config:source"}
+		Expect(c.Update(ctx, source)).To(Succeed())
+		ci := newClusterInstance(v1alpha1.ExtraManifestReference{
+			Name: sharedCMName, Namespace: v1alpha1.SharedResourcesNamespace,
+		})
+		syncer := &SharedManifestSync{Client: c}
+		var initialVersion string
+		for _, phase := range []string{"creation", "re-copy", "sync"} {
+			source.Data = map[string]string{"foo": phase}
+			Expect(c.Update(ctx, source)).To(Succeed())
+			if phase == "sync" {
+				Expect(syncer.propagate(ctx, testLogger, ci, source)).To(Succeed())
+			} else {
+				Expect(r.copySharedExtraManifests(ctx, testLogger, ci)).To(Succeed())
+			}
+			copy := &corev1.ConfigMap{}
+			Expect(c.Get(ctx, clusterKey, copy)).To(Succeed())
+			Expect(copy.Data).To(Equal(source.Data))
+			Expect(copy.Labels).To(Equal(map[string]string{ManagedCopyLabel: ManagedCopyLabelValue}))
+			Expect(copy.Annotations).NotTo(HaveKey("argocd.argoproj.io/tracking-id"))
+			if phase == "creation" {
+				initialVersion = source.ResourceVersion
+			}
+			Expect(copy.Annotations).To(Equal(map[string]string{InitialResourceVersionAnnotation: initialVersion, SourceResourceVersionAnnotation: source.ResourceVersion, SourceNamespaceAnnotation: v1alpha1.SharedResourcesNamespace}))
+		}
 	})
 
 	It("fails when a user-created ConfigMap with the same name already exists locally", func() {

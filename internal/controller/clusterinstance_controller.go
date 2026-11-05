@@ -42,7 +42,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
@@ -203,8 +205,7 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		return res, err
 	}
-
-	if res, err := r.ensureVeleroRestoreStatusAnnotation(ctx, log, clusterInstance); !res.IsZero() || err != nil {
+	if res, err := r.prepareSharedRecovery(ctx, log, clusterInstance); !res.IsZero() || err != nil {
 		return res, err
 	}
 
@@ -988,6 +989,14 @@ func (r *ClusterInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	//nolint:wrapcheck
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.ClusterInstance{}).
+		WatchesRawSource(source.Kind(mgr.GetCache(), &corev1.ConfigMap{},
+			handler.TypedEnqueueRequestsFromMapFunc(sharedCopyOwnerRequests),
+			predicate.TypedFuncs[*corev1.ConfigMap]{
+				CreateFunc:  func(event.TypedCreateEvent[*corev1.ConfigMap]) bool { return false },
+				UpdateFunc:  func(event.TypedUpdateEvent[*corev1.ConfigMap]) bool { return false },
+				GenericFunc: func(event.TypedGenericEvent[*corev1.ConfigMap]) bool { return false },
+				DeleteFunc:  func(event.TypedDeleteEvent[*corev1.ConfigMap]) bool { return true },
+			})).
 		WithEventFilter(predicate.Or(
 			predicate.GenerationChangedPredicate{},
 			predicate.LabelChangedPredicate{},

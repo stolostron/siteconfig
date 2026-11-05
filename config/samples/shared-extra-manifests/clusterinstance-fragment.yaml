@@ -4,4 +4,4 @@
 spec:
   extraManifestsRefs:
     - name: common-manifests-v1
-      namespace: openshift-siteconfig-resources
+      namespace: siteconfig-shared-resources

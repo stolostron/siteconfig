@@ -18,18 +18,21 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 )
@@ -58,6 +61,7 @@ var _ = Describe("NamespaceMonitor Reconcile", func() {
 
 		Expect(c.Get(ctx, sharedKey, ns)).To(Succeed())
 		Expect(ns.Labels).To(HaveKeyWithValue(SharedResourcesNamespaceManagedByLabel, SharedResourcesNamespaceManagedByValue))
+		Expect(ns.Labels).To(HaveKeyWithValue(sharedNamespaceEnforceLabel, "restricted"))
 	})
 
 	It("is a no-op when the namespace already exists", func() {
@@ -70,6 +74,36 @@ var _ = Describe("NamespaceMonitor Reconcile", func() {
 
 		ns := &corev1.Namespace{}
 		Expect(c.Get(ctx, sharedKey, ns)).To(Succeed())
+	})
+
+	It("requeues while the namespace is terminating", func() {
+		now := metav1.Now()
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: sharedKey.Name, DeletionTimestamp: &now, Finalizers: []string{"test"}}}
+		c = fakeclient.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(ns).Build()
+		r.Client = c
+		result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: sharedKey})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+		Expect(EnsureSharedResourcesNamespace(ctx, c)).To(MatchError(ContainSubstring("terminating")))
+	})
+
+	It("reports read and creation failures", func() {
+		for _, phase := range []string{"get", "create"} {
+			c = fakeclient.NewClientBuilder().WithScheme(scheme.Scheme).WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if phase == "get" {
+						return fmt.Errorf("read denied")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+				Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+					return fmt.Errorf("create denied")
+				},
+			}).Build()
+			r.Client = c
+			_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: sharedKey})
+			Expect(err).To(HaveOccurred())
+		}
 	})
 
 	It("ignores reconcile requests for unrelated namespaces", func() {
@@ -100,6 +134,25 @@ var _ = Describe("EnsureSharedResourcesNamespace", func() {
 		ns := &corev1.Namespace{}
 		Expect(c.Get(ctx, sharedKey, ns)).To(Succeed())
 		Expect(ns.Labels).To(HaveKeyWithValue(SharedResourcesNamespaceManagedByLabel, SharedResourcesNamespaceManagedByValue))
+		Expect(ns.Labels).To(HaveKeyWithValue(sharedNamespaceEnforceLabel, "restricted"))
+	})
+
+	It("re-reads an AlreadyExists race and reconciles the winning namespace", func() {
+		calls := 0
+		c = fakeclient.NewClientBuilder().WithScheme(scheme.Scheme).WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				calls++
+				winner := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: sharedKey.Name, Labels: map[string]string{"keep": "yes"}}}
+				Expect(c.Create(ctx, winner, opts...)).To(Succeed())
+				return apierrors.NewAlreadyExists(corev1.Resource("namespaces"), sharedKey.Name)
+			},
+		}).Build()
+		Expect(EnsureSharedResourcesNamespace(ctx, c)).To(Succeed())
+		Expect(calls).To(Equal(1))
+		ns := &corev1.Namespace{}
+		Expect(c.Get(ctx, sharedKey, ns)).To(Succeed())
+		Expect(ns.Labels).To(HaveKeyWithValue("keep", "yes"))
+		Expect(ns.Labels).To(HaveKeyWithValue(sharedNamespaceEnforceLabel, "restricted"))
 	})
 
 	It("is idempotent when the namespace already exists", func() {
@@ -119,5 +172,6 @@ var _ = Describe("EnsureSharedResourcesNamespace", func() {
 		ns := &corev1.Namespace{}
 		Expect(c.Get(ctx, sharedKey, ns)).To(Succeed())
 		Expect(ns.Labels).To(HaveKeyWithValue(SharedResourcesNamespaceManagedByLabel, SharedResourcesNamespaceManagedByValue))
+		Expect(ns.Labels).To(HaveKeyWithValue(sharedNamespaceEnforceLabel, "restricted"))
 	})
 })

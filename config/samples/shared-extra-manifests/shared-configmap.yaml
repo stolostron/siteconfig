@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: common-manifests-v1
-  namespace: openshift-siteconfig-resources
+  namespace: siteconfig-shared-resources
 data:
   00-proof.yaml: |
     apiVersion: v1

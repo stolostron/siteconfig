@@ -157,7 +157,7 @@ type ResourceRef struct {
 
 // ExtraManifestReference is a reference to a ConfigMap containing extra manifests to be applied to the cluster.
 // It allows the ConfigMap to reside either in the ClusterInstance's own namespace or in the shared
-// openshift-siteconfig-resources namespace.
+// siteconfig-shared-resources namespace.
 type ExtraManifestReference struct {
 	// Name specifies the name of the ConfigMap.
 	// +kubebuilder:validation:MinLength=1
@@ -167,7 +167,7 @@ type ExtraManifestReference struct {
 	// Namespace specifies the namespace of the ConfigMap.
 	// When omitted, defaults to the namespace of the ClusterInstance.
 	// When specified, must be either the ClusterInstance's own namespace
-	// or the openshift-siteconfig-resources namespace.
+	// or the siteconfig-shared-resources namespace.
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
 }
@@ -489,7 +489,7 @@ type ClusterInstanceSpec struct {
 
 	// ExtraManifestsRefs is list of config map references containing additional manifests to be applied to the cluster.
 	// Each reference may optionally specify a namespace, which must be either the ClusterInstance's own namespace
-	// or the openshift-siteconfig-resources namespace. When omitted, the ClusterInstance's namespace is used.
+	// or the siteconfig-shared-resources namespace. When omitted, the ClusterInstance's namespace is used.
 	// +optional
 	ExtraManifestsRefs []ExtraManifestReference `json:"extraManifestsRefs,omitempty"`
 

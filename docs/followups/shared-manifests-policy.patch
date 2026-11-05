@@ -1,0 +1,11 @@
+--- a/telco-hub/configuration/reference-crs/required/gitops/ztp-policies/extra-manifests-policy.yaml
++++ b/telco-hub/configuration/reference-crs/required/gitops/ztp-policies/extra-manifests-policy.yaml
+@@ -81,6 +81,8 @@
+               spec: {{hub $manifest.spec | toJson hub}}
+           {{hub end hub}}
+           {{hub end hub}}
++          {{hub else hub}}
++          {{hub fail (printf "Missing extra-manifest ConfigMap %s/%s referenced by ClusterInstance %s/%s" $mcl $exManifest.name $mcl $mcl) hub}}
+           {{hub end hub}}
+           {{hub end hub}}
+           {{ $existingMCs := (lookup "machineconfiguration.openshift.io/v1" "MachineConfig" "" "").items }}

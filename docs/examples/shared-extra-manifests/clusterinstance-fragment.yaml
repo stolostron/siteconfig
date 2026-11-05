@@ -1,0 +1,7 @@
+# Fragment only: merge into each complete QE ClusterInstance before installation.
+# Keep any required existing extraManifestsRefs entries.
+# spec.clusterName must equal metadata.namespace for shared references.
+spec:
+  extraManifestsRefs:
+    - name: qe-shared-manifests-v1
+      namespace: siteconfig-shared-resources

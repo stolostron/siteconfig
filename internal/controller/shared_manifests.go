@@ -50,10 +50,10 @@ const (
 	// SharedManifestSync updates) when content is propagated; metadata-only source edits need not advance it.
 	SourceResourceVersionAnnotation = v1alpha1.Group + "/source-resource-version"
 
-	// ProvisionedResourceVersionAnnotation records the resourceVersion of the source ConfigMap at the
+	// InitialResourceVersionAnnotation records the resourceVersion of the source ConfigMap at the
 	// time the managed copy was first created. It is set once and never updated, providing a
 	// copy-creation audit trail. For post-install reference changes this is not the installation version.
-	ProvisionedResourceVersionAnnotation = v1alpha1.Group + "/provisioned-resource-version"
+	InitialResourceVersionAnnotation = v1alpha1.Group + "/initial-resource-version"
 )
 
 // handleCopySharedExtraManifests copies shared extra-manifest ConfigMaps into the ClusterInstance
@@ -125,6 +125,9 @@ func (r *ClusterInstanceReconciler) copySharedExtraManifest(
 		return fmt.Errorf("failed to retrieve shared ExtraManifest %s/%s: %w",
 			v1alpha1.SharedResourcesNamespace, name, err)
 	}
+	if err := ensureSharedSourceBackup(ctx, r.Client, source); err != nil {
+		return err
+	}
 
 	copy := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -157,10 +160,10 @@ func (r *ClusterInstanceReconciler) copySharedExtraManifest(
 		copy.Annotations[SourceNamespaceAnnotation] = v1alpha1.SharedResourcesNamespace
 		copy.Annotations[SourceResourceVersionAnnotation] = source.ResourceVersion
 
-		// provisioned-resource-version is set once at creation and never updated, preserving an
+		// initial-resource-version is set once at creation and never updated, preserving a
 		// copy-creation audit trail even as SharedManifestSync advances source-resource-version.
-		if _, ok := copy.Annotations[ProvisionedResourceVersionAnnotation]; !ok {
-			copy.Annotations[ProvisionedResourceVersionAnnotation] = source.ResourceVersion
+		if _, ok := copy.Annotations[InitialResourceVersionAnnotation]; !ok {
+			copy.Annotations[InitialResourceVersionAnnotation] = source.ResourceVersion
 		}
 
 		// ownerReference enables automatic garbage collection when the ClusterInstance is deleted.
