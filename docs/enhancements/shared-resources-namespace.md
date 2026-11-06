@@ -202,7 +202,7 @@ editable after a cluster has been installed.
   but nothing watches the copies as currently specified, so a hand edit is
   repaired when the source next changes or at the next cache resync — by
   default within ten hours — not when the edit happens.
-  [Open Question 2](#open-questions) proposes adding that watch, which would
+  A future recovery proposal (see [Open Question 2](#open-questions)) would add that watch, which would
   make repair prompt; it would not add detection or reporting, which stay out
   of scope. See
   [Change detection and convergence](#change-detection-and-convergence).
@@ -540,8 +540,8 @@ updating in place.
     condition (see [Name collision handling](#name-collision-handling));
     `ci.Validate` remains read-only. The `ObservedGeneration` pre-empt is
     **not** modified by the copy or propagation paths. If
-    [Open Question 2](#open-questions) is settled as proposed, this controller
-    also gains a narrow "ensure managed copies" step that runs *ahead* of the
+    a future recovery proposal (see [Open Question 2](#open-questions)) is
+    adopted, this controller also gains a narrow "ensure managed copies" step *ahead* of the
     pre-empt and a startup pass over ClusterInstances carrying shared
     references; both are recovery-only, perform no rendering, and do not
     advance `ObservedGeneration`.
@@ -554,7 +554,8 @@ updating in place.
     [Shared ConfigMap update propagation](#shared-configmap-update-propagation)).
   - `SharedManifestSync` (new): Watches ConfigMaps in the shared namespace and
     propagates updates to the cluster-namespace copies. If
-    [Open Question 2](#open-questions) is settled as proposed, it also watches
+    a future recovery proposal (see [Open Question 2](#open-questions)) is
+    adopted, it also watches
     objects carrying the managed-copy label so that deleting or editing a copy
     enqueues the owning ClusterInstance — detection only; the write stays in
     `ClusterInstanceReconciler`.
@@ -1209,7 +1210,7 @@ shared ConfigMap itself — was rejected; see
 | Name collision: shared ConfigMap name matches existing local ConfigMap | Detected read-only during validation — the object lacks the managed-copy label, or its ownerReference UID does not match — so it fails on `ClusterInstanceValidated` instead of overwriting. Propagation repeats the same check before every write and skips on mismatch. |
 | Updated copy does not match the running spoke cluster | After propagation the cluster-namespace ConfigMap holds the new content while the installed cluster still runs the old manifests until the ACM policy and TALM reconcile it. Documented so it is not mistaken for a siteconfig bug. The provenance annotations record the copy's lineage, not what the spoke installed. |
 | Copies not garbage-collected when deletion is paused | ownerReference GC only runs once the ClusterInstance object is removed, which the finalizer gates. On deletion timeout the reconciler applies the pause annotation and the object persists, so its copies persist with it until an administrator intervenes. |
-| Shared ConfigMaps and copies are absent from ACM hub backup | `applyACMBackupLabelToInstallTemplates` labels only `TemplateRefs` ConfigMaps. After a restore the copies are missing and the `ObservedGeneration` pre-empt stops the reconciler recreating them. Labelling the shared ConfigMaps restores the inputs but not the copies, so it is necessary and not sufficient; see Open Question 2. |
+| Shared ConfigMaps are absent from ACM hub backup | `applyACMBackupLabelToInstallTemplates` labels only `TemplateRefs` ConfigMaps, so the shared ConfigMaps must be labelled too or a restored hub has no sources. The copies need no backup: Velero strips `status` and ACM's `restoreStatus` is nil by default, so a restored ClusterInstance recreates them. See [Open Question 2](#open-questions). |
 | Extra-manifests policy does not treat a missing copy as non-compliance | A deleted copy is not recreated for an already-provisioned cluster, so the policy is the only thing that would surface it. If the policy skips a missing ConfigMap rather than reporting non-compliance, the failure is invisible end to end. External to this repository; see Open Question 3. |
 | Downstream CRD incompatibility | Controller copies ConfigMaps locally and strips `namespace` before template rendering, so downstream CRDs see only `name` — identical to current behavior. |
 | ownerReference pattern inconsistency | Scoped to this one use case (copied ConfigMaps). Documented in code. Label-based ownership remains the pattern for template-rendered objects. |
@@ -1272,63 +1273,20 @@ shared ConfigMap itself — was rejected; see
    rejects the update, the staged-rollout workflow must fall back to
    reinstall-based repointing, which recreates the downstream CR instead of
    updating it.
-2. **How should a missing or drifted copy be recovered?** Today a deleted
-   copy is never recreated for an already-provisioned cluster, and a
-   hand-edited copy is repaired only when the source next changes (see
-   [Change detection and convergence](#change-detection-and-convergence)).
+2. **How should a missing or drifted copy be recovered?** Not in this
+   implementation. A deleted copy is not recreated for an already-provisioned
+   cluster, and a hand-edited copy is repaired only when the source next
+   changes. If this needs to be addressed properly, an RFE can be opened and
+   handled as a separate, dedicated proposal.
 
-   The proposed answer is **a startup pass plus a watch on the copies, and no
-   periodic resync**.
-
-   A watch on objects carrying the managed-copy label covers deletion and hand
-   edits while the operator is running, and it is close to free: it adds an
-   event handler to the cluster-wide ConfigMap informer that already exists,
-   with no new informer, no new API-server watch and no RBAC change. The cost
-   is worked through under
-   [Change detection and convergence](#change-detection-and-convergence). It
-   also covers events missed during a watch gap, because on relist client-go's
-   delta queue emits a delete for objects that are no longer present, so a
-   deletion that happened while the connection was broken is still delivered.
-
-   What the watch cannot cover is a copy that is already absent when the
-   operator starts: the object is not in the informer's initial list, so there
-   is no delta and no event. That is the ACM hub restore case, where a
-   restored ClusterInstance comes back with `ObservedGeneration ==
-   Generation`, nothing recreates its copies, and the day-2 policy has nothing
-   to read. That depends on the hub backup restoring the CR's `status`, which
-   is cluster-backup-operator behaviour and cannot be confirmed from this
-   repository; if a restore cleared `status`, the ordinary reconcile would
-   recreate the copies and only the drift case would remain. A startup pass closes it — after cache sync, list the
-   ClusterInstances carrying shared references through the field index and
-   verify each copy exists. That is one cached list plus one cached read per
-   reference, once per leader term, with writes only for the copies that are
-   genuinely missing. It is a boot-time check, not a sweep. It must be cheap
-   and idempotent, because `LeaderElectionReleaseOnCancel` is enabled and a
-   leader handover re-runs it.
-
-   A **purpose-built periodic sweep is not proposed**, which is a narrower
-   claim than "no periodic behaviour at all". One already exists for free: the
-   manager's informer resync defaults to ten hours and redelivers every cached
-   object as an update, which content comparison turns into a drift check for
-   every copy that exists. That is the backstop referred to elsewhere in this
-   document, and it is why drift converges on a ten-hour bound even today. A
-   watch replaces that bound with prompt repair. An *additional* sweep over
-   ClusterInstances would re-check only what the watch already observes; it
-   reads from the cache so it costs no API traffic, but at fleet scale it is a
-   recurring walk over every ClusterInstance and every copy, and a recurring
-   load that scale testing would then have to characterise — for a failure
-   mode that only arises while the operator is not running, which is precisely
-   what the startup pass covers.
-
-   What still has to be settled before `implementable` is not whether to
-   recover but where the write lives. Recreation must not move into
-   `SharedManifestSync`, so it needs a narrow "ensure managed copies" step in
-   `ClusterInstanceReconciler` ahead of the `ObservedGeneration` pre-empt, and
-   the watch itself must not be added with `Watches()` on a controller that
-   applies a controller-wide `WithEventFilter` — though `WatchesRawSource` is
-   documented as bypassing that filter and would work. Making the copies
-   immutable is not an
-   alternative; see
+   The exposure is narrower than it looks: unhold, reinstall and hub restore
+   all clear the `ObservedGeneration` pre-empt and re-run the copy step, so
+   the residual case is a copy lost on a provisioned cluster that nothing
+   subsequently touches. There, it is **neither detected nor recovered** —
+   which makes [Open Question 3](#open-questions) a prerequisite rather than
+   a parallel concern, since the extra-manifests policy is then the only
+   thing that could surface the loss. Until then, the manual path and its
+   cost are described under
    [Change detection and convergence](#change-detection-and-convergence).
 3. **How does the extra-manifests ACM policy select and evaluate the
    cluster-namespace copy?** Two sub-questions, neither answerable from this
@@ -1402,13 +1360,13 @@ shared ConfigMap itself — was rejected; see
     label-only update on the ClusterInstance enters `Reconcile` but is
     pre-empted, and the copy is **not** recreated. This asserts the behaviour
     as currently specified; it is superseded by the ensure-copies case below
-    if [Open Question 2](#open-questions) is settled as proposed.
+    under a future recovery proposal; see [Open Question 2](#open-questions).
   - Copy deleted, then an allow-listed spec path is edited
     (`spec.extraAnnotations` under a kind no template renders) — the
     generation advances, the reconcile runs in full, and the copy is
     recreated with a fresh `initial-resource-version`.
-  - **Conditional on [Open Question 2](#open-questions) being settled as
-    proposed**, and superseding the previous case once it is: copy absent on
+  - **Conditional on a future recovery proposal
+    (see [Open Question 2](#open-questions))**, superseding the previous case: copy absent on
     an already-provisioned ClusterInstance — the ensure-copies step runs ahead
     of the pre-empt and recreates it, without rendering templates and without
     advancing `ObservedGeneration`.
@@ -1492,15 +1450,15 @@ shared ConfigMap itself — was rejected; see
   copies are reclaimed in the repointed namespaces only.
 - **Hub restore ([Open Question 2](#open-questions)):** restore a hub whose
   ClusterInstances reference shared ConfigMaps but whose cluster-namespace
-  copies are absent, and confirm the copies are recreated **without** any
-  ClusterInstance generation change — that is, with
-  `Status.ObservedGeneration == Generation` throughout. Generation equality
-  is not sufficient on its own: it shows only that the spec did not change,
-  not that template rendering and Server-Side Apply were skipped. Also assert
-  that every object listed in `Status.ManifestsRendered` keeps its
-  `resourceVersion`, and that only the absent copies are created while copies
-  that still exist keep theirs. A copy watch alone cannot satisfy this test,
-  since an absent object generates no event.
+  copies are absent. First assert the precondition this now relies on — the
+  restored ClusterInstance arrives with `status` empty, so
+  `Status.ObservedGeneration` is zero against a non-zero
+  `metadata.generation` and the pre-empt does not fire. Then confirm ordinary
+  reconciliation recreates the copies, with no recovery machinery involved.
+  Run the same scenario a second time with `ClusterInstance` added to the ACM
+  `Restore`'s `restoreStatus.includedResources`, which preserves `status` and
+  reinstates the gap: there the copies must remain absent, which is the
+  documented limitation rather than a defect.
 - **Drift with no source event ([Open Question 2](#open-questions)):**
   hand-edit a cluster-namespace copy, leave the shared ConfigMap untouched,
   and confirm the chosen recovery path repairs it. The propagation tests above
@@ -1535,11 +1493,15 @@ shared ConfigMap itself — was rejected; see
   extra-manifests policy reports a missing copy as non-compliant and
   correlates from the ClusterInstance to the ConfigMap its references name —
   or a story exists on this epic to make it do both
-- [ ] **[Open Question 2](#open-questions) resolved**: a recovery path chosen
-  that covers both failure modes it names — a hub-restore test confirming
-  absent copies return without a ClusterInstance generation change, and a
-  test confirming a hand-edited copy is repaired with no source-ConfigMap
-  event
+- [ ] **[Open Question 2](#open-questions) scoped out**: automatic recovery
+  of a missing or drifted copy is not in this implementation. The limitation
+  is stated in user-facing documentation as "neither detected nor
+  recovered", and the manual path is documented with its `ForceOwnership`
+  side effects. A hub-restore test confirms the paths that *do* self-heal: a
+  restored ClusterInstance reconciles and recreates its copies because
+  `status` is not restored by default, and releasing a held installation
+  does the same. If the limitation proves unacceptable in practice, an RFE
+  can be opened to address recovery in a dedicated proposal
 - [ ] Documented in user-facing operator documentation covering shared
   namespace setup, `ExtraManifestsRefs` namespace field usage, the staged
   rollout workflow, the interaction with the extra-manifests ACM policy, and
