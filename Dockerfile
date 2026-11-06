@@ -20,7 +20,7 @@ COPY api/ api/
 COPY internal/ internal/
 
 # Build the binaries
-RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} GO111MODULE=on \
+RUN CGO_ENABLED=1 GOEXPERIMENT=strictfipsruntime GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} GO111MODULE=on \
   go build -mod=vendor -a -o build/siteconfig-manager cmd/main.go
 
 #####################################################################################################
