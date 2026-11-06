@@ -254,6 +254,11 @@ func (in *ClusterInstanceStatus) DeepCopyInto(out *ClusterInstanceStatus) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.ManagedClusterRef != nil {
+		in, out := &in.ManagedClusterRef, &out.ManagedClusterRef
+		*out = new(v1.LocalObjectReference)
+		**out = **in
+	}
 	if in.ManifestsRendered != nil {
 		in, out := &in.ManifestsRendered, &out.ManifestsRendered
 		*out = make([]ManifestReference, len(*in))

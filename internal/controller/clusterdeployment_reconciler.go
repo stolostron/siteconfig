@@ -78,6 +78,13 @@ func (r *ClusterDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return requeueWithError(err)
 	}
 
+	// Skip ClusterDeployment reconciliation for HostedControlPlane clusters
+	// as they are managed by ManagedClusterReconciler instead
+	if clusterInstance.Spec.ClusterType == v1alpha1.ClusterTypeHostedControlPlane {
+		log.Info("Skipping ClusterDeployment reconciliation for HostedControlPlane cluster")
+		return doNotRequeue(), nil
+	}
+
 	oldStatus := clusterInstance.Status.DeepCopy()
 	patch := client.MergeFrom(clusterInstance.DeepCopy())
 
