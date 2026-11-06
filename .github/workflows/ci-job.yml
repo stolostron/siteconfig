@@ -34,3 +34,6 @@ jobs:
 
     - name: Run CI job
       run: make ci-job
+
+    - name: Test CRD against a local API server
+      run: make test-integration
