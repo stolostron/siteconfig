@@ -52,6 +52,7 @@ import (
 	cierrors "github.com/stolostron/siteconfig/internal/controller/errors"
 	"github.com/stolostron/siteconfig/internal/controller/reinstall"
 	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
+	hcp_templates "github.com/stolostron/siteconfig/internal/templates/hosted-cluster"
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 )
 
@@ -379,6 +380,7 @@ func (r *ClusterInstanceReconciler) applyACMBackupLabelToInstallTemplates(
 
 	defaultInstallTemplates := []string{
 		ai_templates.ClusterLevelInstallTemplates, ai_templates.NodeLevelInstallTemplates,
+		hcp_templates.ClusterLevelInstallTemplates, hcp_templates.NodeLevelInstallTemplates,
 		ibi_templates.ClusterLevelInstallTemplates, ibi_templates.NodeLevelInstallTemplates,
 	}
 
