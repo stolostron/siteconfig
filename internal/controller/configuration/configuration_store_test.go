@@ -25,12 +25,14 @@ var _ = Describe("NewConfigurationStore", func() {
 	It("creates a new ConfigurationStore object with the given Configuration object", func() {
 		testConfigs := []*Configuration{
 			{
-				allowReinstalls:         false,
-				maxConcurrentReconciles: 5,
+				allowReinstalls:                false,
+				maxConcurrentReconciles:        5,
+				strictSecretPresenceValidation: false,
 			},
 			{
-				allowReinstalls:         true,
-				maxConcurrentReconciles: 1,
+				allowReinstalls:                true,
+				maxConcurrentReconciles:        1,
+				strictSecretPresenceValidation: true,
 			},
 			NewDefaultConfiguration(),
 		}
@@ -51,29 +53,34 @@ var _ = Describe("NewConfigurationStore", func() {
 var _ = Describe("ConfigurationStore.UpdateConfiguration", func() {
 	It("successfully updates the Configuration object from the ConfigurationStore with the given data map", func() {
 		config := &Configuration{
-			allowReinstalls:         true,
-			maxConcurrentReconciles: 1,
+			allowReinstalls:                true,
+			maxConcurrentReconciles:        1,
+			strictSecretPresenceValidation: false,
 		}
 		configStore, err := NewConfigurationStore(config)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(configStore.GetAllowReinstalls()).To(BeTrue())
 		Expect(configStore.GetMaxConcurrentReconciles()).To(Equal(1))
+		Expect(configStore.GetStrictSecretPresenceValidation()).To(BeFalse())
 
 		data := map[string]string{
-			"allowReinstalls":         "false",
-			"maxConcurrentReconciles": "1",
+			"allowReinstalls":                "false",
+			"maxConcurrentReconciles":        "1",
+			"strictSecretPresenceValidation": "true",
 		}
 
 		err = configStore.UpdateConfiguration(data)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(configStore.GetAllowReinstalls()).To(BeFalse())
 		Expect(configStore.GetMaxConcurrentReconciles()).To(Equal(1))
+		Expect(configStore.GetStrictSecretPresenceValidation()).To(BeTrue())
 
 		data["maxConcurrentReconciles"] = "10"
 		err = configStore.UpdateConfiguration(data)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(configStore.GetAllowReinstalls()).To(BeFalse())
 		Expect(configStore.GetMaxConcurrentReconciles()).To(Equal(10))
+		Expect(configStore.GetStrictSecretPresenceValidation()).To(BeTrue())
 	})
 })
