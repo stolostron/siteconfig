@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -27,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	bmo "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	k8syaml "sigs.k8s.io/yaml"
@@ -316,10 +318,21 @@ func toYaml(v interface{}) string {
 	return strings.TrimSuffix(string(data), "\n")
 }
 
+func defaultNetworkInterfaceNamespaces(interfaces []bmo.NetworkInterface, namespace string) []bmo.NetworkInterface {
+	result := slices.Clone(interfaces)
+	for i := range result {
+		if result[i].HostNetworkAttachment.Namespace == "" {
+			result[i].HostNetworkAttachment.Namespace = namespace
+		}
+	}
+	return result
+}
+
 // funcMap provides additional useful functions for template rendering
 func funcMap() template.FuncMap {
 	f := sprig.TxtFuncMap()
 	f["toYaml"] = toYaml
+	f["defaultNetworkInterfaceNamespaces"] = defaultNetworkInterfaceNamespaces
 	return f
 }
 

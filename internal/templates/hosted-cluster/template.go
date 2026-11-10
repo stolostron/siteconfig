@@ -15,6 +15,8 @@ See the License for the specific language governing permissions and
 
 package hostedcluster
 
+import "github.com/stolostron/siteconfig/internal/templates"
+
 // Default hosted cluster install template names
 const (
 	ClusterLevelInstallTemplates = "hcp-cluster-templates-v1"
@@ -314,7 +316,13 @@ spec:
 {{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:
 {{ .SpecialVars.CurrentNode.RootDeviceHints | toYaml | indent 4 }}
+{{ end }}
+{{ with .SpecialVars.CurrentNode.NetworkInterfaces }}
+  networkInterfaces:
+{{ defaultNetworkInterfaceNamespaces . $.Spec.ClusterName | toYaml | indent 4 }}
 {{ end }}`
+
+const HostNetworkAttachment = templates.HostNetworkAttachment
 
 func GetClusterTemplates() map[string]string {
 	data := make(map[string]string)
@@ -322,6 +330,7 @@ func GetClusterTemplates() map[string]string {
 	data["SshPubKeySecret"] = SshPubKeySecret
 	data["ManagedCluster"] = ManagedCluster
 	data["KlusterletAddonConfig"] = KlusterletAddonConfig
+	data["HostNetworkAttachment"] = HostNetworkAttachment
 	return data
 }
 

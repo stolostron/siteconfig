@@ -24,13 +24,16 @@ import (
 	"maps"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/go-logr/logr"
+	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	"github.com/wI2L/jsondiff"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const maxK8sNameLength = 253
@@ -131,6 +134,7 @@ var (
 		"bootMACAddress":         "/nodes/*/bootMACAddress",
 		"nodeNetwork/interfaces": "/nodes/*/nodeNetwork/interfaces/*/macAddress",
 		"rootDeviceHints":        "/nodes/*/rootDeviceHints",
+		"networkInterfaces":      "/nodes/*/networkInterfaces",
 	}
 
 	// Cluster-level paths (always allowed)
@@ -154,6 +158,7 @@ var (
 	// Additional cluster-level paths allowed during reinstall
 	ReinstallClusterPaths = []string{
 		"/reinstall",
+		"/hostNetworkAttachmentTemplates",
 	}
 )
 
@@ -194,6 +199,16 @@ func ValidateClusterInstance(clusterInstance *ClusterInstance) error {
 	// Validate control-plane agent count.
 	if err := validateControlPlaneAgentCount(clusterInstance); err != nil {
 		return fmt.Errorf("control-plane agent validation failed: %w", err)
+	}
+
+	// Validate HostNetworkAttachmentTemplates.
+	if err := validateHostNetworkAttachmentTemplates(clusterInstance); err != nil {
+		return fmt.Errorf("host network attachment validation failed: %w", err)
+	}
+
+	// Validate network interface attachments.
+	if err := validateNetworkInterfaces(clusterInstance); err != nil {
+		return fmt.Errorf("network attachment validation failed: %w", err)
 	}
 
 	return nil
@@ -962,4 +977,125 @@ func getReinstallPermissibleFields() []string {
 // getReinstallNodePaths returns JSON paths from ReinstallPermissions
 func getReinstallNodePaths() []string {
 	return slices.Collect(maps.Values(ReinstallPermissions))
+}
+
+// validateHostNetworkAttachmentTemplates validates HostNetworkAttachment templates in the cluster spec.
+func validateHostNetworkAttachmentTemplates(clusterInstance *ClusterInstance) error {
+	names := make(map[string]bool)
+	for idx, hna := range clusterInstance.Spec.HostNetworkAttachmentTemplates {
+		if nameErrors := validation.IsDNS1123Subdomain(hna.Name); len(nameErrors) > 0 {
+			return fmt.Errorf("hostNetworkAttachmentTemplates[%d]: invalid name %q: %s",
+				idx, hna.Name, strings.Join(nameErrors, "; "))
+		}
+
+		// Check for duplicate names
+		if names[hna.Name] {
+			return fmt.Errorf("hostNetworkAttachmentTemplates[%d]: duplicate name %q", idx, hna.Name)
+		}
+		names[hna.Name] = true
+
+		// The embedded CRD markers do not include BMO's webhook validation.
+		// Treat an omitted mode as access without changing the submitted spec.
+		if (hna.Spec.Mode == "" || hna.Spec.Mode == bmh_v1alpha1.SwitchportModeAccess) && len(hna.Spec.AllowedVLANs) > 0 {
+			return fmt.Errorf(
+				"hostNetworkAttachmentTemplates[%d].spec.allowedVLANs: cannot be specified for access mode", idx)
+		}
+		for vlanIdx, vlan := range hna.Spec.AllowedVLANs {
+			if err := validateAllowedVLANEntry(vlan); err != nil {
+				return fmt.Errorf("hostNetworkAttachmentTemplates[%d].spec.allowedVLANs[%d] %q: %w",
+					idx, vlanIdx, vlan, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// validateAllowedVLANEntry mirrors BMO's webhook rules for VLAN IDs and ranges.
+func validateAllowedVLANEntry(entry string) error {
+	before, after, hasRange := strings.Cut(entry, "-")
+	start, err := strconv.Atoi(before)
+	if err != nil {
+		return fmt.Errorf("invalid VLAN ID: %w", err)
+	}
+	if start < 1 || start > 4094 {
+		return fmt.Errorf("allowed VLAN ID %d out of range 1-4094", start)
+	}
+	if !hasRange {
+		return nil
+	}
+
+	end, err := strconv.Atoi(after)
+	if err != nil {
+		return fmt.Errorf("invalid range end: %w", err)
+	}
+	if end < 1 || end > 4094 {
+		return fmt.Errorf("allowed VLAN ID %d out of range 1-4094", end)
+	}
+	if start >= end {
+		return fmt.Errorf("range start (%d) must be less than end (%d)", start, end)
+	}
+	return nil
+}
+
+// validateNetworkInterfaces validates network interface selectors and their HostNetworkAttachment references
+// in node specs.
+func validateNetworkInterfaces(clusterInstance *ClusterInstance) error {
+	// Build a map of SiteConfig-managed attachment names. Node bindings may also
+	// refer to external attachments, but those references must include a
+	// namespace so that ownership and lookup are unambiguous.
+	managedAttachments := make(map[string]bool)
+	for _, hna := range clusterInstance.Spec.HostNetworkAttachmentTemplates {
+		managedAttachments[hna.Name] = true
+	}
+
+	// Validate each node's network interfaces.
+	for nodeIdx, node := range clusterInstance.Spec.Nodes {
+		seen := make(map[string]bool, len(node.NetworkInterfaces))
+		for interfaceIdx, networkInterface := range node.NetworkInterfaces {
+			// BMO's NetworkInterface type makes both selectors optional; require
+			// exactly one non-empty selector in ClusterInstance.
+			hasName := networkInterface.Name != ""
+			hasMAC := networkInterface.MACAddress != ""
+
+			if hasName == hasMAC {
+				return fmt.Errorf(
+					"nodes[%d].networkInterfaces[%d]: exactly one of name or macAddress must be set",
+					nodeIdx, interfaceIdx)
+			}
+
+			// Match BMO's case-insensitive selector comparison within each host.
+			key := strings.ToLower(networkInterface.GetKey())
+			if seen[key] {
+				return fmt.Errorf("nodes[%d].networkInterfaces[%d]: duplicate interface selector for %q",
+					nodeIdx, interfaceIdx, networkInterface.GetKey())
+			}
+			seen[key] = true
+
+			// Validate the BMO HostNetworkAttachmentRef.
+			refName := networkInterface.HostNetworkAttachment.Name
+			if nameErrors := validation.IsDNS1123Subdomain(refName); len(nameErrors) > 0 {
+				return fmt.Errorf(
+					"nodes[%d].networkInterfaces[%d]: hostNetworkAttachment.name %q is invalid: %s",
+					nodeIdx, interfaceIdx, refName, strings.Join(nameErrors, "; "))
+			}
+
+			namespace := networkInterface.HostNetworkAttachment.Namespace
+			if namespace != "" {
+				if namespaceErrors := validation.IsDNS1123Label(namespace); len(namespaceErrors) > 0 {
+					return fmt.Errorf(
+						"nodes[%d].networkInterfaces[%d]: hostNetworkAttachment.namespace %q is invalid: %s",
+						nodeIdx, interfaceIdx, namespace, strings.Join(namespaceErrors, "; "))
+				}
+			}
+
+			if namespace == "" && !managedAttachments[refName] {
+				return fmt.Errorf(
+					"nodes[%d].networkInterfaces[%d]: external hostNetworkAttachment %q must specify a namespace",
+					nodeIdx, interfaceIdx, refName)
+			}
+		}
+	}
+
+	return nil
 }
