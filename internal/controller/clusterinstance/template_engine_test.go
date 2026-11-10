@@ -18,6 +18,8 @@ package clusterinstance
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"testing"
@@ -49,6 +51,9 @@ func isEqualRenderedObject(got, expected []RenderedObject) bool {
 	return reflect.DeepEqual(got, expected)
 }
 
+// TestTemplateEngineRender checks template expansion and the complete decoded
+// output for representative resources, including multiple documents in one template.
+// It also covers template errors and conditions that produce no output.
 func TestTemplateEngineRender(t *testing.T) {
 
 	NetConfig := GetMockNetConfig()
@@ -125,7 +130,7 @@ func TestTemplateEngineRender(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    map[string]interface{}
+		want    []map[string]interface{}
 		wantErr bool
 	}{
 		{
@@ -138,6 +143,23 @@ func TestTemplateEngineRender(t *testing.T) {
 			want:    nil,
 			wantErr: true,
 		},
+		{
+			name:    "Test with template execution error",
+			args:    args{templateType: "InvalidField", templateStr: "{{ .Spec.doesNotExist }}", data: TestData},
+			wantErr: true,
+		},
+		{
+			name: "Test with empty output",
+			args: args{templateType: "Empty", templateStr: "", data: TestData},
+		},
+		{
+			name: "Test with whitespace-only output",
+			args: args{templateType: "Whitespace", templateStr: " \t\n", data: TestData},
+		},
+		{
+			name: "Test with false conditional output",
+			args: args{templateType: "Conditional", templateStr: "{{ if .Spec.HoldInstallation }}apiVersion: v1{{ end }}", data: TestData},
+		},
 
 		{
 			name: "Test with a valid AgentClusterInstall-like template",
@@ -146,7 +168,7 @@ func TestTemplateEngineRender(t *testing.T) {
 				templateStr:  GetMockAgentClusterInstallTemplate(),
 				data:         TestData,
 			},
-			want: map[string]interface{}{
+			want: []map[string]interface{}{{
 				"apiVersion": "extensions.hive.openshift.io/v1beta1",
 				"kind":       "AgentClusterInstall",
 				"metadata": map[string]interface{}{
@@ -168,7 +190,7 @@ func TestTemplateEngineRender(t *testing.T) {
 						"machineNetwork": []interface{}{map[string]interface{}{"cidr": "203.0.113.0/24"}},
 						"serviceNetwork": []interface{}{"203.0.113.0/24"}},
 					"provisionRequirements": map[string]interface{}{"controlPlaneAgents": 1, "workerAgents": 0, "arbiterAgents": 0},
-					"sshPublicKey":          "ssh-rsa"}},
+					"sshPublicKey":          "ssh-rsa"}}},
 			wantErr: false,
 		},
 
@@ -179,7 +201,7 @@ func TestTemplateEngineRender(t *testing.T) {
 				templateStr:  GetMockNMStateConfigTemplate(),
 				data:         TestData,
 			},
-			want: map[string]interface{}{
+			want: []map[string]interface{}{{
 				"apiVersion": "agent-install.openshift.io/v1beta1",
 				"kind":       "NMStateConfig",
 				"metadata": map[string]interface{}{
@@ -192,7 +214,7 @@ func TestTemplateEngineRender(t *testing.T) {
 					"config":     NetConfig.Config,
 					"interfaces": NetConfig.GetInterfaces(),
 				},
-			},
+			}},
 			wantErr: false,
 		},
 
@@ -203,7 +225,7 @@ func TestTemplateEngineRender(t *testing.T) {
 				templateStr:  GetMockImageClusterInstallTemplate(),
 				data:         TestData,
 			},
-			want: map[string]interface{}{
+			want: []map[string]interface{}{{
 				"apiVersion": "extensions.hive.openshift.io/v1alpha1",
 				"kind":       "ImageClusterInstall",
 				"metadata": map[string]interface{}{
@@ -229,7 +251,7 @@ func TestTemplateEngineRender(t *testing.T) {
 					"machineNetwork":   "203.0.113.0/24",
 					"bareMetalHostRef": map[string]interface{}{"name": "node1", "namespace": "site-sno-du-1"},
 					"sshKey":           "ssh-rsa",
-				}},
+				}}},
 			wantErr: false,
 		},
 
@@ -253,7 +275,7 @@ metadata:
 `,
 				data: TestData,
 			},
-			want: map[string]interface{}{
+			want: []map[string]interface{}{{
 				"apiVersion": "metal3.io/v1alpha1",
 				"kind":       "BareMetalHost",
 				"metadata": map[string]interface{}{
@@ -267,7 +289,7 @@ metadata:
 					"name":      "node1",
 					"namespace": "site-sno-du-1",
 				},
-			},
+			}},
 			wantErr: false,
 		},
 
@@ -278,7 +300,7 @@ metadata:
 				templateStr:  GetMockNodePoolTemplate(),
 				data:         TestData,
 			},
-			want: map[string]interface{}{
+			want: []map[string]interface{}{{
 				"apiVersion": "hypershift.openshift.io/v1beta1",
 				"kind":       "NodePool",
 				"metadata": map[string]interface{}{
@@ -293,6 +315,77 @@ metadata:
 					"replicas":    1,
 					"release": map[string]interface{}{
 						"image": "test-image",
+					},
+				},
+			}},
+			wantErr: false,
+		},
+
+		{
+			name: "Test with multi-document YAML template",
+			args: args{
+				templateType: "MultiDoc",
+				templateStr: `---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Spec.ClusterName }}-config1"
+  namespace: "{{ .Spec.ClusterName }}"
+data:
+  key1: value1
+---
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Spec.ClusterName }}-config2"
+  namespace: "{{ .Spec.ClusterName }}"
+data:
+  key2: value2
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: "{{ .Spec.ClusterName }}-secret"
+  namespace: "{{ .Spec.ClusterName }}"
+stringData:
+  password: "secret123"
+---
+`,
+				data: TestData,
+			},
+			want: []map[string]interface{}{
+				{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]interface{}{
+						"name":      "site-sno-du-1-config1",
+						"namespace": "site-sno-du-1",
+					},
+					"data": map[string]interface{}{
+						"key1": "value1",
+					},
+				},
+				{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]interface{}{
+						"name":      "site-sno-du-1-config2",
+						"namespace": "site-sno-du-1",
+					},
+					"data": map[string]interface{}{
+						"key2": "value2",
+					},
+				},
+				{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]interface{}{
+						"name":      "site-sno-du-1-secret",
+						"namespace": "site-sno-du-1",
+					},
+					"stringData": map[string]interface{}{
+						"password": "secret123",
 					},
 				},
 			},
@@ -314,6 +407,70 @@ metadata:
 			}
 		})
 	}
+}
+
+// TestTemplateEngineRenderDocumentErrors checks that decoding and validation errors
+// identify the template and failing Decode call, counting skipped documents too.
+// Decoder errors must omit rendered values so callers can safely log them.
+func TestTemplateEngineRenderDocumentErrors(t *testing.T) {
+	const validDocument = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: valid\n"
+	// Four skipped documents: empty, comment-only, and both YAML null spellings.
+	const skippedDocuments = "---\n---\n# comment\n---\nnull\n---\n~\n---\n"
+	positions := []struct {
+		name   string
+		prefix string
+		index  int
+	}{
+		{name: "first document", index: 1},
+		{name: "after valid document", prefix: validDocument + "---\n", index: 2},
+		{name: "after skipped documents", prefix: skippedDocuments, index: 5},
+		{name: "after valid and skipped documents", prefix: validDocument + skippedDocuments, index: 6},
+	}
+	tests := []struct {
+		name       string
+		document   string
+		diagnostic string
+		decode     bool
+	}{
+		{name: "missing apiVersion", document: "kind: ConfigMap\nmetadata: {name: invalid}\n", diagnostic: "missing apiVersion"},
+		{name: "empty mapping", document: "{}\n", diagnostic: "missing apiVersion"},
+		{name: "invalid apiVersion", document: "apiVersion: 1\nkind: ConfigMap\nmetadata: {name: invalid}\n", diagnostic: "missing apiVersion"},
+		{name: "missing kind", document: "apiVersion: v1\nmetadata: {name: invalid}\n", diagnostic: "missing kind"},
+		{name: "invalid kind", document: "apiVersion: v1\nkind: []\nmetadata: {name: invalid}\n", diagnostic: "missing kind"},
+		{name: "missing metadata", document: "apiVersion: v1\nkind: ConfigMap\n", diagnostic: "missing metadata"},
+		{name: "invalid metadata", document: "apiVersion: v1\nkind: ConfigMap\nmetadata: invalid\n", diagnostic: "missing metadata"},
+		{name: "missing name", document: "apiVersion: v1\nkind: ConfigMap\nmetadata: {}\n", diagnostic: "missing metadata.name"},
+		{name: "invalid name", document: "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: 1}\n", diagnostic: "missing metadata.name"},
+		{name: "malformed YAML", document: "apiVersion: [v1\n", decode: true},
+		{name: "scalar", document: "scalar\n", decode: true},
+		{name: "sequence", document: "- item\n", decode: true},
+	}
+	for _, position := range positions {
+		for _, tt := range tests {
+			t.Run(position.name+"/"+tt.name, func(t *testing.T) {
+				g := NewWithT(t)
+				_, err := NewTemplateEngine().render("resources.yaml", position.prefix+tt.document, nil)
+				g.Expect(err).To(HaveOccurred(), "reject %s at %s", tt.name, position.name)
+				g.Expect(err.Error()).To(ContainSubstring(fmt.Sprintf("YAML document %d", position.index)), "document numbering should count skipped documents")
+				g.Expect(err.Error()).To(ContainSubstring("template resources.yaml"), "the error should identify the failing template key")
+				if tt.decode {
+					g.Expect(err).To(MatchError(fmt.Sprintf("failed to unmarshal YAML document %d in template resources.yaml", position.index)), "decoder errors should expose only the document location")
+					g.Expect(errors.Unwrap(err)).To(BeNil(), "raw decoder errors must not expose rendered values through unwrapping")
+				} else {
+					g.Expect(errors.Unwrap(err)).NotTo(BeNil(), "validation errors should retain the missing-field diagnostic")
+					g.Expect(err.Error()).To(Equal(fmt.Sprintf("failed to validate YAML document %d: %s in template resources.yaml", position.index, tt.diagnostic)), "validation errors should identify the invalid field and document")
+				}
+			})
+		}
+	}
+	t.Run("decoder read-ahead reports the failing Decode call", func(t *testing.T) {
+		g := NewWithT(t)
+		_, err := NewTemplateEngine().render("resources.yaml", validDocument+"---\n@invalid\n", nil)
+		g.Expect(err).To(HaveOccurred(), "decoder read-ahead should detect malformed content in the next document")
+		g.Expect(err.Error()).To(ContainSubstring("YAML document 1 in template resources.yaml"), "the index should identify the failing Decode call")
+		g.Expect(err).To(MatchError("failed to unmarshal YAML document 1 in template resources.yaml"), "read-ahead errors should still omit rendered content")
+		g.Expect(errors.Unwrap(err)).To(BeNil(), "the raw read-ahead error must not be exposed through unwrapping")
+	})
 }
 
 var _ = Describe("renderTemplates", func() {
@@ -393,6 +550,19 @@ var _ = Describe("renderTemplates", func() {
 		Expect(err).To(MatchError(ContainSubstring("field doesNotExist")))
 	})
 
+	DescribeTable("rejects the entire template when a later document fails", func(invalidDocument string) {
+		const validDocument = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: valid\n"
+		objects, err := tmplEngine.renderManifestFromTemplate(ctx, c, testLogger, TestClusterInstance, nil,
+			"cluster-level", "resources.yaml", validDocument+"---\n"+invalidDocument)
+		Expect(err).To(HaveOccurred(), "an invalid later document should reject the entire template")
+		Expect(err.Error()).To(ContainSubstring("YAML document 2"), "the error should identify the invalid later document")
+		Expect(err.Error()).To(ContainSubstring("template resources.yaml"), "the error should identify the failing template key")
+		Expect(objects).To(BeEmpty(), "the valid first document must not escape a rejected template")
+	},
+		Entry("malformed YAML", "apiVersion: [v1\n"),
+		Entry("missing required field", "apiVersion: v1\nkind: ConfigMap\n"),
+	)
+
 	It("suppresses rendering manifests at cluster-level", func() {
 
 		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
@@ -452,6 +622,66 @@ var _ = Describe("renderTemplates", func() {
 		}
 
 		Expect(isEqualRenderedObject(got, expected)).To(BeTrue())
+	})
+
+	It("processes each document in a multi-document template", func() {
+		TestClusterInstance.Spec.TemplateRefs = []v1alpha1.TemplateRef{
+			{Name: "cluster-level", Namespace: "test"},
+		}
+
+		clusterTemplates := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "cluster-level", Namespace: "test"},
+			Data: map[string]string{
+				"MultiDoc": `---
+apiVersion: test.io/v1
+kind: TestRendered
+metadata:
+  name: rendered
+  namespace: "{{ .Spec.ClusterName }}"
+---
+apiVersion: test.io/v1
+kind: TestPruned
+metadata:
+  name: pruned
+  namespace: "{{ .Spec.ClusterName }}"
+---
+apiVersion: test.io/v1
+kind: TestSuppressed
+metadata:
+  name: suppressed
+  namespace: "{{ .Spec.ClusterName }}"
+---
+`,
+			},
+		}
+		Expect(c.Create(ctx, clusterTemplates)).To(Succeed(), "create the template containing render, prune, and suppress candidates")
+
+		TestClusterInstance.Spec.PruneManifests = []v1alpha1.ResourceRef{{
+			APIVersion: "test.io/v1",
+			Kind:       "TestPruned",
+		}}
+		TestClusterInstance.Spec.SuppressedManifests = []string{"TestSuppressed"}
+		TestClusterInstance.Spec.ExtraLabels = map[string]map[string]string{
+			"TestRendered": {"test-label": "test-value"},
+		}
+
+		got, err := tmplEngine.renderTemplates(ctx, c, testLogger, TestClusterInstance, nil)
+		Expect(err).ToNot(HaveOccurred(), "a stream with mixed render, prune, and suppress actions should succeed")
+		Expect(got).To(HaveLen(3), "each document should produce an independently processed resource")
+
+		objectsByKind := make(map[string]RenderedObject, len(got))
+		for _, object := range got {
+			objectsByKind[object.GetKind()] = object
+		}
+
+		rendered := objectsByKind["TestRendered"]
+		Expect(rendered.action).To(Equal(actionRender), "the unselected kind should retain the default render action")
+		Expect(rendered.GetLabels()[OwnedByLabel]).To(Equal(GenerateOwnedByLabelValue(
+			TestClusterInstance.Namespace, TestClusterInstance.Name)), "the rendered document should receive ClusterInstance ownership")
+		Expect(rendered.GetLabels()["test-label"]).To(Equal("test-value"), "the rendered document should receive user-specified labels")
+
+		Expect(objectsByKind["TestPruned"].action).To(Equal(actionPrune), "pruning should affect only the selected document kind")
+		Expect(objectsByKind["TestSuppressed"].action).To(Equal(actionSuppress), "suppression should affect only the selected document kind")
 	})
 
 	It("suppresses rendering manifests at node-level", func() {
