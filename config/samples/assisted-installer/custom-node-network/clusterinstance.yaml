@@ -1,0 +1,50 @@
+# Create the namespace, pull secret and BMC secret first. Replace the image-set
+# reference, BMC details, disk, SSH key and addresses for your environment.
+# Replace BOTH templateRefs namespaces with the operator namespace on your hub.
+apiVersion: siteconfig.open-cluster-management.io/v1alpha1
+kind: ClusterInstance
+metadata:
+  name: example-network-sno
+  namespace: example-network-sno
+spec:
+  clusterName: example-network-sno
+  clusterType: SNO
+  baseDomain: example.com
+  clusterImageSetNameRef: openshift-4.20
+  pullSecretRef:
+    name: pull-secret
+  sshPublicKey: "ssh-rsa REPLACE_ME"
+  holdInstallation: true
+  networkType: OVNKubernetes
+  machineNetwork:
+  - cidr: 192.0.2.0/24
+  clusterNetwork:
+  - cidr: 10.128.0.0/14
+    hostPrefix: 23
+  serviceNetwork:
+  - cidr: 172.30.0.0/16
+  templateRefs:
+  - name: ai-cluster-templates-v1
+    namespace: siteconfig-operator
+  nodes:
+  - hostName: node1.example.com
+    role: master
+    bmcAddress: redfish-virtualmedia://198.51.100.10/redfish/v1/Systems/1
+    bmcCredentialsName:
+      name: node1-bmc-secret
+    bootMACAddress: "00:11:22:33:44:55"
+    bootMode: UEFI
+    rootDeviceHints:
+      deviceName: /dev/sda
+    nodeNetwork:
+      interfaces:
+      - name: eno1
+        macAddress: "00:11:22:33:44:55"
+    templateData:
+      nodeIp: "192.0.2.10"
+      prefixLength: 24
+      gwIp: "192.0.2.1"
+      dnsServer: "192.0.2.53"
+    templateRefs:
+    - name: custom-node-templates-v1
+      namespace: siteconfig-operator
