@@ -526,6 +526,11 @@ func getUnauthorizedChanges(oldNode, newNode NodeSpec, allowReinstall bool) []st
 	if oldNode.HostName != newNode.HostName {
 		unauthorized = append(unauthorized, "hostName")
 	}
+	// Parameters never inherit permissions from names in the legacy substring
+	// matcher. The caller only compares existing nodes outside the hold window.
+	if hasTemplateDataChanged(oldNode, newNode) {
+		unauthorized = append(unauthorized, "templateData")
+	}
 
 	// Check other fields using JSON diff for completeness
 	if len(unauthorized) == 0 {
@@ -561,6 +566,36 @@ func getUnauthorizedJSONDiffs(oldNode, newNode NodeSpec, allowReinstall bool) []
 	return unauthorized
 }
 
+// hasTemplateDataChanged compares parameters independently of permissions for
+// existing fields. Comparison errors fail closed; parameter values stay out of errors.
+func hasTemplateDataChanged(oldNode, newNode NodeSpec) bool {
+	// Both forms are omitted by NodeSpec's JSON serialization.
+	if len(oldNode.TemplateData) == 0 && len(newNode.TemplateData) == 0 {
+		return false
+	}
+	oldJSON, err := json.Marshal(oldNode.TemplateData)
+	if err != nil {
+		return true
+	}
+	newJSON, err := json.Marshal(newNode.TemplateData)
+	if err != nil {
+		return true
+	}
+	diffs, err := jsondiff.CompareJSON(oldJSON, newJSON, jsondiff.UnmarshalFunc(unmarshalJSONWithNumber))
+	return err != nil || len(diffs) > 0
+}
+
+// unmarshalJSONWithNumber preserves numeric precision when comparing parameters.
+// Decoding through float64 can hide changes to adjacent large integer parameters.
+func unmarshalJSONWithNumber(data []byte, value interface{}) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(value); err != nil {
+		return fmt.Errorf("failed to decode JSON for comparison: %w", err)
+	}
+	return nil
+}
+
 // isCRDUpgradeFieldChange returns true if the diff represents a field being added or
 // removed during/after a CRD upgrade, allowing GitOps tools to sync with pre-upgrade git sources.
 func isCRDUpgradeFieldChange(diff jsondiff.Operation) bool {
@@ -579,9 +614,8 @@ func getNodeIdentifier(node NodeSpec) string {
 
 // isPermissibleNodeChange checks if a node field change is allowed
 func isPermissibleNodeChange(fieldPath string, allowReinstall bool) bool {
-	// Start with base permissible fields
+	// Preserve existing field permissions; templateData has a separate guard.
 	permissibleChanges := append([]string{}, BasePermissibleFields...)
-
 	if allowReinstall {
 		permissibleChanges = append(permissibleChanges, getReinstallPermissibleFields()...)
 	}
