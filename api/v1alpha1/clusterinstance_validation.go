@@ -141,6 +141,8 @@ var (
 		"/pruneManifests",
 		"/clusterImageSetNameRef",
 		"/holdInstallation", // Allow toggling HoldInstallation (only true→false is valid, enforced in webhook)
+		// Day-N references drive local copies for policy; installers validate rendered changes.
+		"/extraManifestsRefs",
 	}
 
 	// Node-level path patterns (always allowed)
@@ -196,6 +198,33 @@ func ValidateClusterInstance(clusterInstance *ClusterInstance) error {
 		return fmt.Errorf("control-plane agent validation failed: %w", err)
 	}
 
+	// Validate extra-manifest ConfigMap references.
+	if err := validateExtraManifestReferences(clusterInstance); err != nil {
+		return fmt.Errorf("extra-manifest reference validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// validateExtraManifestReferences ensures that each extra-manifest ConfigMap reference targets an
+// allowed namespace. A reference namespace is allowed when it is empty (defaults to the
+// ClusterInstance's own namespace), equals the ClusterInstance's namespace, or equals the
+// shared-resources namespace.
+func validateExtraManifestReferences(clusterInstance *ClusterInstance) error {
+	for _, ref := range clusterInstance.Spec.ExtraManifestsRefs {
+		if ref.Namespace == SharedResourcesNamespace && clusterInstance.Spec.ClusterName != clusterInstance.Namespace {
+			return fmt.Errorf("shared extra-manifest references require spec.clusterName to equal the ClusterInstance namespace")
+		}
+		switch ref.Namespace {
+		case "", clusterInstance.Namespace, SharedResourcesNamespace:
+			// allowed
+		default:
+			return fmt.Errorf(
+				"extraManifestsRefs entry %q references disallowed namespace %q: "+
+					"namespace must be empty, the ClusterInstance namespace %q, or %q",
+				ref.Name, ref.Namespace, clusterInstance.Namespace, SharedResourcesNamespace)
+		}
+	}
 	return nil
 }
 

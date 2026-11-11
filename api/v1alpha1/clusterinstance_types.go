@@ -155,6 +155,23 @@ type ResourceRef struct {
 	Kind string `json:"kind"`
 }
 
+// ExtraManifestReference is a reference to a ConfigMap containing extra manifests to be applied to the cluster.
+// It allows the ConfigMap to reside either in the ClusterInstance's own namespace or in the shared
+// siteconfig-shared-resources namespace.
+type ExtraManifestReference struct {
+	// Name specifies the name of the ConfigMap.
+	// +kubebuilder:validation:MinLength=1
+	// +required
+	Name string `json:"name,omitempty"`
+
+	// Namespace specifies the namespace of the ConfigMap.
+	// When omitted, defaults to the namespace of the ClusterInstance.
+	// When specified, must be either the ClusterInstance's own namespace
+	// or the siteconfig-shared-resources namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+}
+
 // NodeSpec defines the desired configuration for a single node (host) in
 // a ClusterInstance, including bare-metal host details, network settings,
 // and node-level template overrides.
@@ -471,8 +488,10 @@ type ClusterInstanceSpec struct {
 	Proxy *aiv1beta1.Proxy `json:"proxy,omitempty"`
 
 	// ExtraManifestsRefs is list of config map references containing additional manifests to be applied to the cluster.
+	// Each reference may optionally specify a namespace, which must be either the ClusterInstance's own namespace
+	// or the siteconfig-shared-resources namespace. When omitted, the ClusterInstance's namespace is used.
 	// +optional
-	ExtraManifestsRefs []corev1.LocalObjectReference `json:"extraManifestsRefs,omitempty"`
+	ExtraManifestsRefs []ExtraManifestReference `json:"extraManifestsRefs,omitempty"`
 
 	// suppressedManifests is a list of Kubernetes resource Kinds to exclude
 	// from rendering. Manifests whose rendered Kind matches an entry in this

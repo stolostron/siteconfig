@@ -527,7 +527,7 @@ var _ = Describe("computeClusterInstanceSpecDiff", func() {
 				NetworkType:            "OVNKubernetes",
 				ExtraLabels:            map[string]map[string]string{"ManagedCluster": {"group-du-sno": "test", "common": "true", "sites": "site-sno-du-1"}},
 				InstallConfigOverrides: "{\"capabilities\":{\"baselineCapabilitySet\": \"None\", \"additionalEnabledCapabilities\": [ \"marketplace\", \"NodeTuning\" ] }}",
-				ExtraManifestsRefs:     []corev1.LocalObjectReference{{Name: "foobar1"}, {Name: "foobar2"}},
+				ExtraManifestsRefs:     []v1alpha1.ExtraManifestReference{{Name: "foobar1"}, {Name: "foobar2"}},
 				TemplateRefs:           []v1alpha1.TemplateRef{{Name: "cluster-v1", Namespace: "site-sno-du-1"}},
 				Nodes: []v1alpha1.NodeSpec{{
 					BmcAddress:         "idrac-virtualmedia+https://198.51.100.0/redfish/v1/Systems/System.Embedded.1",
