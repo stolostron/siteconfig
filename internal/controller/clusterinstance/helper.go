@@ -17,6 +17,7 @@ limitations under the License.
 package clusterinstance
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -316,10 +317,44 @@ func toYaml(v interface{}) string {
 	return strings.TrimSuffix(string(data), "\n")
 }
 
+// templateVar returns a decoded custom node template parameter. UseNumber avoids rounding
+// integers through float64 before a template serializes or converts the value.
+func templateVar(node v1alpha1.NodeSpec, key string) (interface{}, error) {
+	if node.TemplateData == nil {
+		return nil, fmt.Errorf("templateData is not defined")
+	}
+	value, ok := node.TemplateData[key]
+	if !ok {
+		return nil, fmt.Errorf("templateData key %q is missing", key)
+	}
+	// apiextensionsv1.JSON represents an explicit JSON null with an empty Raw slice.
+	if len(value.Raw) == 0 {
+		return nil, nil
+	}
+	if !json.Valid(value.Raw) {
+		return nil, fmt.Errorf("templateData key %q contains invalid JSON", key)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(value.Raw))
+	decoder.UseNumber()
+	var decoded interface{}
+	if err := decoder.Decode(&decoded); err != nil {
+		return nil, fmt.Errorf("failed to decode templateData key %q: %w", key, err)
+	}
+	return decoded, nil
+}
+
+// hasTemplateVar reports presence, including explicit null, false, zero and empty values.
+func hasTemplateVar(node v1alpha1.NodeSpec, key string) bool {
+	_, ok := node.TemplateData[key]
+	return ok
+}
+
 // funcMap provides additional useful functions for template rendering
 func funcMap() template.FuncMap {
 	f := sprig.TxtFuncMap()
 	f["toYaml"] = toYaml
+	f["templateVar"] = templateVar
+	f["hasTemplateVar"] = hasTemplateVar
 	return f
 }
 
