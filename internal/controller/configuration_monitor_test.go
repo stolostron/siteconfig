@@ -93,6 +93,7 @@ var _ = Describe("Reconcile", func() {
 		// Update config and verify changes
 		cm.Data["allowReinstalls"] = "true"
 		cm.Data["maxConcurrentReconciles"] = "10"
+		cm.Data[configuration.SharedManifestSyncMaxConcurrentReconcilesKey] = "8"
 		Expect(c.Update(ctx, cm)).To(Succeed())
 
 		// Trigger a reconcile and verify that the configuration is updated
@@ -102,6 +103,8 @@ var _ = Describe("Reconcile", func() {
 		cm1 := &corev1.ConfigMap{}
 		Expect(c.Get(ctx, key, cm1)).To(Succeed())
 		Expect(cm1.Data).To(Equal(cm.Data))
+		Expect(r.ConfigStore.GetSharedManifestSyncMaxConcurrentReconciles()).To(Equal(8))
+		Expect(r.ConfigStore.GetMaxConcurrentReconciles()).To(Equal(10))
 	})
 
 	It("recreates the SiteConfig configuration ConfigMap with default config when deleted", func() {

@@ -1167,6 +1167,7 @@ spec:
           - ""
           resources:
           - configmaps
+          - namespaces
           - secrets
           verbs:
           - create
@@ -1176,17 +1177,6 @@ spec:
           - patch
           - update
           - watch
-        - apiGroups:
-          - ""
-          resources:
-          - namespaces
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
         - apiGroups:
           - agent-install.openshift.io
           resources:

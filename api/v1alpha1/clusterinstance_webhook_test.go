@@ -127,7 +127,7 @@ var _ = Describe("ValidateUpdate", func() {
 				NetworkType:            "OVNKubernetes",
 				ExtraLabels:            map[string]map[string]string{"ManagedCluster": {"group-du-sno": "test", "common": "true", "sites": "site-sno-du-1"}},
 				InstallConfigOverrides: "{\"capabilities\":{\"baselineCapabilitySet\": \"None\", \"additionalEnabledCapabilities\": [ \"marketplace\", \"NodeTuning\" ] }}",
-				ExtraManifestsRefs:     []corev1.LocalObjectReference{{Name: "foobar1"}, {Name: "foobar2"}},
+				ExtraManifestsRefs:     []ExtraManifestReference{{Name: "foobar1"}, {Name: "foobar2"}},
 				TemplateRefs:           []TemplateRef{{Name: "cluster-v1", Namespace: "site-sno-du-1"}},
 				Nodes: []NodeSpec{{
 					BmcAddress:         "idrac-virtualmedia+https://198.51.100.0/redfish/v1/Systems/System.Embedded.1",
@@ -150,6 +150,16 @@ var _ = Describe("ValidateUpdate", func() {
 
 			newClusterInstance = oldClusterInstance.DeepCopy()
 
+		})
+
+		It("blocks changing shared references during active provisioning", func() {
+			oldClusterInstance.Status.Conditions = []metav1.Condition{{
+				Type: string(ClusterProvisioned), Status: metav1.ConditionFalse, Reason: string(InProgress),
+			}}
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.ExtraManifestsRefs = []ExtraManifestReference{{Name: "v2", Namespace: SharedResourcesNamespace}}
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
+			Expect(err).To(MatchError(ContainSubstring("spec update not allowed during provisioning")))
 		})
 
 		It("should block spec changes while provisioning is in-progress", func() {
@@ -232,6 +242,31 @@ var _ = Describe("ValidateUpdate", func() {
 
 		})
 
+		It("allows changing, adding, removing, and reordering extra-manifest references after installation", func() {
+			for _, refs := range [][]ExtraManifestReference{
+				{{Name: "common-v2", Namespace: SharedResourcesNamespace}},
+				{{Name: "common-v2", Namespace: SharedResourcesNamespace}, {Name: "local"}},
+				{{Name: "foobar2"}, {Name: "foobar1"}},
+				{},
+			} {
+				newClusterInstance = oldClusterInstance.DeepCopy()
+				newClusterInstance.Spec.ExtraManifestsRefs = refs
+				_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
+				Expect(err).NotTo(HaveOccurred())
+			}
+		})
+
+		It("still rejects unrelated namespace and immutable spec changes after installation", func() {
+			newClusterInstance.Spec.ExtraManifestsRefs = []ExtraManifestReference{{Name: "common", Namespace: "other"}}
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
+			Expect(err).To(HaveOccurred())
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.ExtraManifestsRefs = []ExtraManifestReference{{Name: "common", Namespace: SharedResourcesNamespace}}
+			newClusterInstance.Spec.BaseDomain = "changed.example.com"
+			_, err = v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
+			Expect(err).To(HaveOccurred())
+		})
+
 		It("should return nil for no spec changes", func() {
 
 			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
@@ -280,6 +315,19 @@ var _ = Describe("ValidateUpdate", func() {
 			}
 
 			newClusterInstance.Spec.Nodes[0].BootMACAddress = "this-is-allowed"
+			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("continues to allow switching extra-manifest references when reinstall is requested", func() {
+			// Day-N reference changes are generally allowed after provisioning. Verify that combining
+			// the same change with an otherwise valid reinstall request remains permitted as well.
+			newClusterInstance.Spec.Reinstall = &ReinstallSpec{
+				Generation: "test-1",
+			}
+			newClusterInstance.Spec.ExtraManifestsRefs = []ExtraManifestReference{
+				{Name: "common-v2", Namespace: SharedResourcesNamespace},
+			}
 			_, err := v.ValidateUpdate(ctx, oldClusterInstance, newClusterInstance)
 			Expect(err).NotTo(HaveOccurred())
 		})

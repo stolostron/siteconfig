@@ -19,6 +19,9 @@ import (
 	"context"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -47,14 +50,57 @@ func validateResources(ctx context.Context, c client.Client, clusterInstance *v1
 			key.Name, key.Namespace, err)
 	}
 
-	// If extraManifests are defined - check that they exist
+	// If extraManifests are defined - check that they exist in their referenced namespace.
+	// A reference may target the ClusterInstance's own namespace (default when unspecified) or the
+	// shared-resources namespace.
 	if len(clusterInstance.Spec.ExtraManifestsRefs) > 0 {
 		for _, extraManifestRef := range clusterInstance.Spec.ExtraManifestsRefs {
-			key = types.NamespacedName{Name: extraManifestRef.Name, Namespace: clusterInstance.Namespace}
+			namespace := extraManifestRef.Namespace
+			if namespace == "" {
+				namespace = clusterInstance.Namespace
+			}
+
+			// Defense-in-depth: reject references to namespaces other than the ClusterInstance's own
+			// namespace or the shared-resources namespace, even if the webhook was bypassed.
+			if namespace != clusterInstance.Namespace && namespace != v1alpha1.SharedResourcesNamespace {
+				return fmt.Errorf(
+					"extra manifest %s references disallowed namespace %s: must be the ClusterInstance namespace %s or %s",
+					extraManifestRef.Name, namespace, clusterInstance.Namespace, v1alpha1.SharedResourcesNamespace)
+			}
+
+			// A shared-namespace reference copies into the ClusterInstance namespace, which must match
+			// spec.clusterName. Requiring the equality keeps the copy target unambiguous.
+			if namespace == v1alpha1.SharedResourcesNamespace &&
+				clusterInstance.Spec.ClusterName != clusterInstance.Namespace {
+				return fmt.Errorf(
+					"extra manifest %s references shared namespace %s, which requires spec.clusterName (%s) "+
+						"to equal the ClusterInstance namespace (%s)",
+					extraManifestRef.Name, v1alpha1.SharedResourcesNamespace,
+					clusterInstance.Spec.ClusterName, clusterInstance.Namespace)
+			}
+
+			key = types.NamespacedName{Name: extraManifestRef.Name, Namespace: namespace}
 			cm := &corev1.ConfigMap{}
 			if err := c.Get(ctx, key, cm); err != nil {
 				return fmt.Errorf("failed to retrieve ExtraManifest: %s in namespace %s, err: %w",
 					key.Name, key.Namespace, err)
+			}
+			if namespace == v1alpha1.SharedResourcesNamespace {
+				local := &corev1.ConfigMap{}
+				err := c.Get(ctx, client.ObjectKey{Name: extraManifestRef.Name, Namespace: clusterInstance.Namespace}, local)
+				if err != nil && !apierrors.IsNotFound(err) {
+					return fmt.Errorf("failed to validate shared extra-manifest destination: %w", err)
+				}
+				if err == nil && (local.Labels[v1alpha1.Group+"/managed-copy"] != "true" ||
+					!metav1.IsControlledBy(local, clusterInstance)) {
+					return fmt.Errorf("name collision: ConfigMap %s/%s is not owned by this ClusterInstance",
+						local.Namespace, local.Name)
+				}
+			} else if cm.Labels[v1alpha1.Group+"/managed-copy"] == "true" &&
+				cm.Annotations[v1alpha1.Group+"/source-namespace"] == v1alpha1.SharedResourcesNamespace &&
+				metav1.IsControlledBy(cm, clusterInstance) {
+				return fmt.Errorf("local extra-manifest %s/%s is a managed shared copy; use a distinct local ConfigMap",
+					cm.Namespace, cm.Name)
 			}
 		}
 	}

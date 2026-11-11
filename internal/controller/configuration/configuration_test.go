@@ -24,8 +24,9 @@ import (
 var _ = Describe("NewDefaultConfiguration", func() {
 	It("creates a new Configuration object with default values for the SiteConfig Operator", func() {
 		expected := &Configuration{
-			allowReinstalls:         DefaultAllowReinstalls,
-			maxConcurrentReconciles: DefaultMaxConcurrentReconciles,
+			allowReinstalls:                           DefaultAllowReinstalls,
+			maxConcurrentReconciles:                   DefaultMaxConcurrentReconciles,
+			sharedManifestSyncMaxConcurrentReconciles: DefaultSharedManifestSyncMaxConcurrentReconciles,
 		}
 		gotConfig := NewDefaultConfiguration()
 		Expect(gotConfig).To(Equal(expected))
@@ -47,10 +48,12 @@ var _ = Describe("Configuration.ToMap", func() {
 		}
 		expectedMaps := []map[string]string{
 			{
+				SharedManifestSyncMaxConcurrentReconcilesKey: "0",
 				"allowReinstalls":         "false",
 				"maxConcurrentReconciles": "5",
 			},
 			{
+				SharedManifestSyncMaxConcurrentReconcilesKey: "0",
 				"allowReinstalls":         "true",
 				"maxConcurrentReconciles": "1",
 			},
