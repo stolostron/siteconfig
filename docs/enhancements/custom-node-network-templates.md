@@ -377,10 +377,16 @@ type NodeSpec struct {
 The `Schemaless` and explicit object-type markers prevent generation of a
 non-nullable `additionalProperties` schema, which would prune parameter entries
 set to null. Local API-server tests (Kubernetes 1.35.0, envtest) with the generated
-CRD verified create/update/read preservation at `spec.nodes[].templateData`,
+CRD verified create/replace/read preservation at `spec.nodes[].templateData`,
 including explicit null and nested values, with and without `nodeNetwork`.
 Strings, numbers, booleans, and arrays were rejected in place of the map;
 existing network validation was unchanged.
+
+Client-side apply (Argo CD's default) removes null-valued object entries; merge
+patches replacing `spec.nodes` can also remove them. Workflows relying on null
+must consistently use server-side apply (`--server-side`; Argo CD
+`ServerSideApply=true`), JSON Patch, or object replacement. Outside the permitted
+hold window, the webhook rejects null-key removal as a parameter change.
 
 The relevant generated CRD fragment would be:
 
@@ -496,9 +502,8 @@ already a value, not a pointer. They only read its map and JSON bytes. No nil
   be tested through actual JSON unmarshalling into `NodeSpec`, not by
   constructing `Raw: []byte("null")` directly.
   Emit explicit null with `toJson` or `toYaml`; reject it in templates requiring
-  a non-null value. A custom template may use an omitted `gateway` to select its
-  default, an explicit null to omit that static route, and a string to override
-  the gateway. These meanings belong to the template, not the operator.
+  a non-null value. Prefer explicit switches such as `emitDefaultRoute: false`
+  to null-based defaults; use `hasTemplateVar` to distinguish omission from false.
 - For optional parameters, use `hasTemplateVar` before `templateVar`:
 
 ```gotemplate
@@ -971,6 +976,8 @@ Integration/e2e tests:
   explicit null persist at `spec.nodes[].templateData`, including without
   `nodeNetwork`, and rejects non-object parameter maps. Unknown siblings must
   be rejected or pruned rather than preserved as another parameter namespace.
+- Cover client-side and server-side apply, transitions between them, and merge
+  patches touching nodes versus metadata; verify the documented null behavior.
 - Rendered InfraEnv `nmStateConfigLabelSelector` matches the NMStateConfig
   label produced by the custom template (interface-selector integration).
 - Verify live API condition messages for missing parameters and broken templates
