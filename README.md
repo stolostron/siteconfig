@@ -19,7 +19,8 @@ The siteconfig-controller enables users to deploy clusters using either the Assi
     - [Safeguarding ConfigMaps and Secrets During Cluster Reinstalls with SiteConfig Operator](https://github.com/stolostron/siteconfig/blob/main/docs/reinstallation/preservation.md)
     - [Cluster reinstallation status conditions](https://github.com/stolostron/siteconfig/blob/main/docs/reinstallation/status_conditions.md)
 6. [Rendering multiple resources from a template](https://github.com/stolostron/siteconfig/blob/main/docs/template_rendering.md)
-7. [Troubleshooting Guide](https://github.com/stolostron/siteconfig/blob/main/docs/troubleshooting.md)
+7. [BareMetalHost power management](docs/baremetalhost_power_management.md)
+8. [Troubleshooting Guide](https://github.com/stolostron/siteconfig/blob/main/docs/troubleshooting.md)
 
 ## Makefile targets
 
