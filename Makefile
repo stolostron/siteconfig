@@ -164,6 +164,10 @@ test-envtest: envtest ## Test BMH field ownership against a local Kubernetes API
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN)/k8s -p path)" \
 		go test -mod=mod -tags=envtest -run '^TestBareMetalHostOnlineEnvtest$$' -count=1 -v ./internal/controller
 
+.PHONY: test-tool-installation
+test-tool-installation: ## Verify Go tool installation honors directory overrides.
+	hack/test-tool-installation.sh
+
 .PHONY: test-coverage
 test-coverage: envtest ## Generate combined unit and API-server test coverage.
 	@echo "Computing unit and API-server test coverage"
@@ -178,7 +182,7 @@ ci-test-unit:
 		./...
 
 .PHONY: ci-job
-ci-job: common-deps-update generate fmt vet golangci-lint unittest test-envtest shellcheck bashate enhancement-lint bundle-check
+ci-job: common-deps-update generate fmt vet golangci-lint unittest test-envtest test-tool-installation shellcheck bashate enhancement-lint bundle-check
 
 ##@ Build
 
@@ -258,7 +262,7 @@ TMP_DIR=$$(mktemp -d) ;\
 cd $$TMP_DIR ;\
 go mod init tmp ;\
 echo "Downloading $(2)" ;\
-GOBIN=$(PROJECT_DIR)/bin GOFLAGS=-mod=mod go install $(2) ;\
+GOBIN="$(abspath $(dir $(1)))" GOFLAGS=-mod=mod go install $(2) ;\
 go mod tidy ;\
 rm -rf $$TMP_DIR ;\
 }

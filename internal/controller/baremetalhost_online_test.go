@@ -1,5 +1,5 @@
 /*
-Copyright 2026.
+Copyright 2026 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -76,13 +76,18 @@ var _ = Describe("BareMetalHost apply safety", func() {
 			}).Build()
 			r := &ClusterInstanceReconciler{Client: c, APIReader: c}
 			result, err := r.applyRenderedObject(context.Background(), c, zap.NewNop(), cluster, *desired, false)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring(expected))
+			Expect(err).To(HaveOccurred(),
+				"an unsafe BMH apply must be rejected before the resource can be modified")
+			Expect(err.Error()).To(ContainSubstring(expected),
+				"the rejection must identify the failed safety check so its cause can be diagnosed")
 			if readError != nil {
-				Expect(errors.Is(err, readError)).To(BeTrue())
+				Expect(errors.Is(err, readError)).To(BeTrue(),
+					"the underlying read error must remain discoverable so callers can diagnose and retry the failure")
 			}
-			Expect(result).To(Equal(controllerutil.OperationResultNone))
-			Expect(writes).To(BeZero())
+			Expect(result).To(Equal(controllerutil.OperationResultNone),
+				"a rejected BMH apply must not report a successful resource change")
+			Expect(writes).To(BeZero(),
+				"a rejected apply must not patch the BMH because a write can change spec.online")
 		},
 		Entry("deleting host", func() {
 			current.SetFinalizers([]string{"example.com/finalizer"})
