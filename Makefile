@@ -157,10 +157,22 @@ unittest:
 	@echo "Running unit tests"
 	go test -v ./...
 
+# Envtest's test-only packages are not included in the operator's vendor tree.
+# Use the pinned module dependencies for these API-server integration tests.
+.PHONY: test-envtest
+test-envtest: envtest ## Test BMH field ownership against a local Kubernetes API server.
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN)/k8s -p path)" \
+		go test -mod=mod -tags=envtest -run '^TestBareMetalHostOnlineEnvtest$$' -count=1 -v ./internal/controller
+
+.PHONY: test-tool-installation
+test-tool-installation: ## Verify Go tool installation honors directory overrides.
+	hack/test-tool-installation.sh
+
 .PHONY: test-coverage
-test-coverage:
-	@echo "Computing test coverage"
-	go test -coverprofile=test-coverage.out -coverpkg=./... ./...
+test-coverage: envtest ## Generate combined unit and API-server test coverage.
+	@echo "Computing unit and API-server test coverage"
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN)/k8s -p path)" \
+		go test -mod=mod -tags=envtest -coverprofile=test-coverage.out -coverpkg=./... ./...
 	awk 'NR==1{print; next} {print | "sort -u"}' test-coverage.out > sorted-coverage.out
 	mv sorted-coverage.out test-coverage.out
 
@@ -170,7 +182,7 @@ ci-test-unit:
 		./...
 
 .PHONY: ci-job
-ci-job: common-deps-update generate fmt vet golangci-lint unittest shellcheck bashate enhancement-lint bundle-check
+ci-job: common-deps-update generate fmt vet golangci-lint unittest test-envtest test-tool-installation shellcheck bashate enhancement-lint bundle-check
 
 ##@ Build
 
@@ -229,11 +241,15 @@ KUBECTL ?= kubectl
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 MOCKGEN ?= $(LOCALBIN)/mockgen
+ENVTEST ?= $(LOCALBIN)/setup-envtest
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.4.3
 CONTROLLER_TOOLS_VERSION ?= v0.20.0
 MOCKGEN_VERSION ?= v0.6.0
+# Match the Kubernetes API and controller-runtime versions in go.mod.
+ENVTEST_K8S_VERSION ?= $(shell go list -m -f '{{.Version}}' k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
+ENVTEST_VERSION ?= $(shell go list -m -f '{{.Version}}' sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
 
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 
@@ -246,7 +262,7 @@ TMP_DIR=$$(mktemp -d) ;\
 cd $$TMP_DIR ;\
 go mod init tmp ;\
 echo "Downloading $(2)" ;\
-GOBIN=$(PROJECT_DIR)/bin GOFLAGS=-mod=mod go install $(2) ;\
+GOBIN="$(abspath $(dir $(1)))" GOFLAGS=-mod=mod go install $(2) ;\
 go mod tidy ;\
 rm -rf $$TMP_DIR ;\
 }
@@ -264,6 +280,10 @@ $(KUSTOMIZE): $(LOCALBIN)
 PHONY: controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
 	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION))
+
+.PHONY: envtest
+envtest: ## Download setup-envtest locally if necessary.
+	$(call go-get-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION))
 
 .PHONY: mockgen
 mockgen: ## Download mockgen locally if necessary.

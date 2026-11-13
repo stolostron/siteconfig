@@ -2578,7 +2578,7 @@ var _ = Describe("executeRenderedManifests", func() {
 		expManifest.Status = v1alpha1.ManifestRenderedSuccess
 
 		testClient := createSSAMockClient(clusterInstance)
-		manifestsRendered, result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status)
+		manifestsRendered, result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status, false)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeTrue())
 
@@ -2607,7 +2607,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			Return(fmt.Errorf("failed to apply object using Server-Side Apply: %s", testError)).
 			Times(1)
 
-		manifestsRendered, result, err := r.executeRenderedManifests(ctx, mockClient, testLogger, clusterInstance, objects, v1alpha1.ManifestRenderedSuccess)
+		manifestsRendered, result, err := r.executeRenderedManifests(ctx, mockClient, testLogger, clusterInstance, objects, v1alpha1.ManifestRenderedSuccess, false)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring(testError))
 		Expect(result).To(BeFalse())
@@ -2634,7 +2634,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			Return(nil).
 			Times(1)
 
-		manifestsRendered, result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status)
+		manifestsRendered, result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status, false)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeTrue())
 
@@ -2657,7 +2657,7 @@ var _ = Describe("executeRenderedManifests", func() {
 			Return(fmt.Errorf("%s", testError)).
 			Times(1)
 
-		manifestsRendered, result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status)
+		manifestsRendered, result, err := r.executeRenderedManifests(ctx, testClient, testLogger, clusterInstance, objects, expManifest.Status, false)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring(testError))
 		Expect(result).To(BeFalse())
