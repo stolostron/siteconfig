@@ -1,7 +1,7 @@
 //go:build envtest
 
 /*
-Copyright 2026.
+Copyright 2026 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -52,6 +53,14 @@ import (
 // ownership, optimistic locking, or the consequences of omitting an owned field.
 func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 	g := NewWithT(t)
+	// Exercise the local-only guard on every run. If it is removed, the invalid
+	// kubeconfig makes the test fail before it can access any existing cluster.
+	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
+	g.Expect(os.WriteFile(kubeconfig, []byte("invalid: [kubeconfig"), 0o600)).To(Succeed(),
+		"the regression must have an invalid kubeconfig so an accidental existing-cluster attempt fails safely")
+	t.Setenv("KUBECONFIG", kubeconfig)
+	t.Setenv("USE_EXISTING_CLUSTER", "true")
+
 	// The structural fixture retains the BMH fields used by these power-state
 	// and template-pipeline tests, notably required boolean spec.online. These
 	// tests do not simulate BMO or installer webhooks/controllers.
@@ -95,6 +104,8 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 		},
 	}
 	server := &envtest.Environment{
+		// Fixture CRDs must never be installed into a developer's cluster.
+		UseExistingCluster:    ptr.To(false),
 		BinaryAssetsDirectory: os.Getenv("KUBEBUILDER_ASSETS"),
 		CRDs:                  []*apiextensionsv1.CustomResourceDefinition{crd, imageSetCRD},
 		// Exercise status updates against the actual ClusterInstance CRD.
