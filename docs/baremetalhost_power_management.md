@@ -60,8 +60,9 @@ power-field ownership tests against a local Kubernetes API server. The latter
 downloads matching API-server binaries through `setup-envtest`; it does not use
 or modify a running cluster. These checks are also included in `make ci-job`.
 
-Run `make test-coverage` to collect both unit and API-server coverage in
-`test-coverage.out`, including the ownership paths exercised only by envtest.
+Run `make test-coverage` to collect unit-test coverage in `test-coverage.out`.
+Sonar CI also measures coverage using ordinary Go tests. API-server tests run
+separately through `make test-envtest` and are not included in this report.
 
 The API-server tests cover initial values of both `true` and `false`, existing
 inventory hosts, adoption of older SiteConfig resources, metadata changes and
