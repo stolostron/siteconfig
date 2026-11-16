@@ -169,10 +169,9 @@ test-tool-installation: ## Verify Go tool installation honors directory override
 	hack/test-tool-installation.sh
 
 .PHONY: test-coverage
-test-coverage: envtest ## Generate combined unit and API-server test coverage.
-	@echo "Computing unit and API-server test coverage"
-	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN)/k8s -p path)" \
-		go test -mod=mod -tags=envtest -coverprofile=test-coverage.out -coverpkg=./... ./...
+test-coverage:
+	@echo "Computing test coverage"
+	go test -coverprofile=test-coverage.out -coverpkg=./... ./...
 	awk 'NR==1{print; next} {print | "sort -u"}' test-coverage.out > sorted-coverage.out
 	mv sorted-coverage.out test-coverage.out
 
