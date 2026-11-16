@@ -15,7 +15,7 @@ api-approvers:
   - "@sabbir-47"
   - "@carbonin"
 creation-date: 2026-04-30
-last-updated: 2026-11-04
+last-updated: 2026-11-16
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/ACM-17129
@@ -172,7 +172,9 @@ editable after a cluster has been installed.
   what it does and does not guarantee.
 - `extraManifestsRefs` is mutable after installation, so administrators can
   stage a fleet-wide manifest change by creating a new shared ConfigMap and
-  repointing clusters in batches.
+  repointing clusters in batches. Whether an installed cluster's install CR
+  takes the new reference is the installer's decision; see
+  [Post-installation mutability of `extraManifestsRefs`](#post-installation-mutability-of-extramanifestsrefs).
 - The change is backward-compatible: existing ClusterInstance CRs that do not
   specify a namespace continue to work unchanged.
 - Validation rejects references to any namespace other than the two allowed
@@ -190,9 +192,8 @@ editable after a cluster has been installed.
   support explicit namespace references).
 - Supporting Secrets in the shared namespace. Scope is `extraManifestsRefs`
   and what the backend installers accept there, which is ConfigMaps only.
-  This covers both readings of the question: hub-side Secrets such as the
-  pull secret, and Secrets intended to land on the spoke cluster. Settled
-  during review.
+  This excludes both hub-side Secrets such as the pull secret and Secrets
+  intended to land on the spoke cluster.
 - Reconciling the *spoke cluster's* state against an updated shared ConfigMap.
   Propagation stops at the cluster-namespace copy; driving that content onto an
   already-installed cluster is the job of an ACM policy and TALM (see
@@ -298,10 +299,11 @@ as the single source of truth for day-2 compliance — see
 3. Because this is a spec change, `metadata.generation` is incremented, the
    `ObservedGeneration` short-circuit is bypassed, and the full reconcile runs:
    validation, re-render, dry-run, and Server-Side Apply of all manifests. The
-   copy for `v2` is created in the cluster namespace and the downstream CRD's
-   manifest reference is updated to the new name.
-4. The `v1` copy is left in place until the ClusterInstance stops referencing
-   it; see [Orphaned copies](#orphaned-copies).
+   copy for `v2` is created in the cluster namespace. The downstream CRD's
+   manifest reference is updated only if the installer accepts the change;
+   see [Post-installation mutability of `extraManifestsRefs`](#post-installation-mutability-of-extramanifestsrefs).
+4. The `v1` copy is reclaimed once that reconcile has applied the rendered
+   manifests; see [Orphaned copies](#orphaned-copies).
 
 Note the asymmetry between these two workflows, which is central to this
 design:
@@ -309,10 +311,10 @@ design:
 | | Shared ConfigMap edited in place | ClusterInstance repointed to a new name |
 |---|---|---|
 | Trigger | ConfigMap event | ClusterInstance spec change |
-| What changes | Copy `data` only | Copy set, plus downstream CRD manifest reference |
+| What changes | Copy `data` only | Copy set |
 | ClusterInstance reconcile | No | Yes (full re-render + SSA) |
-| Downstream CRD updated | No | Yes |
-| Risk profile | Low — ConfigMap writes only | Carries the open question in [Post-installation mutability of `extraManifestsRefs`](#post-installation-mutability-of-extramanifestsrefs) |
+| Downstream CRD updated | No | Only if the installer accepts the change |
+| Risk profile | Low — ConfigMap writes only | The installer may reject the change; see [Post-installation mutability of `extraManifestsRefs`](#post-installation-mutability-of-extramanifestsrefs) |
 
 **Downstream CRD compatibility:**
 
@@ -321,10 +323,8 @@ The downstream CRDs that consume `ExtraManifestsRefs` do not support a
 
 - `AgentClusterInstall.spec.manifestsConfigMapRefs` uses
   `ManifestsConfigMapReference` (has only `Name`).
-- `ImageClusterInstall.spec.extraManifestsRefs` is understood to use
-  `corev1.LocalObjectReference` (only `Name`). `ImageClusterInstall` is not
-  vendored in this repository, so this is taken from its upstream API rather
-  than verified here.
+- `ImageClusterInstall.spec.extraManifestsRefs` uses
+  `corev1.LocalObjectReference` (only `Name`).
 
 Both expect the referenced ConfigMaps to exist in the same namespace as the
 CRD. The local-copy approach ensures this contract is preserved.
@@ -394,8 +394,8 @@ equals `siteconfig-shared-resources`; any other value is rejected.
 
 #### Why an explicit field rather than a dual-namespace lookup
 
-The obvious alternative, raised during review, is to change no API at all and
-have the controller look in both namespaces
+The obvious alternative is to change no API at all and have the controller
+look in both namespaces
 (see [Alternative A](#alternative-a-validator-checks-both-namespaces-without-api-change)).
 Its premise is correct: `namespace` can only ever be empty, the ClusterInstance's
 own namespace, or `siteconfig-shared-resources`, so the field is effectively
@@ -431,8 +431,6 @@ The costs of the field are real and are accepted:
   patch release; a shipped CRD field can only be deprecated.
 - It puts an operator-owned namespace name into user CRs, so a future rename
   becomes a fleet-wide CR migration rather than a change to a single constant.
-  That name has already changed twice during this review and is now back at
-  its original value.
 - Adopting the shared namespace for an existing cluster requires editing the
   ClusterInstance, which bumps `metadata.generation` and forces a full
   re-render and Server-Side Apply even though the rendered downstream payload
@@ -490,44 +488,33 @@ cluster is not installing while it is held. Repointing without
 `holdInstallation` remains available exactly when provisioning has completed,
 which is the intended window.
 
-**Precedent, with a caveat.** `/clusterImageSetNameRef` is already day-N
-mutable and renders into `AgentClusterInstall.spec.imageSetRef` and
-`ImageClusterInstall.spec.imageSetRef`, so the control flow for changing a
-downstream install-CR field after provisioning already exists. What this
-repository cannot show is that assisted-service or the IBI operator has ever
-*accepted* such an update in practice — the same unknown as Open Question 1.
-The precedent establishes the mechanism, not the outcome.
-Adding `/extraManifestsRefs` introduces no new control flow: a full re-render
-and Server-Side Apply of every manifest already happens today for all ten
-existing allow-listed paths. The only new thing is that the re-applied
-`AgentClusterInstall` / `ImageClusterInstall` payload differs in content.
+**Precedent.** `/clusterImageSetNameRef` is already day-N mutable and renders
+into `AgentClusterInstall.spec.imageSetRef` and
+`ImageClusterInstall.spec.imageSetRef`. Adding `/extraManifestsRefs`
+introduces no new control flow: a full re-render and Server-Side Apply of
+every manifest already happens for all ten existing allow-listed paths. The
+precedent establishes the mechanism, not the outcome.
 
-**Open risk — see [Open Questions](#open-questions).** Whether the downstream
-CRDs accept an in-place update to their manifest reference after installation
-is not established. At the schema level `AgentClusterInstall.spec.manifestsConfigMapRefs`
-carries only `+optional` with no CEL immutability rule, so the CRD itself will
-accept the change; but the assisted-service validating webhook is not vendored
-in this repository and cannot be inspected here, and there is precedent for
-assisted-service enforcing `AgentClusterInstall` immutability elsewhere
-(`internal/controller/clusterinstance/helper.go` documents exactly such a
-constraint for SNO expansion). `ImageClusterInstall` is not vendored in any
-form, so its behaviour is unknown.
+**The installer decides whether the change is permitted.** SiteConfig adds no
+installer-specific check for this field: the change is rendered and dry-run
+like any other allow-listed change. If the installer accepts it, the
+downstream manifest reference is updated. assisted-service and the IBI
+operator both reject it on an installed cluster today: the dry-run fails, no
+rendered manifest is applied, and the error is reported on
+`RenderedTemplatesValidated`. The user then either reverts the change, or
+keeps it by adding the rejecting kind (`AgentClusterInstall` or
+`ImageClusterInstall`) to `spec.suppressedManifests`, which is how a staged
+rollout currently proceeds.
 
-If a downstream rejection does occur, the failure mode is severe and must be
-understood before implementation: `handleRenderTemplates` dry-runs **every**
-rendered object before applying **any** of them, so a single rejected object
-means nothing at all is applied for that ClusterInstance, `ObservedGeneration`
-is never advanced, and the ClusterInstance retries indefinitely with no pause
-annotation and no self-healing. The retry interval is **not** the 30 seconds
-of `DefaultTemplateRenderingErrorDelay`: that delay is returned alongside a
-non-nil error, and controller-runtime discards the result whenever the error
-is non-nil, requeueing on the workqueue rate limiter instead. No custom rate
-limiter is configured, so the default exponential backoff applies and the
-interval grows towards a ceiling of roughly 16 minutes — the failure is both
-permanent and progressively slower to retry. **This must be settled by a live-cluster test before the
-enhancement moves to `implementable`.** The guaranteed-safe fallback is
-reinstall, which tears the downstream CR down and recreates it rather than
-updating in place.
+Suppression skips that manifest and leaves the install CR untouched, still
+naming `v1`, so the reconcile completes and the `v1` copy is reclaimed. The
+install CR is then left naming a ConfigMap that no longer exists, which is
+harmless on an installed cluster because neither installer consumes it after
+installation. The extra-manifests policy follows the ClusterInstance's
+references, so it evaluates the `v2` copy either way.
+Remove the suppression in the same edit that requests a reinstall: removed
+earlier, the installer rejects the render again; left in place, the reinstall
+deletes the install CR and does not render a new one.
 
 ### Siteconfig Impact
 
@@ -582,27 +569,24 @@ The namespace is named `siteconfig-shared-resources`, matching the
 `siteconfig-` prefix the operator already uses for its own resources
 (`siteconfig-operator-configuration`, `siteconfig-controller-manager`).
 
-An earlier revision renamed it to `openshift-siteconfig-resources`, for
-consistency with components delivered under the OpenShift umbrella. That rename
-has been reverted on user-experience grounds. The console classes
+An `openshift-` prefix (`openshift-siteconfig-resources`), for consistency
+with components delivered under the OpenShift umbrella, was rejected on
+user-experience grounds. The console classes
 `openshift-`-prefixed namespaces as system projects and hides them behind the
 "Show default projects" toggle — a UI default rather than a permission
 boundary, but one that applies to administrators as well as ordinary users.
-(Console behaviour is external to this repository and is taken from the
-review discussion rather than verified here.)
 This namespace exists precisely so that administrators can put shared
 ConfigMaps in it and edit them, so hiding it by default works against the
-primary workflow. The prefix also left two questions open that could not be
-answered from this repository: whether the managed-cluster validating webhook
+primary workflow. The prefix also raises two questions: whether the
+managed-cluster validating webhook
 on ROSA/OSD would permit the operator's ServiceAccount to create a privileged
 namespace, and — more importantly — whether administrators could still create
 and edit ConfigMaps inside one. An ordinary `siteconfig-` name carries no
-special treatment, so it retires both questions rather than leaving them to a
-live-cluster check.
+special treatment, so neither question arises.
 
-The other reason originally given for the `openshift-` prefix was that
+The other argument for the `openshift-` prefix is that
 reserved prefixes avoid collision with user-created namespaces. That holds,
-and the revert gives it up: `siteconfig-shared-resources` is an ordinary name
+and this name gives it up: `siteconfig-shared-resources` is an ordinary name
 a user could already have created. The operator's create is
 create-if-not-exists, so it adopts whatever is there rather than failing,
 which means a pre-existing namespace of that name is used as-is. This is
@@ -612,7 +596,7 @@ operator adds its labels and the namespace continues to hold whatever else it
 held. An administrator who wants certainty can check for the namespace before
 installing the operator.
 
-Two points are independent of the name and survive the revert:
+Two points are independent of the name:
 
 - **Pod Security Admission.** The operator sets
   `pod-security.kubernetes.io/enforce: restricted` on the namespace at
@@ -623,13 +607,8 @@ Two points are independent of the name and survive the revert:
   happens at startup, so a label stripped at runtime is not restored until the
   operator restarts. Having the monitor correct label drift as well is a small
   change and should be settled during implementation.
-- **must-gather does not collect the namespace automatically.** A previous
-  revision stated flatly that `openshift/must-gather` and
-  `stolostron/must-gather` select namespaces by explicit name lists and
-  ClusterOperator `relatedObjects` rather than by prefix. Neither repository is
-  vendored here and this one contains no must-gather artefact, so that claim
-  cannot be checked from this repository and is recorded as unverified. The
-  design does not rely on the namespace name for collection either way;
+- **must-gather does not collect the namespace automatically.** The design
+  does not rely on the namespace name for collection;
   coverage is handled as an explicit follow-up, so that a support bundle
   containing ClusterInstance CRs also contains the shared ConfigMaps they
   reference. This is tracked as a graduation criterion rather than an open
@@ -686,11 +665,22 @@ that actually use the shared namespace, so no existing CR changes behaviour.
 A ConfigMap in the ClusterInstance namespace is treated as the controller's
 own copy only if it carries **both** the managed-copy label and an
 ownerReference whose UID matches the current ClusterInstance. Anything else —
-no label, no ownerReference, or an ownerReference carrying a stale UID left
-behind by a `--cascade=orphan` deletion and re-create — is treated as a
+no label, or an ownerReference carrying another UID — is treated as a
 user-created object and is never overwritten.
 
-Because this check is read-only, it runs as part of the validation phase
+One exception: a ConfigMap that carries the managed-copy label but no
+ownerReference is adopted. Two flows produce this. Global Hub cluster
+migration copies the extra-manifest ConfigMaps referenced by
+`ImageClusterInstall` to the target hub without their `ownerReferences`. An
+ACM hub restore does the same for any copy that was backed up: Velero drops
+`ownerReferences`, and both installers add the ACM backup label to the
+ConfigMaps their install CR references. Such an object passes validation,
+and the copy step then sets the ownerReference and rewrites the content and
+all three provenance annotations from the shared ConfigMap, as for a new
+copy. `SharedManifestSync` never adopts: it skips the object until
+`ClusterInstanceReconciler` has adopted it.
+
+Because the ownership check is read-only, it runs in the validation phase
 (`ci.Validate`) rather than as part of the copy. The placement is load-bearing:
 the copy runs after `handleValidate` and before template rendering, and nothing
 in that gap writes `Status.Conditions`. A collision detected there would leave
@@ -717,41 +707,20 @@ A copy is constructed from its source, never deep-copied from it. Exactly
 three things are taken from the source ConfigMap: its `name`, its `data` and
 its `binaryData`. **No label and no annotation on the source is copied onto
 the copy** — not at creation, not during propagation, and not on the re-copy
-that happens during a reinstall. Every label and annotation a copy carries is
-written by the controller: the managed-copy label, and the provenance
-annotations below.
+that happens during a reinstall. The controller writes only its own metadata
+onto a copy: the managed-copy label and the provenance annotations below.
 
-The rule is deliberately a blanket one rather than a list of keys to strip,
-because the hazards are open-ended and three are already visible.
+The rule is a blanket one rather than a list of keys to strip. Source metadata
+that must not reach a copy includes:
 
-**GitOps ownership metadata.** The shared ConfigMaps are expected to be
-managed from Git — that is the premise of the feature — and this project
-documents deploying from an ArgoCD `Application` with
-`syncPolicy.automated.prune: true` (`docs/argocd.md`). GitOps engines mark the
-objects they own with labels and annotations and use those marks to decide
-what to prune. Copying such a mark onto a controller-created object in a
-ClusterInstance namespace, which no Git manifest renders, presents that object
-to the engine as Git-owned with no source behind it. The likely outcomes are
-that the engine prunes the copy on its next sync, or reports it permanently as
-out-of-sync or orphaned. The exact keys and pruning semantics are properties
-of the GitOps engine and the user's `Application`, not of siteconfig, and are
-not asserted here; a blanket rule holds without depending on them.
-
-**Reinstall preservation labels.** If a source ConfigMap carried
-`siteconfig.open-cluster-management.io/preserve`, a copy inheriting it would
-be swept into the reinstall backup/restore/cleanup path whenever the
-referencing ClusterInstance used `PreservationMode: All`, producing two
-controllers writing the same object. The `.internal` variant is worse: the
-controller runs an internal preservation pass alongside the user's mode on
-every reinstall where the mode is not `None`, so a copy carrying that label
-would be swept in regardless of which mode the user chose.
-
-**ACM hub backup label.** Labelling the shared ConfigMaps with
-`cluster.open-cluster-management.io/backup` so the inputs survive a hub
-restore is contemplated elsewhere in this proposal. The copies must not
-inherit it: they are reconstructible from the source, so backing up one copy
-per cluster namespace adds bulk to the backup and restores objects the
-reconciler would recreate anyway.
+- **GitOps ownership marks.** The GitOps engine would see the copy as
+  Git-owned with no manifest behind it, and may prune it or report it
+  out-of-sync.
+- **Reinstall preservation labels**
+  (`siteconfig.open-cluster-management.io/preserve`). The copy would be swept
+  into the reinstall backup/restore/cleanup path.
+- **ACM hub backup label** (`cluster.open-cluster-management.io/backup`).
+  Copies are reconstructible from the source and need no backup.
 
 #### Copy provenance annotations
 
@@ -775,13 +744,13 @@ annotations:
   the change-detection key; see
   [Change detection and convergence](#change-detection-and-convergence).
 - `initial-resource-version`: The source's `resourceVersion` at the time
-  **that copy** was first created, never updated thereafter. The name is
+  **that copy** was created or adopted, never updated thereafter. The name is
   deliberately not `provisioned-resource-version`: the version a copy was
   created from is frequently not the version the cluster installed from.
   Three cases make them diverge, and all three are accepted rather than
   engineered around:
-  - A copy created by a post-installation repoint records the version at
-    repoint time, not at install.
+  - A copy created by a post-installation repoint, or adopted after a hub
+    migration or restore, records the version at that time, not at install.
   - A ClusterInstance created with `spec.holdInstallation: true` has its
     copies created on the first reconcile, because nothing in
     `ClusterInstanceReconciler` is gated on `holdInstallation` — within the
@@ -858,7 +827,7 @@ Three reasons, all structural:
    avoid) or threading a second code path through the main loop.
 3. Keeping them separate means propagation **cannot** trigger a re-render.
    Nothing downstream of `handleRenderTemplates` runs, so a shared ConfigMap
-   edit carries none of the Server-Side Apply risk described under
+   edit cannot hit the installer rejection described under
    [Post-installation mutability](#post-installation-mutability-of-extramanifestsrefs).
 
 **Resolving which ClusterInstances reference a ConfigMap.** A field index is
@@ -938,11 +907,9 @@ events, so two cases are not self-healing:
 - **A deleted copy is not recreated.** Propagation skips a missing object by
   design, and the `ClusterInstanceReconciler` cannot recreate it for an
   already-provisioned cluster because of the `ObservedGeneration` pre-empt. The
-  copy stays missing until something bumps the ClusterInstance generation. A
-  missing copy must therefore also register as non-compliance on the
-  extra-manifests policy rather than being silently skipped, or the failure is
-  invisible end to end. That is external to this repository and is recorded as
-  [Open Question 3](#open-questions).
+  copy stays missing until something bumps the ClusterInstance generation. The
+  reference extra-manifests policy skips a missing ConfigMap rather than
+  reporting it; see [Open Question 3](#open-questions).
 - **A hand-edited copy is repaired only when the source next changes, or at
   the next cache resync**, because nothing watches the copies as currently
   specified. The manager's informer resync defaults to ten hours and
@@ -972,8 +939,8 @@ reads and would break both `ConfigurationMonitor`'s watch on the unlabelled
 operator ConfigMap and the validator's reads of user extra-manifest
 ConfigMaps. The label filter belongs in a per-watch predicate, after delivery.
 
-**The real cost is structural**, which is why this remains an open question
-rather than specified behaviour. Recreating a copy means either letting
+**The real cost is structural**, which is why recovery is out of scope rather
+than specified behaviour. Recreating a copy means either letting
 `SharedManifestSync` create objects, contradicting the single-ownership rule
 above, or adding a narrow "ensure managed copies" step to
 `ClusterInstanceReconciler` that runs *before* the `ObservedGeneration`
@@ -1010,16 +977,15 @@ stay meaningful, once per copy per edit, across the fleet.
 Two further costs are smaller. `initial-resource-version` is reset on each
 recreate unless the controller reads the old copy and carries the value
 forward, which turns provenance into state that any delete-recreate cycle can
-silently lose — a cost already anticipated when the option was raised.
+silently lose.
 Recreation would also move creation into `SharedManifestSync` unless the
 replacement is driven from `ClusterInstanceReconciler` instead. Set against
 blocking an edit that content comparison already repairs, the trade does not
 pay. If hand edits need preventing outright, namespace RBAC is the direct
 lever and does not disturb the propagation path.
 
-**Manual recovery of a missing copy.** Until [Open Question
-2](#open-questions) is settled there is a manual path, but it is narrower than
-it looks, because the two intuitive nudges both fail silently:
+**Manual recovery of a missing copy.** There is a manual path, but it is
+narrower than it looks, because the two intuitive nudges both fail silently:
 
 - **Editing the source ConfigMap does not work**, for two independent reasons.
   A metadata-only edit — a meaningless annotation or label — bumps the
@@ -1054,8 +1020,7 @@ it looks, because the two intuitive nudges both fail silently:
 This recovery is not free: the reconcile it triggers re-renders and re-applies
 **every** manifest with Server-Side Apply and `client.ForceOwnership`, so any
 drift in a siteconfig-owned field is reverted. It is a blunt escape hatch
-rather than a targeted repair, which is the main argument for settling Open
-Question 2 instead of relying on it.
+rather than a targeted repair.
 
 **Source metadata is never propagated either.** Propagation writes `data`,
 `binaryData` and `source-resource-version` and nothing else. A label or
@@ -1063,9 +1028,9 @@ annotation added to the source, whether alongside a content change or on its
 own, is not carried onto the copy, and the labels and annotations already on
 the copy are left untouched. This is the same rule that governs the initial
 copy, applied on the update path — see
-[Source metadata is not copied](#source-metadata-is-not-copied) for why GitOps
-ownership marks, reinstall preservation labels and the ACM backup label must
-all stay off the copies.
+[Source metadata is not copied](#source-metadata-is-not-copied) for why the
+source's GitOps ownership marks, reinstall preservation labels and ACM backup
+label are not carried onto the copies.
 
 **Deletion of a source ConfigMap** does not delete the copies. Copies remain
 so that already-provisioned clusters keep a valid policy source.
@@ -1126,17 +1091,10 @@ When a ClusterInstance stops referencing a shared ConfigMap — the staged-rollo
 case, where `v1` is replaced by `v2` — the `v1` copy is left in the cluster
 namespace.
 
-How harmful that is depends on something this design does not control. If the
-extra-manifests policy correlates from the ClusterInstance's
-`extraManifestsRefs` to the ConfigMap those references name — which is what it
-should do, and is recorded as [Open Question 3](#open-questions) — then an
-orphan is never read by the policy, because the current reference set does not
-name it. If the policy instead selects ConfigMaps in the cluster namespace
-more broadly, the orphan becomes a live second source of truth for that
-cluster.
-
-It is worth reclaiming either way, for reasons that do not depend on that
-answer: the copies accumulate without bound, an unowned copy is exactly the
+The extra-manifests policy never reads an orphan, because it correlates from
+the ClusterInstance's `extraManifestsRefs`
+([Open Question 3](#open-questions)). An orphan is still worth reclaiming:
+the copies accumulate without bound, an unowned copy is exactly the
 "second source of truth with no owner" that this design otherwise rejects, and
 the name-masquerade case below makes a stale copy actively misleading to an
 administrator reading the namespace.
@@ -1148,7 +1106,9 @@ the `owned-by` label, and the one existing namespace sweep —
 labels. Reclaiming them requires the `ClusterInstanceReconciler`, during the
 same reconcile that processes the new reference set, to list ConfigMaps in the
 ClusterInstance namespace carrying the managed-copy label and delete any that
-the current `extraManifestsRefs` no longer names.
+the current `extraManifestsRefs` no longer names. Reclamation runs only after
+the rendered manifests have been applied, so a repoint the installer rejects
+leaves the `v1` copy in place.
 
 Reclamation must key on owner identity and source, not on name alone. Two
 cases break a name-only sweep: nothing forbids two ClusterInstances in one
@@ -1171,9 +1131,8 @@ state to the ConfigMap, and it does not drive manifests onto a running cluster.
 
 Nothing below it does either. Neither assisted-service nor the IBI operator
 re-reads a changed extra-manifests ConfigMap on an already-installed cluster,
-so neither propagates the change to the spoke (confirmed during review; this
-is behaviour of components outside this repository and cannot be verified
-from it). The policy/TALM path is therefore not one option among several for
+so neither propagates the change to the spoke. The policy/TALM path is
+therefore not one option among several for
 day-2 convergence — it is the only one, and the cluster-namespace copy has no
 other consumer after installation.
 
@@ -1190,10 +1149,9 @@ constructed is outside the scope of this enhancement and is described here
 only for reference. The result is a single source of truth spanning both
 installation and day-N state.
 
-What that policy must do to make this work — report a missing copy as
-non-compliant, and correlate from the ClusterInstance's references rather
-than reading the namespace broadly — is recorded as
-[Open Question 3](#open-questions), because it is outside this repository.
+The policy already correlates from the ClusterInstance's references; it does
+not yet report a missing copy as non-compliant. See
+[Open Question 3](#open-questions).
 
 The alternative — leaving the copies stale and having the policy resolve the
 shared ConfigMap itself — was rejected; see
@@ -1210,16 +1168,16 @@ shared ConfigMap itself — was rejected; see
 | Name collision: shared ConfigMap name matches existing local ConfigMap | Detected read-only during validation — the object lacks the managed-copy label, or its ownerReference UID does not match — so it fails on `ClusterInstanceValidated` instead of overwriting. Propagation repeats the same check before every write and skips on mismatch. |
 | Updated copy does not match the running spoke cluster | After propagation the cluster-namespace ConfigMap holds the new content while the installed cluster still runs the old manifests until the ACM policy and TALM reconcile it. Documented so it is not mistaken for a siteconfig bug. The provenance annotations record the copy's lineage, not what the spoke installed. |
 | Copies not garbage-collected when deletion is paused | ownerReference GC only runs once the ClusterInstance object is removed, which the finalizer gates. On deletion timeout the reconciler applies the pause annotation and the object persists, so its copies persist with it until an administrator intervenes. |
-| Shared ConfigMaps are absent from ACM hub backup | `applyACMBackupLabelToInstallTemplates` labels only `TemplateRefs` ConfigMaps, so the shared ConfigMaps must be labelled too or a restored hub has no sources. The copies need no backup: Velero strips `status` and ACM's `restoreStatus` is nil by default, so a restored ClusterInstance recreates them. See [Open Question 2](#open-questions). |
-| Extra-manifests policy does not treat a missing copy as non-compliance | A deleted copy is not recreated for an already-provisioned cluster, so the policy is the only thing that would surface it. If the policy skips a missing ConfigMap rather than reporting non-compliance, the failure is invisible end to end. External to this repository; see Open Question 3. |
+| Shared ConfigMaps are absent from ACM hub backup | `applyACMBackupLabelToInstallTemplates` labels only `TemplateRefs` ConfigMaps, so the shared ConfigMaps must be labelled too or a restored hub has no sources. The copies need none: `status` is not restored by default, so a restored ClusterInstance recreates a missing copy and adopts a restored one. See [Open Question 2](#open-questions). |
+| Extra-manifests policy does not treat a missing copy as non-compliance | A deleted copy is not recreated for an already-provisioned cluster, and the reference policy skips a missing ConfigMap. Tracked in [CNF-30038](https://redhat.atlassian.net/browse/CNF-30038); see Open Question 3. |
 | Downstream CRD incompatibility | Controller copies ConfigMaps locally and strips `namespace` before template rendering, so downstream CRDs see only `name` — identical to current behavior. |
 | ownerReference pattern inconsistency | Scoped to this one use case (copied ConfigMaps). Documented in code. Label-based ownership remains the pattern for template-rendered objects. |
 | Shared ConfigMap updated after provisioning — copy is stale | `SharedManifestSync` propagates the update to every referencing cluster namespace. `source-resource-version` records the version last propagated; `initial-resource-version` preserves the version the copy was first created from. |
 | Propagation burst at fleet scale (3,500 writes from one edit) | Separate controller with its own `MaxConcurrentReconciles`, so it cannot starve `ClusterInstanceReconciler`. No new informer is added (a cluster-wide ConfigMap informer already exists). Steady-state cost is zero; bursts are expected a few times per release. |
 | Shared ConfigMap edited while a referencing cluster is mid-install, or before a held installation is released | Accepted and documented behaviour. The cluster may install with mixed content, or with content newer than `initial-resource-version` records. The day-2 policy reconcile converges it afterwards. Staged rollout via a new ConfigMap name avoids both. |
-| Downstream CRD rejects an in-place manifest-reference update on a repoint | **Unresolved** — see [Open Questions](#open-questions). Nothing is applied at all, because the dry-run gate precedes every apply, and retries back off towards ~16 minutes. Must be settled by live-cluster test before `implementable`; reinstall is the safe fallback. |
+| Installer rejects an in-place manifest-reference update on a repoint | The dry-run fails, no rendered manifest is applied, and `RenderedTemplatesValidated` reports the error. The user reverts the change or suppresses the rejecting manifest; see [Post-installation mutability of `extraManifestsRefs`](#post-installation-mutability-of-extramanifestsrefs). |
 | Repoint re-applies all manifests with `ForceOwnership`, reverting drift | Pre-existing behaviour for all ten currently-allowed day-N paths, not introduced here. Fields siteconfig does not render are not owned and so are not affected; `BareMetalHost.spec.online` and `automatedCleaningMode` are re-asserted. |
-| Copy inherits a GitOps ownership label or annotation and is pruned by the GitOps engine | No source label or annotation is copied. A copy is built from the source's `name`, `data` and `binaryData` only; every label and annotation it carries is written by the controller. See [Source metadata is not copied](#source-metadata-is-not-copied). |
+| Copy inherits a GitOps ownership label or annotation and is pruned by the GitOps engine | No source label or annotation is copied. A copy is built from the source's `name`, `data` and `binaryData` only, and the controller adds only its own managed-copy label and provenance annotations. See [Source metadata is not copied](#source-metadata-is-not-copied). |
 | Copy inherits a preservation label and collides with the reinstall preservation flow | Same rule — no source metadata is copied, so `siteconfig.open-cluster-management.io/preserve` never reaches a copy and the copy cannot be swept into the reinstall backup/restore/cleanup path. |
 | Orphaned `v1` copies accumulate after a staged rollout | Reconciler deletes managed copies in the ClusterInstance namespace that the current `extraManifestsRefs` no longer names. |
 | Two controllers writing the same ConfigMap | Creation and ownership belong solely to `ClusterInstanceReconciler`. `SharedManifestSync` only updates objects that exist and pass the ownership check, and only `data`/`binaryData`/`source-resource-version`. It uses `Get`-then-`Update`, not `CreateOrUpdate`, and avoids SSA, so it cannot replace the `siteconfig-controller` field set. |
@@ -1242,6 +1200,9 @@ shared ConfigMap itself — was rejected; see
 - Making `/extraManifestsRefs` day-N mutable is all-or-nothing: the existing
   allow-list mechanism cannot express a narrower rule, so administrators can
   also remove or reorder references post-install, not only repoint them.
+- Both installers reject a post-install repoint today, so a staged rollout
+  depends on suppressing the install CR, which then receives no updates until
+  the suppression is removed with a reinstall request.
 - A shared ConfigMap edit now reaches every referencing cluster namespace on
   the hub by construction, and it does so immediately. That is the point of
   the feature, but it means a mistaken edit lands in every cluster-namespace
@@ -1252,8 +1213,7 @@ shared ConfigMap itself — was rejected; see
   described here only for reference. By design that policy runs in inform
   mode, so a mistaken edit surfaces fleet-wide as reported non-compliance
   rather than being applied fleet-wide; enforcement happens only under a
-  progressive rollout driven by TALM. (Policy and TALM behaviour is external
-  to this repository and cannot be verified from it.) See
+  progressive rollout driven by TALM. See
   [Relationship to policy-driven day-2 reconciliation](#relationship-to-policy-driven-day-2-reconciliation).
 
 ## Design Details
@@ -1261,48 +1221,34 @@ shared ConfigMap itself — was rejected; see
 ### Open Questions
 
 1. **Do the downstream CRDs accept an in-place manifest-reference update after
-   installation?** `AgentClusterInstall.spec.manifestsConfigMapRefs` carries no
-   CEL immutability rule at the schema level, but the assisted-service
-   validating webhook is not vendored in this repository and cannot be
-   inspected here, and assisted-service is known to enforce
-   `AgentClusterInstall` immutability elsewhere. `ImageClusterInstall` is not
-   vendored in any form, so nothing can be said about it from this repository.
-   This must be answered by a live-cluster test before the enhancement moves to
-   `implementable`, because a rejection blocks *all* manifest application for
-   the affected ClusterInstance, not just the changed object. If either CRD
-   rejects the update, the staged-rollout workflow must fall back to
-   reinstall-based repointing, which recreates the downstream CR instead of
-   updating it.
+   installation?** The installer decides. `extraManifestsRefs` is mutable
+   after installation and SiteConfig adds no installer-specific check for it.
+   If the installer rejects the change, the dry-run fails and the user
+   reverts it or suppresses the rejecting manifest. Both installers reject it
+   today. See
+   [Post-installation mutability of `extraManifestsRefs`](#post-installation-mutability-of-extramanifestsrefs).
 2. **How should a missing or drifted copy be recovered?** Not in this
    implementation. A deleted copy is not recreated for an already-provisioned
    cluster, and a hand-edited copy is repaired only when the source next
-   changes. If this needs to be addressed properly, an RFE can be opened and
-   handled as a separate, dedicated proposal.
+   changes or at the next cache resync. If this needs to be addressed
+   properly, an RFE can be opened and handled as a separate, dedicated
+   proposal.
 
-   The exposure is narrower than it looks: unhold, reinstall and hub restore
-   all clear the `ObservedGeneration` pre-empt and re-run the copy step, so
-   the residual case is a copy lost on a provisioned cluster that nothing
-   subsequently touches. There, it is **neither detected nor recovered** —
-   which makes [Open Question 3](#open-questions) a prerequisite rather than
-   a parallel concern, since the extra-manifests policy is then the only
-   thing that could surface the loss. Until then, the manual path and its
-   cost are described under
+   The exposure is narrower than it looks: unhold, reinstall, hub restore and
+   Global Hub cluster migration all clear the `ObservedGeneration` pre-empt
+   and re-run the copy step, so the residual case is a copy lost on a
+   provisioned cluster that nothing subsequently touches. There, the
+   extra-manifests policy does not yet report the missing copy
+   ([Open Question 3](#open-questions)), and it is restored manually; see
+   "Manual recovery of a missing copy" under
    [Change detection and convergence](#change-detection-and-convergence).
 3. **How does the extra-manifests ACM policy select and evaluate the
-   cluster-namespace copy?** Two sub-questions, neither answerable from this
-   repository — no policy is defined or vendored here, and the only reference
-   is the `extra-manifests-policy` CR in `openshift-kni/telco-reference`.
-   First, does the policy report a **missing** copy as non-compliant? The
-   design relies on it: a deleted copy is not recreated for an
-   already-provisioned cluster, so until Open Question 2 is implemented the
-   policy is the only thing that would surface the loss, and a policy that
-   skips a missing ConfigMap would make it silent. Second, does the policy
-   **correlate from the ClusterInstance's `extraManifestsRefs` to the
-   ConfigMap those references name**, rather than selecting ConfigMaps in the
-   cluster namespace more broadly? The answer decides whether an orphaned copy
-   is inert clutter or a live second source of truth; see
-   [Orphaned copies](#orphaned-copies). If either answer is no, a story to
-   change the policy belongs on this epic.
+   cluster-namespace copy?** The `extra-manifests-policy` reference CR in
+   `openshift-kni/telco-reference`:
+   - Correlates from the ClusterInstance's `extraManifestsRefs` to the
+     ConfigMaps those references name, so an orphaned copy is never read.
+   - Skips a missing ConfigMap instead of reporting it as non-compliant.
+     Tracked in [CNF-30038](https://redhat.atlassian.net/browse/CNF-30038).
 
 ### Test Plan
 
@@ -1352,28 +1298,20 @@ shared ConfigMap itself — was rejected; see
     asserted as set equality rather than as the absence of named keys, so the
     test fails on any inherited metadata.
   - Name collision with user-created local ConfigMap — rejected with error.
+  - ConfigMap carrying the managed-copy label but no ownerReference —
+    adopted: ownerReference set, content and provenance annotations rewritten.
   - Shared ConfigMap does not exist — error.
   - Namespace field cleared on in-memory ExtraManifestsRefs before rendering.
   - Managed copies no longer named by `extraManifestsRefs` are deleted
     (orphan reclamation after a repoint).
   - Copy deleted while `Status.ObservedGeneration == Generation` — a
     label-only update on the ClusterInstance enters `Reconcile` but is
-    pre-empted, and the copy is **not** recreated. This asserts the behaviour
-    as currently specified; it is superseded by the ensure-copies case below
-    under a future recovery proposal; see [Open Question 2](#open-questions).
+    pre-empted, and the copy is **not** recreated: the documented limitation
+    in [Open Question 2](#open-questions).
   - Copy deleted, then an allow-listed spec path is edited
     (`spec.extraAnnotations` under a kind no template renders) — the
     generation advances, the reconcile runs in full, and the copy is
     recreated with a fresh `initial-resource-version`.
-  - **Conditional on a future recovery proposal
-    (see [Open Question 2](#open-questions))**, superseding the previous case: copy absent on
-    an already-provisioned ClusterInstance — the ensure-copies step runs ahead
-    of the pre-empt and recreates it, without rendering templates and without
-    advancing `ObservedGeneration`.
-  - Copy present and current on an already-provisioned ClusterInstance — the
-    ensure-copies step performs no write.
-  - ClusterInstance with no shared references — the ensure-copies step
-    returns without listing or reading anything.
 - `internal/controller/sharedmanifestsync_controller_test.go` (new; mirrors the
   fake-client Ginkgo pattern in `configuration_monitor_test.go`, since the
   repository uses no envtest):
@@ -1388,8 +1326,9 @@ shared ConfigMap itself — was rejected; see
   - Copy absent — propagation skips it and does not create one.
   - Source edited in metadata only while the copy is absent — no write and no
     create; an absent copy is not recoverable from the source side.
-  - Copy present but not a managed copy (no label, or an ownerReference UID
-    that does not match) — skipped, never overwritten, warning Event emitted.
+  - Copy present but not a managed copy (no label, no ownerReference, or an
+    ownerReference UID that does not match) — skipped, never overwritten,
+    warning Event emitted.
   - Copy hand-edited — content comparison detects the drift and the next
     propagation repairs it, even though the copy's `source-resource-version`
     annotation still matches the source.
@@ -1437,15 +1376,14 @@ shared ConfigMap itself — was rejected; see
   and does **not** cause the referencing ClusterInstances to re-render
   (assert `Status.ObservedGeneration` and the downstream CRD's
   `resourceVersion` are unchanged).
-- **Blocking test for [Open Question 1](#open-questions):** on a provisioned
-  cluster, repoint `extraManifestsRefs` from `v1` to `v2` and confirm that
-  assisted-service accepts the `AgentClusterInstall.spec.manifestsConfigMapRefs`
-  update, and that the IBI operator accepts the equivalent
-  `ImageClusterInstall.spec.extraManifestsRefs` update. Assert that the dry-run
-  gate passes and the ClusterInstance reaches `ObservedGeneration ==
-  Generation` rather than failing the dry-run gate and backing off
-  indefinitely.
-- Staged rollout across a batch: repoint a subset of ClusterInstances to `v2`,
+- **Post-install repoint ([Open Question 1](#open-questions)):** on a
+  provisioned cluster, repoint `extraManifestsRefs` from `v1` to `v2`, for
+  both Assisted Installer and IBI. If the installer accepts, assert
+  `ObservedGeneration == Generation`. If it rejects, assert a
+  `RenderedTemplatesValidated` failure that clears both on revert and on
+  suppressing the rejecting kind, with the install CR unchanged.
+- Staged rollout across a batch: repoint a subset of ClusterInstances to `v2`
+  (suppressing the install CR where the installer rejects the change),
   confirm the unrepointed ones still reference `v1`, and confirm orphaned `v1`
   copies are reclaimed in the repointed namespaces only.
 - **Hub restore ([Open Question 2](#open-questions)):** restore a hub whose
@@ -1455,15 +1393,20 @@ shared ConfigMap itself — was rejected; see
   `Status.ObservedGeneration` is zero against a non-zero
   `metadata.generation` and the pre-empt does not fire. Then confirm ordinary
   reconciliation recreates the copies, with no recovery machinery involved.
-  Run the same scenario a second time with `ClusterInstance` added to the ACM
-  `Restore`'s `restoreStatus.includedResources`, which preserves `status` and
-  reinstates the gap: there the copies must remain absent, which is the
-  documented limitation rather than a defect.
-- **Drift with no source event ([Open Question 2](#open-questions)):**
-  hand-edit a cluster-namespace copy, leave the shared ConfigMap untouched,
-  and confirm the chosen recovery path repairs it. The propagation tests above
-  only cover repair triggered by a later source change, which is a different
-  path and does not exercise this one.
+  Repeat with the copies restored without ownerReferences and confirm they
+  are adopted.
+  Run the copies-absent scenario again with `ClusterInstance` added to the ACM
+  `Restore`'s `restoreStatus.includedResources`, which preserves `status`.
+  A restored object's `metadata.generation` restarts at 1, so the pre-empt
+  fires only for a ClusterInstance whose spec was never edited: there the
+  copies remain absent, which is the documented limitation rather than a
+  defect.
+- **Cluster migration:** migrate an IBI-installed cluster that references a
+  shared ConfigMap to another hub with
+  [Global Hub](https://developers.redhat.com/articles/2026/02/24/use-global-hub-migrate-managed-clusters),
+  with the shared ConfigMaps applied to the target hub first. Confirm the
+  re-applied ClusterInstance reconciles and adopts the migrated copy, and
+  that a later source edit on the target hub propagates to it.
 
 **Scale testing:**
 
@@ -1475,13 +1418,6 @@ shared ConfigMap itself — was rejected; see
 ### Graduation Criteria
 
 - [ ] Design reviewed and approved by maintainers
-- [ ] **[Open Question 1](#open-questions) resolved by live-cluster test**:
-  confirmed whether `AgentClusterInstall` and `ImageClusterInstall` accept an
-  in-place manifest-reference update post-installation. Required before this
-  proposal moves from `provisional` to `implementable`, since a rejection
-  changes the staged-rollout design. A negative answer does not block
-  propagation, which is independently shippable; it blocks only the repoint
-  capability built on top of it.
 - [ ] Implementation merged with adequate test coverage
 - [ ] Propagation validated at fleet scale
 - [ ] **Must-gather coverage aligned**: confirm what the ACM/MCE must-gather
@@ -1489,23 +1425,26 @@ shared ConfigMap itself — was rejected; see
   collected, add the shared namespace to the same collection so a bundle is
   self-contained. The change lands in the must-gather repository, so it is
   tracked as a separate story on the epic.
-- [ ] **[Open Question 3](#open-questions) confirmed or tracked**: the
-  extra-manifests policy reports a missing copy as non-compliant and
-  correlates from the ClusterInstance to the ConfigMap its references name —
-  or a story exists on this epic to make it do both
+- [x] **[Open Question 3](#open-questions) confirmed or tracked**: the
+  extra-manifests policy correlates from the ClusterInstance to the ConfigMap
+  its references name; reporting a missing copy as non-compliant is tracked
+  in [CNF-30038](https://redhat.atlassian.net/browse/CNF-30038)
 - [ ] **[Open Question 2](#open-questions) scoped out**: automatic recovery
   of a missing or drifted copy is not in this implementation. The limitation
-  is stated in user-facing documentation as "neither detected nor
-  recovered", and the manual path is documented with its `ForceOwnership`
-  side effects. A hub-restore test confirms the paths that *do* self-heal: a
+  is stated in user-facing documentation, and the procedure to restore a
+  missing copy is documented with its `ForceOwnership` side effects. A
+  hub-restore test confirms the paths that *do* self-heal: a
   restored ClusterInstance reconciles and recreates its copies because
   `status` is not restored by default, and releasing a held installation
   does the same. If the limitation proves unacceptable in practice, an RFE
   can be opened to address recovery in a dedicated proposal
+- [ ] Global Hub cluster migration validated (see [Test Plan](#test-plan))
 - [ ] Documented in user-facing operator documentation covering shared
   namespace setup, `ExtraManifestsRefs` namespace field usage, the staged
-  rollout workflow, the interaction with the extra-manifests ACM policy, and
-  the accepted mid-install and held-install behaviour
+  rollout workflow including a rejected repoint, the interaction with the
+  extra-manifests ACM policy, cluster migration (the shared ConfigMaps must
+  exist on the target hub first), and the accepted mid-install and
+  held-install behaviour
 - [ ] Released
 
 ### Upgrade / Downgrade Strategy
@@ -1567,27 +1506,29 @@ scenario is between the CRD version and the operator version:
 ## Implementation History
 
 - 2026-04-30: Initial proposal created.
-- 2026-10-29: Revised following review. Namespace renamed from
+- 2026-10-29: Namespace renamed from
   `siteconfig-shared-resources` to `openshift-siteconfig-resources`; added
   propagation of shared ConfigMap updates to cluster-namespace copies via a
   dedicated `SharedManifestSync` controller; made `extraManifestsRefs` mutable
   after installation to support staged fleet rollout; split provenance into
   live and install-time annotations.
-- 2026-11-04: Second review pass folded in. Namespace rename reverted to
+- 2026-11-04: Namespace rename reverted to
   `siteconfig-shared-resources`, because the `openshift-` prefix hides the
   namespace behind the console's "Show default projects" toggle and left the
   managed-OpenShift question unresolved. `provisioned-resource-version`
   renamed to `initial-resource-version`, which is what it actually records.
   Confirmed that neither assisted-service nor the IBI operator re-reads a
   changed ConfigMap post-install; scoped Secrets out as a Non-Goal; recorded
-  that no source label or annotation is copied onto a copy; corrected the
-  Drawbacks claim about fleet blast radius; and settled the copy-recovery
-  open question on a startup pass plus a copy watch, with no additional
-  periodic sweep; where the write lives is still open. Must-gather coverage
+  that no source label or annotation is copied onto a copy; and corrected the
+  Drawbacks claim about fleet blast radius. Must-gather coverage
   moved from an open question to a graduation criterion.
   Open Questions renumbered: the downstream-CRD mutability question stays 1,
   copy recovery becomes 2, and a new question records the extra-manifests
   policy dependency as 3.
+- 2026-11-16: Open questions answered: the installer decides on a
+  post-install repoint, and copy recovery stays out of scope. Copies arriving
+  without an ownerReference are adopted, for Global Hub cluster migration
+  and hub restore.
 
 ## Alternatives
 
@@ -1710,19 +1651,16 @@ source when evaluating compliance.
 **Rejected because:** SiteConfig owns the 1:N mapping that `extraManifestsRefs`
 expresses, so keeping the copies faithful to the source is its responsibility;
 pushing that elsewhere splits one relationship across two owners. The first
-two objections below were raised by @imiller0 during review and are reproduced
-here because they are the decisive ones:
+two objections below are the decisive ones:
 
 - A TALM-side controller would have to watch ClusterInstances and the shared
   ConfigMaps — watches the SiteConfig operator already holds — and would
   duplicate the copy logic in a second codebase, with the two implementations
   free to drift.
 - Policy-side traversal moves the cost from rare to continuous: the mapping
-  would be unwound on every compliance evaluation, typically every 10 minutes,
-  for every cluster. At 3,500 clusters that is a permanent load, against a
-  propagation burst that occurs a few times per release. (The evaluation
-  interval is quoted from that review discussion and is not established in
-  this repository.)
+  would be unwound on every compliance evaluation, for every cluster. At
+  3,500 clusters that is a permanent load, against a
+  propagation burst that occurs a few times per release.
 - A third variant avoids both costs: have the ACM policy reference the shared
   ConfigMap directly through hub-side templating, needing neither a second
   controller nor per-cluster traversal. It is rejected for a different reason.
@@ -1734,9 +1672,3 @@ here because they are the decisive ones:
 Leaving the copies stale also defeats the purpose of the feature. The goal is a
 single source of truth spanning installation and day-N state; a copy that no
 longer matches its source is a second source of truth with no owner.
-
-The earlier revision of this proposal argued the opposite — that extra
-manifests are consumed once at provisioning, so propagation would be overhead
-with no consumer. That reasoning was wrong in its premise: the consumer is not
-the installer but the ACM policy that treats the cluster-namespace ConfigMap as
-the desired day-N state.
