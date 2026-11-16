@@ -45,7 +45,7 @@ spec:
             value: $(params.EXPECTED_OUTPUT)
           script: |
             # Install Deps
-            dnf -y install jq git make golang podman
+            dnf -y install jq git make golang
 
             # Runtime Env Config
             export GOPATH=$HOME/.go
