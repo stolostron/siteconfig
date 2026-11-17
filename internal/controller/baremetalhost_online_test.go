@@ -120,6 +120,9 @@ var _ = Describe("BareMetalHost apply safety", func() {
 	type lifecycleCase struct {
 		previousLifecycle string
 		reinstall         string
+		observedReinstall string
+		failedReason      v1alpha1.ClusterInstanceConditionReason
+		expectedLifecycle string
 		restore           string
 		handledRestore    string
 		unallocated       bool
@@ -133,25 +136,64 @@ var _ = Describe("BareMetalHost apply safety", func() {
 			if tc.reinstall != "" {
 				cluster.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: tc.reinstall}
 			}
+			if tc.observedReinstall != "" || tc.failedReason != "" {
+				cluster.Status.Reinstall = &v1alpha1.ReinstallStatus{ObservedGeneration: tc.observedReinstall}
+			}
+			if tc.failedReason != "" {
+				cluster.Status.Reinstall.InProgressGeneration = tc.reinstall
+				cluster.Status.Reinstall.RequestEndTime = metav1.Now()
+				cluster.Status.Reinstall.Conditions = []metav1.Condition{{
+					Type: string(v1alpha1.ReinstallRequestProcessed), Status: metav1.ConditionFalse,
+					Reason: string(tc.failedReason),
+				}}
+			}
 			cluster.Labels = map[string]string{veleroRestoreNameLabel: tc.restore}
 			cluster.Annotations = map[string]string{veleroRestoreHandledAnnotation: tc.handledRestore}
-			prepared, err := prepareBareMetalHostApply(cluster, *desired)
-			Expect(err).ToNot(HaveOccurred(), "the rendered host must be valid for the lifecycle check")
+			lifecycle := bareMetalHostOnlineLifecycle(cluster, tc.previousLifecycle)
+			prepared := desired.DeepCopy()
+			prepared.SetAnnotations(map[string]string{bmhOnlineInitializedAnnotation: lifecycle})
 			Expect(bareMetalHostOnlineInitialized(current, prepared, cluster)).To(Equal(expected),
-				"only the same assigned installation or a handled restore may preserve the current power state")
+				"only a confirmed new installation or association may reset the current power state")
+			if tc.expectedLifecycle != "" {
+				Expect(lifecycle).To(Equal(tc.expectedLifecycle),
+					"an unprocessed reinstall must retain the last initialized installation in the marker")
+			}
 		},
 		Entry("legacy assigned host", lifecycleCase{}, true),
 		Entry("current installation", lifecycleCase{previousLifecycle: "cluster-uid"}, true),
 		Entry("current reinstall", lifecycleCase{
-			previousLifecycle: "cluster-uid:install-1", reinstall: "install-1",
+			previousLifecycle: "cluster-uid:install-1", reinstall: "install-1", observedReinstall: "install-1",
 		}, true),
 		Entry("inventory returned to the pool", lifecycleCase{
 			previousLifecycle: "cluster-uid", unallocated: true,
 		}, false),
 		Entry("new ClusterInstance", lifecycleCase{previousLifecycle: "old-cluster-uid"}, false),
-		Entry("new reinstall attempt", lifecycleCase{
-			previousLifecycle: "cluster-uid:install-1", reinstall: "install-2",
+		Entry("successfully processed new reinstall", lifecycleCase{
+			previousLifecycle: "cluster-uid:install-1", reinstall: "install-2", observedReinstall: "install-2",
 		}, false),
+		Entry("requested first reinstall", lifecycleCase{
+			previousLifecycle: "cluster-uid", reinstall: "install-1", expectedLifecycle: "cluster-uid",
+		}, true),
+		Entry("requested next reinstall", lifecycleCase{
+			previousLifecycle: "cluster-uid:install-1", reinstall: "install-2", observedReinstall: "install-1",
+			expectedLifecycle: "cluster-uid:install-1",
+		}, true),
+		Entry("rejected first reinstall", lifecycleCase{
+			previousLifecycle: "cluster-uid", reinstall: "install-1", failedReason: v1alpha1.Failed,
+			expectedLifecycle: "cluster-uid",
+		}, true),
+		Entry("rejected next reinstall", lifecycleCase{
+			previousLifecycle: "cluster-uid:install-1", reinstall: "install-2", observedReinstall: "install-1",
+			failedReason: v1alpha1.Failed, expectedLifecycle: "cluster-uid:install-1",
+		}, true),
+		Entry("timed-out next reinstall", lifecycleCase{
+			previousLifecycle: "cluster-uid:install-1", reinstall: "install-2", observedReinstall: "install-1",
+			failedReason: v1alpha1.TimedOut, expectedLifecycle: "cluster-uid:install-1",
+		}, true),
+		Entry("lost reinstall status", lifecycleCase{
+			previousLifecycle: "cluster-uid:install-1", reinstall: "install-2",
+			expectedLifecycle: "cluster-uid:install-1",
+		}, true),
 		Entry("restore not yet handled", lifecycleCase{
 			previousLifecycle: "old-cluster-uid", restore: "restore-1",
 		}, false),
@@ -162,13 +204,21 @@ var _ = Describe("BareMetalHost apply safety", func() {
 			previousLifecycle: "old-cluster-uid", restore: "restore-1", handledRestore: "restore-1",
 		}, true),
 		Entry("handled restore with the same reinstall", lifecycleCase{
-			previousLifecycle: "old-cluster-uid:install-1", reinstall: "install-1",
+			previousLifecycle: "old-cluster-uid:install-1", reinstall: "install-1", observedReinstall: "install-1",
 			restore: "restore-1", handledRestore: "restore-1",
 		}, true),
 		Entry("handled restore with a new reinstall", lifecycleCase{
-			previousLifecycle: "old-cluster-uid:install-1", reinstall: "install-2",
+			previousLifecycle: "old-cluster-uid:install-1", reinstall: "install-2", observedReinstall: "install-2",
 			restore: "restore-1", handledRestore: "restore-1",
 		}, false),
+		Entry("handled restore without reinstall status", lifecycleCase{
+			previousLifecycle: "old-cluster-uid:install-1", reinstall: "install-1",
+			restore: "restore-1", handledRestore: "restore-1", expectedLifecycle: "cluster-uid:install-1",
+		}, true),
+		Entry("handled restore without status after an unprocessed request", lifecycleCase{
+			previousLifecycle: "old-cluster-uid:install-1", reinstall: "install-2",
+			restore: "restore-1", handledRestore: "restore-1", expectedLifecycle: "cluster-uid:install-1",
+		}, true),
 	)
 
 	// These tests verify the API requests and failure boundaries. Envtest covers
