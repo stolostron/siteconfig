@@ -82,6 +82,7 @@ const (
 // ClusterInstanceReconciler reconciles a ClusterInstance object
 type ClusterInstanceReconciler struct {
 	client.Client
+	APIReader        client.Reader
 	Scheme           *runtime.Scheme
 	Recorder         events.EventRecorder
 	Log              *zap.Logger
@@ -698,7 +699,7 @@ func (r *ClusterInstanceReconciler) executeRenderedManifests(
 	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 	objects []ci.RenderedObject,
-	manifestStatus string) (manifestsRendered []v1alpha1.ManifestReference, ok bool, err error) {
+	manifestStatus string, dryRun bool) (manifestsRendered []v1alpha1.ManifestReference, ok bool, err error) {
 
 	ok = true
 	manifestsRendered = append([]v1alpha1.ManifestReference{}, clusterInstance.Status.ManifestsRendered...)
@@ -709,7 +710,8 @@ func (r *ClusterInstanceReconciler) executeRenderedManifests(
 
 		status := v1alpha1.ManifestRenderedFailure
 		message := ""
-		if result, applyErr := applyObject(ctx, c, log, object.GetObject()); applyErr != nil {
+		if result, applyErr := r.applyRenderedObject(
+			ctx, c, log, clusterInstance, object.GetObject(), dryRun); applyErr != nil {
 			errs = append(errs, applyErr)
 			ok = false
 			message = applyErr.Error()
@@ -742,7 +744,7 @@ func (r *ClusterInstanceReconciler) validateRenderedManifests(
 	dryRunClient := client.NewDryRunClient(r.Client)
 
 	manifestsRendered, rendered, err := r.executeRenderedManifests(ctx, dryRunClient, log,
-		clusterInstance, objects, v1alpha1.ManifestRenderedValidated)
+		clusterInstance, objects, v1alpha1.ManifestRenderedValidated, true)
 
 	conditionReason := v1alpha1.Completed
 	conditionStatus := metav1.ConditionTrue
@@ -788,7 +790,7 @@ func (r *ClusterInstanceReconciler) applyRenderedManifests(
 	log.Info("Applying the rendered manifests")
 
 	manifestsRendered, rendered, err := r.executeRenderedManifests(ctx, r.Client,
-		log, clusterInstance, objects, v1alpha1.ManifestRenderedSuccess)
+		log, clusterInstance, objects, v1alpha1.ManifestRenderedSuccess, false)
 
 	conditionReason := v1alpha1.Completed
 	conditionStatus := metav1.ConditionTrue
