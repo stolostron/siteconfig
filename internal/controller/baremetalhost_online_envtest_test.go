@@ -45,6 +45,8 @@ import (
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
+	"github.com/stolostron/siteconfig/internal/controller/configuration"
+	"github.com/stolostron/siteconfig/internal/controller/reinstall"
 	ai_templates "github.com/stolostron/siteconfig/internal/templates/assisted-installer"
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 )
@@ -296,6 +298,41 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			})
 			assertOnline(t, desired, false)
 			g.Expect(read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/pipeline-test", "powered-off"))
+
+			// A rejected reinstall still resumes normal rendering. Exercise the
+			// actual default-disabled handler before reapplying the production template.
+			power(t, desired, !installer.online)
+			marker := read(t, desired).GetAnnotations()[bmhOnlineInitializedAnnotation]
+			store, err := configuration.NewConfigurationStore(configuration.NewDefaultConfiguration())
+			g.Expect(err).ToNot(HaveOccurred(), "the default configuration must be available")
+			g.Expect(store.GetAllowReinstalls()).To(BeFalse(), "this regression requires reinstalls to be disabled")
+			handler := &reinstall.ReinstallHandler{Client: c, Logger: log, ConfigStore: store}
+			before := instance.DeepCopy()
+			instance.Spec.Reinstall = &v1alpha1.ReinstallSpec{
+				Generation: "rejected-attempt", PreservationMode: v1alpha1.PreservationModeNone,
+			}
+			g.Expect(c.Patch(ctx, instance, client.MergeFrom(before))).To(Succeed(), "the reinstall request must be stored")
+			for range 5 {
+				_, err := handler.ProcessRequest(ctx, instance)
+				if err != nil {
+					g.Expect(err).To(MatchError(ContainSubstring("not configured for cluster reinstalls")),
+						"only the expected disabled-reinstall failure is allowed")
+				}
+				g.Expect(c.Get(ctx, client.ObjectKeyFromObject(instance), instance)).To(Succeed(), "read reinstall progress")
+				if !instance.Status.Reinstall.RequestEndTime.IsZero() {
+					break
+				}
+			}
+			g.Expect(instance.Status.Reinstall.RequestEndTime.IsZero()).To(BeFalse(), "the request must reach terminal failure")
+			g.Expect(meta.IsStatusConditionFalse(instance.Status.Reinstall.Conditions,
+				string(v1alpha1.ReinstallRequestValidated))).To(BeTrue(), "the request must be rejected by validation")
+			result, err := handler.ProcessRequest(ctx, instance)
+			g.Expect(err).ToNot(HaveOccurred(), "a rejected request is already considered processed")
+			g.Expect(result.IsZero()).To(BeTrue(), "normal template rendering is allowed to resume")
+			runPipeline()
+			assertOnline(t, desired, !installer.online)
+			g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, marker),
+				"a rejected request must not advance the initialization marker")
 		})
 	}
 	for _, failure := range []string{"initial-write-timeout", "handoff-then-metadata-failure"} {
@@ -526,6 +563,41 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 		g.Expect(apply(desired, false)).To(Succeed())
 		assertOnline(t, desired, false)
 	})
+	for _, previousReinstall := range []string{"", "first-success"} {
+		for _, reason := range []v1alpha1.ClusterInstanceConditionReason{v1alpha1.Failed, v1alpha1.TimedOut} {
+			t.Run(fmt.Sprintf("unsuccessful-reinstall-previous-%s-reason-%s", previousReinstall, reason), func(t *testing.T) {
+				g := NewWithT(t)
+				desired := host(false)
+				original := cluster.DeepCopy()
+				if previousReinstall != "" {
+					original.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: previousReinstall}
+					original.Status.Reinstall = &v1alpha1.ReinstallStatus{ObservedGeneration: previousReinstall}
+				}
+				_, err := applyBareMetalHost(ctx, c, c, log, original, *desired, false)
+				g.Expect(err).ToNot(HaveOccurred(), "initialize the existing installation")
+				power(t, desired, true)
+				marker := read(t, desired).GetAnnotations()[bmhOnlineInitializedAnnotation]
+				next := original.DeepCopy()
+				next.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: "unsuccessful-attempt"}
+				next.Status.Reinstall = &v1alpha1.ReinstallStatus{
+					ObservedGeneration: previousReinstall, InProgressGeneration: "unsuccessful-attempt",
+					RequestEndTime: metav1.Now(),
+					Conditions: []metav1.Condition{{
+						Type: string(v1alpha1.ReinstallRequestProcessed), Status: metav1.ConditionFalse, Reason: string(reason),
+					}},
+				}
+				handler := &reinstall.ReinstallHandler{Logger: log}
+				result, err := handler.ProcessRequest(ctx, next)
+				g.Expect(err).ToNot(HaveOccurred(), "the unsuccessful request is already considered processed")
+				g.Expect(result.IsZero()).To(BeTrue(), "normal manifest rendering can resume")
+				_, err = applyBareMetalHost(ctx, c, c, log, next, *desired, false)
+				g.Expect(err).ToNot(HaveOccurred(), "metadata must remain applicable after the failed request")
+				assertOnline(t, desired, true)
+				g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, marker),
+					"a failed request must retain the last initialized installation")
+			})
+		}
+	}
 	for _, boundary := range []string{"reinstall", "new-ci", "reallocated-inventory"} {
 		t.Run(boundary, func(t *testing.T) {
 			g := NewWithT(t)
@@ -536,6 +608,7 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			switch boundary {
 			case "reinstall":
 				nextCluster.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: "attempt-2"}
+				nextCluster.Status.Reinstall = &v1alpha1.ReinstallStatus{ObservedGeneration: "attempt-2"}
 			case "new-ci":
 				nextCluster.UID = types.UID("next-cluster-uid")
 			case "reallocated-inventory":
@@ -562,6 +635,7 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			originalCluster := cluster.DeepCopy()
 			if alreadyReinstalled {
 				originalCluster.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: "first-reinstall"}
+				originalCluster.Status.Reinstall = &v1alpha1.ReinstallStatus{ObservedGeneration: "first-reinstall"}
 			}
 			_, err := applyBareMetalHost(ctx, c, c, log, originalCluster, *desired, false)
 			g.Expect(err).ToNot(HaveOccurred())
@@ -576,7 +650,21 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			g.Expect(err).ToNot(HaveOccurred())
 			assertOnline(t, desired, true)
 			g.Expect(read(t, desired).GetAnnotations()[bmhOnlineInitializedAnnotation]).To(HavePrefix("restored-uid"))
+			// Restore may omit status and may contain an unprocessed reinstall
+			// request. The surviving BMH marker must remain authoritative then.
+			restored.Status.Reinstall = nil
+			restored.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: "unprocessed-after-restore"}
+			_, err = restarted.applyRenderedObject(ctx, c, log, restored, *desired, false)
+			g.Expect(err).ToNot(HaveOccurred(), "restoring without reinstall status must preserve power")
+			assertOnline(t, desired, true)
+			expectedLifecycle := "restored-uid"
+			if alreadyReinstalled {
+				expectedLifecycle += ":first-reinstall"
+			}
+			g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, expectedLifecycle),
+				"the restored marker must retain the previous initialized generation")
 			restored.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: "next-reinstall"}
+			restored.Status.Reinstall = &v1alpha1.ReinstallStatus{ObservedGeneration: "next-reinstall"}
 			_, err = restarted.applyRenderedObject(ctx, c, log, restored, *desired, false)
 			g.Expect(err).ToNot(HaveOccurred())
 			assertOnline(t, desired, false)

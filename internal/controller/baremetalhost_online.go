@@ -85,6 +85,10 @@ func applyBareMetalHost(
 	if err := validateBareMetalHostApply(existing, prepared); err != nil {
 		return controllerutil.OperationResultNone, err
 	}
+	annotations := prepared.GetAnnotations()
+	annotations[bmhOnlineInitializedAnnotation] = bareMetalHostOnlineLifecycle(
+		clusterInstance, existing.GetAnnotations()[bmhOnlineInitializedAnnotation])
+	prepared.SetAnnotations(annotations)
 	prepared.SetUID(existing.GetUID())
 	prepared.SetResourceVersion(existing.GetResourceVersion())
 	if bareMetalHostOnlineInitialized(existing, prepared, clusterInstance) {
@@ -101,10 +105,6 @@ func prepareBareMetalHostApply(
 	if clusterInstance.UID == "" {
 		return nil, fmt.Errorf("cannot initialize BMH power without a ClusterInstance UID")
 	}
-	lifecycle := string(clusterInstance.UID)
-	if clusterInstance.Spec.Reinstall != nil {
-		lifecycle += ":" + clusterInstance.Spec.Reinstall.Generation
-	}
 	owner := ci.GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name)
 	if ci.GetOwner(&object) != owner {
 		return nil, fmt.Errorf("rendered BMH does not belong to ClusterInstance %s", owner)
@@ -115,10 +115,31 @@ func prepareBareMetalHostApply(
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
-	annotations[bmhOnlineInitializedAnnotation] = lifecycle
+	annotations[bmhOnlineInitializedAnnotation] = bareMetalHostOnlineLifecycle(clusterInstance, "")
 	prepared.SetAnnotations(annotations)
 
 	return prepared, nil
+}
+
+func bareMetalHostOnlineLifecycle(clusterInstance *v1alpha1.ClusterInstance, previousLifecycle string) string {
+	lifecycle := string(clusterInstance.UID)
+	// The reinstall handler advances ObservedGeneration only after teardown and
+	// data restoration succeed. A requested generation alone does not authorize
+	// resetting power: rejected and failed requests can resume normal rendering.
+	if status := clusterInstance.Status.Reinstall; status != nil && status.ObservedGeneration != "" {
+		return lifecycle + ":" + status.ObservedGeneration
+	}
+
+	// Status can be absent after a restore. Keep the existing initialization
+	// record for the same CI or a handled restore instead of replaying a default.
+	// A later successfully processed reinstall supplies a new generation above.
+	previousUID, previousReinstall, _ := strings.Cut(previousLifecycle, ":")
+	restoreName := clusterInstance.Labels[veleroRestoreNameLabel]
+	restored := restoreName != "" && clusterInstance.Annotations[veleroRestoreHandledAnnotation] == restoreName
+	if previousReinstall != "" && (previousUID == lifecycle || restored) {
+		return lifecycle + ":" + previousReinstall
+	}
+	return lifecycle
 }
 
 func validateBareMetalHostApply(existing, prepared *unstructured.Unstructured) error {

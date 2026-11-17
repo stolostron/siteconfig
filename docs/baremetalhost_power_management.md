@@ -20,18 +20,25 @@ controller responsible for the BMH instead.
 
 SiteConfig records the initialization in the internal
 `siteconfig.open-cluster-management.io/online-initialized` annotation. The value
-identifies the ClusterInstance UID and, when present, its reinstall generation.
+identifies the ClusterInstance UID and the last successfully processed reinstall
+generation, when present in `status.reinstall.observedGeneration`.
 The marker is applied atomically with the initial power value and survives
 controller restarts and ordinary ClusterInstance updates.
 
-A new ClusterInstance UID, a new reinstall generation, or a new association after
-the SiteConfig ownership label has been removed starts a new initialization.
+A new ClusterInstance UID, a successfully processed new reinstall, or a new
+association after the SiteConfig ownership label has been removed starts a new
+initialization. Changing `spec.reinstall.generation` alone does not reset power.
+A rejected or failed request that leaves the BMH in place retains its existing
+initialization marker and power state. The reinstall handler confirms a new
+generation after deleting rendered manifests and restoring preserved data.
 A BMH that is already owned by the same ClusterInstance but has no initialization
 marker is adopted with its current power value. This avoids replaying an
 installation default on hosts created by older SiteConfig versions. For a
 ClusterInstance restored by Velero, a changed UID is adopted without resetting
 power when SiteConfig has handled the restore and the reinstall generation is
-unchanged. An explicit new reinstall still initializes power normally.
+unchanged. If reinstall status was not restored, the existing BMH marker supplies
+the previous initialization generation. A successfully processed new reinstall
+still initializes power normally.
 
 Do not edit or remove the initialization annotation or SiteConfig ownership
 label to request a power change. Use the supported reinstall workflow for a
