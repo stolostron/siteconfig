@@ -254,15 +254,47 @@ spec or triggering a Day-1 re-render.
      -o jsonpath='{.metadata.uid}'
    ```
 
-3. If a managed copy already exists without the correct controller owner (for
-   example after a migration), patch its owner reference instead of deleting it:
+3. For an existing migrated copy, first verify that the target ClusterInstance
+   references this shared source, the copy has the managed-copy label and correct
+   source namespace, and it has **no owner references**. Stop if another object
+   owns it or its provenance is uncertain. Do not adopt a user-owned ConfigMap.
+
+   Restore content and provenance from one target-source snapshot together with
+   ownership. Patching ownership alone is insufficient: the recorded source
+   resourceVersion belongs to the old hub and can incorrectly block target sync.
+   With `jq` installed, substitute the names below:
 
    ```bash
-   oc patch configmap <source-name> -n <namespace> --type=merge -p \
-     '{"metadata":{"ownerReferences":[{"apiVersion":"siteconfig.open-cluster-management.io/v1alpha1","kind":"ClusterInstance","name":"<cluster-instance>","uid":"<cluster-instance-uid>","controller":true,"blockOwnerDeletion":true}]}}'
+   recovery_dir=$(mktemp -d)
+   oc get configmap <source-name> -n siteconfig-shared-resources -o json > "$recovery_dir/source.json"
+   oc get clusterinstance <cluster-instance> -n <namespace> -o json > "$recovery_dir/ci.json"
+   oc get configmap <source-name> -n <namespace> -o json > "$recovery_dir/copy.json"
+   jq --slurpfile source "$recovery_dir/source.json" --slurpfile ci "$recovery_dir/ci.json" '
+     if .metadata.labels["siteconfig.open-cluster-management.io/managed-copy"] != "true"
+       or .metadata.annotations["siteconfig.open-cluster-management.io/source-namespace"] != "siteconfig-shared-resources"
+       or ((.metadata.ownerReferences // []) | length) != 0
+       or .metadata.name != $source[0].metadata.name
+       or .metadata.namespace != $ci[0].metadata.namespace
+       or ([ $ci[0].spec.extraManifestsRefs[]? |
+             select(.name == $source[0].metadata.name and .namespace == "siteconfig-shared-resources") ] | length) == 0
+     then error("copy is not eligible for manual adoption") else . end |
+     .data = ($source[0].data // {}) |
+     .binaryData = ($source[0].binaryData // {}) |
+     .metadata.annotations["siteconfig.open-cluster-management.io/source-resource-version"] = $source[0].metadata.resourceVersion |
+     .metadata.ownerReferences = [{apiVersion: $ci[0].apiVersion, kind: "ClusterInstance",
+       name: $ci[0].metadata.name, uid: $ci[0].metadata.uid,
+       controller: true, blockOwnerDeletion: true}]
+   ' "$recovery_dir/copy.json" > "$recovery_dir/restored.json" &&
+     oc replace -f "$recovery_dir/restored.json"
    ```
 
-4. Otherwise create the copy from the source `data`/`binaryData`:
+   The replacement retains the copy's resourceVersion, so a concurrent copy update
+   produces a conflict; inspect and repeat from fresh snapshots instead of forcing
+   the update. It preserves `initial-resource-version` as historical provenance,
+   not as a target-hub version. Verify a subsequent target source update propagates.
+
+4. If the copy is missing, create it from one source snapshot's `data`, `binaryData`,
+   and resourceVersion:
 
    ```yaml
    apiVersion: v1
@@ -289,10 +321,10 @@ spec or triggering a Day-1 re-render.
      # copy the source binaryData verbatim
    ```
 
-   Apply it:
+   Create it (an existing object causes a conflict instead of being overwritten):
 
    ```bash
-   oc apply -f <copy>.yaml
+   oc create -f <copy>.yaml
    ```
 
 5. Verify the copy and its ownership:

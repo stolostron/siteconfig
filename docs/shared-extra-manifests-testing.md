@@ -170,6 +170,14 @@ results do not validate the current PR or the documentation-only manual procedur
 Add migration/registration and copy behavior to the QE test plan before the
 feature is considered complete.
 
+For the current manual adoption procedure, include a transferred ownerless copy
+whose recorded source resourceVersion is numerically higher than the target
+source's. Verify that restoring target content and provenance together with
+ownership allows subsequent source updates (including binaryData) to propagate.
+Ownership-only adoption is insufficient. `TestManualMigratedCopyRecovery` covers
+this case with a fake client; the revised adoption procedure still requires live
+QE validation and is not covered by the November 18 missing-copy creation result.
+
 Attach the tested commit/image, installer versions, inputs without credentials,
 conditions, timings, and cleanup results to the test report. Keep run-specific
 images and lab histories in that report rather than in this reusable checklist.

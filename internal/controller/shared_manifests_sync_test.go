@@ -36,6 +36,54 @@ import (
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 )
 
+// A migrated copy carries a version from an unrelated API server. Manual adoption
+// must establish target content and provenance atomically, not just ownership.
+func TestManualMigratedCopyRecovery(t *testing.T) {
+	g := gomega.NewWithT(t)
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	g.Expect(corev1.AddToScheme(scheme)).To(gomega.Succeed())
+	g.Expect(v1alpha1.AddToScheme(scheme)).To(gomega.Succeed())
+	ci := &v1alpha1.ClusterInstance{ObjectMeta: metav1.ObjectMeta{Name: "target", Namespace: "target", UID: "target-ci", Generation: 3},
+		Spec:   v1alpha1.ClusterInstanceSpec{ExtraManifestsRefs: []v1alpha1.ExtraManifestReference{{Name: "common", Namespace: v1alpha1.SharedResourcesNamespace}}},
+		Status: v1alpha1.ClusterInstanceStatus{ObservedGeneration: 3}}
+	source := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "common", Namespace: v1alpha1.SharedResourcesNamespace, ResourceVersion: "10"},
+		Data: map[string]string{"payload": "target"}, BinaryData: map[string][]byte{"binary": {1, 2}}}
+	copy := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "common", Namespace: ci.Namespace,
+		Labels: map[string]string{ManagedCopyLabel: ManagedCopyLabelValue},
+		Annotations: map[string]string{SourceNamespaceAnnotation: v1alpha1.SharedResourcesNamespace,
+			SourceResourceVersionAnnotation: "999999999", InitialResourceVersionAnnotation: "999999998"}},
+		Data: map[string]string{"payload": "old-hub"}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ci, source, copy).WithStatusSubresource(ci).Build()
+	syncer := &SharedManifestSync{Client: c, Recorder: events.NewFakeRecorder(10)}
+	key := client.ObjectKeyFromObject(copy)
+	g.Expect(c.Get(ctx, key, copy)).To(gomega.Succeed())
+	// Ownership alone leaves the old hub's version blocking synchronization.
+	copy.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(ci, v1alpha1.GroupVersion.WithKind("ClusterInstance"))}
+	g.Expect(c.Update(ctx, copy)).To(gomega.Succeed())
+	g.Expect(syncer.propagate(ctx, zap.NewNop(), ci, source)).To(gomega.Succeed())
+	g.Expect(c.Get(ctx, key, copy)).To(gomega.Succeed())
+	g.Expect(copy.Data["payload"]).To(gomega.Equal("old-hub"))
+	// The documented replacement copies both content and target provenance.
+	copy.Data = source.DeepCopy().Data
+	copy.BinaryData = source.DeepCopy().BinaryData
+	copy.Annotations[SourceResourceVersionAnnotation] = source.ResourceVersion
+	g.Expect(c.Update(ctx, copy)).To(gomega.Succeed())
+	source.Data = map[string]string{"payload": "target-update"}
+	source.BinaryData = map[string][]byte{"binary": {3, 4}}
+	g.Expect(c.Update(ctx, source)).To(gomega.Succeed())
+	g.Expect(syncer.propagate(ctx, zap.NewNop(), ci, source)).To(gomega.Succeed())
+	g.Expect(c.Get(ctx, key, copy)).To(gomega.Succeed())
+	g.Expect(copy.Data).To(gomega.Equal(source.Data))
+	g.Expect(copy.BinaryData).To(gomega.Equal(source.BinaryData))
+	g.Expect(copy.Annotations[SourceResourceVersionAnnotation]).To(gomega.Equal(source.ResourceVersion))
+	g.Expect(copy.Annotations[InitialResourceVersionAnnotation]).To(gomega.Equal("999999998"))
+	actualCI := &v1alpha1.ClusterInstance{}
+	g.Expect(c.Get(ctx, client.ObjectKeyFromObject(ci), actualCI)).To(gomega.Succeed())
+	g.Expect(actualCI.Spec).To(gomega.Equal(ci.Spec))
+	g.Expect(actualCI.Status).To(gomega.Equal(ci.Status))
+}
+
 func TestSharedManifestSync(t *testing.T) {
 	for _, scenario := range []string{"fanout", "metadata-only", "unmanaged", "wrong-owner", "wrong-source", "missing-copy", "missing-source", "retry", "aggregate", "drift", "hand-edit-only", "staged-rollout", "cleanup"} {
 		t.Run(scenario, func(t *testing.T) {
