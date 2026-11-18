@@ -28,6 +28,12 @@ const (
 
 	// DefaultMaxConcurrentReconciles defines the default maximum number of concurrent reconciles.
 	DefaultMaxConcurrentReconciles = 1
+
+	// DefaultSharedManifestSyncMaxConcurrentReconciles bounds concurrent shared-source reconciliations.
+	DefaultSharedManifestSyncMaxConcurrentReconciles = 4
+
+	// SharedManifestSyncMaxConcurrentReconcilesKey is the operator ConfigMap key for sync workers.
+	SharedManifestSyncMaxConcurrentReconcilesKey = "sharedManifestSyncMaxConcurrentReconciles"
 )
 
 // Configuration defines the runtime settings for the ClusterInstance controller.
@@ -42,21 +48,27 @@ type Configuration struct {
 	// To apply changes to this value after the controller has started, the siteconfig-manager
 	// pod must be restarted.
 	maxConcurrentReconciles int
+
+	// sharedManifestSyncMaxConcurrentReconciles applies to the sync controller at startup.
+	// Changes require an operator restart, independently of the ClusterInstance worker count.
+	sharedManifestSyncMaxConcurrentReconciles int
 }
 
 // NewDefaultConfiguration creates a new Configuration instance with default settings.
 func NewDefaultConfiguration() *Configuration {
 	return &Configuration{
-		allowReinstalls:         DefaultAllowReinstalls,
-		maxConcurrentReconciles: DefaultMaxConcurrentReconciles,
+		allowReinstalls:                           DefaultAllowReinstalls,
+		maxConcurrentReconciles:                   DefaultMaxConcurrentReconciles,
+		sharedManifestSyncMaxConcurrentReconciles: DefaultSharedManifestSyncMaxConcurrentReconciles,
 	}
 }
 
 // ToMap converts the Configuration object into a map of string keys and values.
 func (c *Configuration) ToMap() map[string]string {
 	return map[string]string{
-		"allowReinstalls":         strconv.FormatBool(c.allowReinstalls),
-		"maxConcurrentReconciles": strconv.Itoa(c.maxConcurrentReconciles),
+		"allowReinstalls":                            strconv.FormatBool(c.allowReinstalls),
+		"maxConcurrentReconciles":                    strconv.Itoa(c.maxConcurrentReconciles),
+		SharedManifestSyncMaxConcurrentReconcilesKey: strconv.Itoa(c.sharedManifestSyncMaxConcurrentReconciles),
 	}
 }
 
@@ -79,9 +91,27 @@ func (c *Configuration) FromMap(input map[string]string) error {
 			}
 			c.maxConcurrentReconciles = intValue
 
+		case SharedManifestSyncMaxConcurrentReconcilesKey:
+			count, err := parseSyncConcurrency(value)
+			if err != nil {
+				return err
+			}
+			c.sharedManifestSyncMaxConcurrentReconciles = count
+
 		default:
 			return fmt.Errorf("unsupported key in input map: %q", key)
 		}
 	}
 	return nil
+}
+
+func parseSyncConcurrency(value string) (int, error) {
+	count, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid value for %q: %w", SharedManifestSyncMaxConcurrentReconcilesKey, err)
+	}
+	if count < 1 {
+		return 0, fmt.Errorf("%s must be a positive integer", SharedManifestSyncMaxConcurrentReconcilesKey)
+	}
+	return count, nil
 }
