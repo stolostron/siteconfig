@@ -1,0 +1,34 @@
+# Expected template output, before the controller adds ownership metadata.
+apiVersion: agent-install.openshift.io/v1beta1
+kind: NMStateConfig
+metadata:
+  name: node1.example.com
+  namespace: example-network-sno
+  annotations:
+    siteconfig.open-cluster-management.io/sync-wave: "1"
+  labels:
+    nmstate-label: node1.example.com
+spec:
+  config:
+    interfaces:
+    - name: eno1
+      type: ethernet
+      state: up
+      ipv4:
+        enabled: true
+        address:
+        - ip: "192.0.2.10"
+          prefix-length: 24
+        dhcp: false
+    dns-resolver:
+      config:
+        server:
+        - "192.0.2.53"
+    routes:
+      config:
+      - destination: "0.0.0.0/0"
+        next-hop-address: "192.0.2.1"
+        next-hop-interface: eno1
+  interfaces:
+  - name: eno1
+    macAddress: "00:11:22:33:44:55"
