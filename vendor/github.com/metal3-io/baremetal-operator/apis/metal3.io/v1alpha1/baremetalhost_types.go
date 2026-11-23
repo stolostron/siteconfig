@@ -81,6 +81,11 @@ const (
 
 	// InspectionModeAgent runs standard agent-based inspection.
 	InspectionModeAgent InspectionMode = "agent"
+
+	// InspectionModeFast runs out-of-band inspection via the BMC (e.g.
+	// Redfish) without booting a ramdisk. It completes in seconds but
+	// may return fewer details than agent-based inspection.
+	InspectionModeFast InspectionMode = "fast"
 )
 
 // RootDeviceHints holds the hints for specifying the storage location
@@ -137,6 +142,88 @@ const (
 	UEFISecureBoot  BootMode = "UEFISecureBoot"
 	Legacy          BootMode = "legacy"
 	DefaultBootMode BootMode = UEFI
+)
+
+const (
+	// ManageableCondition documents the registration of the BareMetalHost.
+	ManageableCondition = "Manageable"
+	// ManageableReason is the reason used when the BareMetalHost is registered and
+	// there is no power fault.
+	ManageableReason = "Manageable"
+	// NotManagedReason is the reason used when the BareMetalHost is not managed.
+	NotManagedReason = "NotManaged"
+	// RegisteringReason is the reason used for the ProgressingCondition when
+	// the BareMetalHost is registering.
+	RegisteringReason = "Registering"
+	// RegistrationFailedReason is the reason used when the BareMetalHost is not
+	// registered.
+	RegistrationFailedReason = "RegistrationFailed"
+	// PowerFailureReason is the reason used when the BareMetalHost is experiencing a
+	// power failure.
+	PowerFailureReason = "PowerFailure"
+
+	// ProvisionedCondition documents the provisioning state of the BareMetalHost
+	// toward the Provisioned goal.
+	ProvisionedCondition = "Provisioned"
+	// ProvisionedReason is the reason used by the Provisioned and the Ready conditions
+	// when the BareMetalHost is provisioned.
+	ProvisionedReason = "Provisioned"
+	// NotProvisionedReason is the reason used when the BareMetalHost is not provisioned and not provisioning.
+	NotProvisionedReason = "NotProvisioned"
+	// ProvisioningReason is the reason used when the BareMetalHost is provisioning.
+	ProvisioningReason = "Provisioning"
+
+	// ReadyCondition documents the fact that the BareMetalHost is provisioned and in a good
+	// operational status.
+	ReadyCondition = "Ready"
+	// ErrorReason is the reason used when the operational state is in error.
+	ErrorReason = "Error"
+	// DetachedReason  the reason used when the host is detached.
+	DetachedReason = "Detached"
+	// ServicingReason is the reason used when the host is servicing.
+	ServicingReason = "Servicing"
+
+	// AvailableForProvisioningCondition documents the availability of the BareMetalHost toward the Available state.
+	AvailableForProvisioningCondition = "AvailableForProvisioning"
+	// AvailableReason is the reason used when the BareMetalHost is in available state.
+	AvailableReason = "Available"
+	// NotManageableReason is the reason used when the BareMetalHost is not manageable.
+	NotManageableReason = "NotManageableReason"
+	// NotAvailableReason is the reason used when the BareMetalHost is not available and not inspecting.
+	NotAvailableReason = "NotAvailable"
+	// InspectingReason is the reason used for the Available condition
+	// when the BareMetalHost is reinspected or for the Progressing condition.
+	InspectingReason = "Inspecting"
+
+	// ProgressingCondition documents the fact that the BareMetalHost is in
+	// an intermediate step progressing toward a stable state.
+	ProgressingCondition = "Progressing"
+	// PreparingReason is the reason used for the ProgressingCondition when
+	// the BareMetalHost is preparing.
+	PreparingReason = "Preparing"
+	// DeprovisioningReason is the reason used for the ProgressingCondition when
+	// the BareMetalHost is deprovisioning.
+	DeprovisioningReason = "Deprovisioning"
+	// PoweringOffBeforeDeleteReason is the reason used for the ProgressingCondition when
+	// the BareMetalHost is powering off before delete.
+	PoweringOffBeforeDeleteReason = "PoweringOffBeforeDelete"
+	// DeletingReason is the reason used for the ProgressingCondition when
+	// the BareMetalHost is deleting.
+	DeletingReason = "Deleting"
+	// NotProgressingReason is the reason used when the BareMetalHost is in
+	// a stable state.
+	NotProgressingReason = "NotProgressing"
+
+	// HealthyCondition documents the health of the BareMetalHost as reported by its BMC.
+	HealthyCondition = "Healthy"
+	// HealthyReason is the reason used when the BareMetalHost is healthy.
+	HealthyReason = "Healthy"
+	// UnknownHealthReason is the reason used when health status is not available.
+	UnknownHealthReason = "Unknown"
+	// WarningHealthReason is the reason used when BMC reports warnings.
+	WarningHealthReason = "Warning"
+	// CriticalHealthReason is the reason used when BMC reports critical errors.
+	CriticalHealthReason = "CriticalError"
 )
 
 // OperationalStatus represents the state of the host.
@@ -322,6 +409,11 @@ type HardwareRAIDVolume struct {
 
 // SoftwareRAIDVolume defines the desired configuration of volume in software RAID.
 type SoftwareRAIDVolume struct {
+	// Setting this to true, causes installer to consider this volume as root device for installation.
+	// This can only be set for one of the volumes.
+	// +kubebuilder:default:=false
+	RootVolume bool `json:"rootVolume,omitempty"`
+
 	// Size of the logical disk to be created in GiB.
 	// If unspecified or set be 0, the maximum capacity of disk will be used for logical disk.
 	// +kubebuilder:validation:Minimum=0
@@ -360,6 +452,8 @@ type RAIDConfig struct {
 }
 
 // FirmwareConfig contains the configuration that you want to configure BIOS settings in Bare metal server.
+//
+// Deprecated: no longer supported by any driver.
 type FirmwareConfig struct {
 	// Supports the virtualization of platform hardware.
 	// +kubebuilder:validation:Enum=true;false
@@ -374,14 +468,54 @@ type FirmwareConfig struct {
 	SriovEnabled *bool `json:"sriovEnabled,omitempty"`
 }
 
+// SwitchPort defines the attributes required to identify a switch port.
+type SwitchPort struct {
+	// SwitchID is expected to be the management MAC address of the switch
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$`
+	SwitchID string `json:"switchID"`
+
+	// PortID is expected to be the configuration name of the port in the
+	// switch management system.
+	PortID string `json:"portID"`
+}
+
+// NetworkInterface defines the network configuration for a specific interface.
+type NetworkInterface struct {
+	// Name of the network interface (e.g., "eth0", "ens1f0")
+	// This must match the name of a NIC discovered during inspection
+	// (see HardwareData resource).
+	// Mutually exclusive with MACAddress.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9._-]+$`
+	Name string `json:"name,omitempty"`
+
+	// MAC address of the network interface.  This must match the MAC address
+	// of a NIC discovered during inspection (see HardwareData resource).
+	// Mutually exclusive with Name.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$`
+	MACAddress string `json:"macAddress,omitempty"`
+
+	// HostNetworkAttachment references the HostNetworkAttachment for this interface
+	HostNetworkAttachment HostNetworkAttachmentRef `json:"hostNetworkAttachment,omitempty"`
+
+	// SwitchPort defines the switch port on which this interface is attached.
+	// This is intended to be a replacement for LLDP information if
+	// LLDP is not enabled on the neighboring switches or if inspection is not
+	// used on the BMH.  If LLDP information is acquired during inspection and
+	// this field is provided then it will override the LLDP provided
+	// information; therefore, caution must be exercised when supplying this
+	// value.
+	// +optional
+	SwitchPort *SwitchPort `json:"switchPort,omitempty"`
+}
+
 // BareMetalHostSpec defines the desired state of BareMetalHost.
 type BareMetalHostSpec struct {
-	// Important: Run "make generate manifests" to regenerate code
-	// after modifying this file
-
 	// Taints is the full, authoritative list of taints to apply to
-	// the corresponding Machine. This list will overwrite any
-	// modifications made to the Machine on an ongoing basis.
+	// the corresponding Machine.
+	//
+	// Deprecated: the Taints field was never actually implemented.
 	// +optional
 	Taints []corev1.Taint `json:"taints,omitempty"`
 
@@ -398,7 +532,8 @@ type BareMetalHostSpec struct {
 
 	// Firmware (BIOS) configuration for bare metal server. If set, the
 	// requested settings will be applied before the host is provisioned.
-	// Only some vendor drivers support this field. An alternative is to
+	//
+	// Deprecated: no longer supported by any driver. An alternative is to
 	// use HostFirmwareSettings resources that allow changing arbitrary
 	// values and support the generic Redfish-based drivers.
 	Firmware *FirmwareConfig `json:"firmware,omitempty"`
@@ -471,8 +606,16 @@ type BareMetalHostSpec struct {
 	// ExternallyProvisioned means something else has provisioned the
 	// image running on the host, and the operator should only manage
 	// the power status. This field is used for integration with already
-	// provisioned hosts and when pivoting hosts between clusters. If
-	// unsure, leave this field as false.
+	// provisioned hosts and when pivoting hosts between clusters.
+	//
+	// This field can be set to true either:
+	// 1. During initial host creation (e.g., for pre-provisioned hosts)
+	// 2. After inspection completes when the host reaches Available state
+	//
+	// When used in environments with Cluster API Provider Metal3 (CAPM3),
+	// ensure hosts are labeled appropriately so CAPM3's host selector can
+	// distinguish them from CAPM3-managed hosts. If unsure, leave this
+	// field as false.
 	ExternallyProvisioned bool `json:"externallyProvisioned,omitempty"`
 
 	// When set to disabled, automated cleaning will be skipped
@@ -502,9 +645,18 @@ type BareMetalHostSpec struct {
 	// Specifies the mode for host inspection.
 	// "disabled" - no inspection will be performed
 	// "agent" - normal agent-based inspection will run
+	// "fast" - out-of-band inspection via BMC (Redfish), no ramdisk boot
 	// +optional
-	// +kubebuilder:validation:Enum=disabled;agent
+	// +kubebuilder:validation:Enum=disabled;agent;fast
 	InspectionMode InspectionMode `json:"inspectionMode,omitempty"`
+
+	// NetworkInterfaces defines the network configuration for each interface.
+	// This will be used to configure switch ports for the host.  Interface
+	// names must correspond to actual NICs discovered during inspection
+	// (see HardwareData resource).  They are referenced by either the name
+	// or MAC address of the NIC.
+	// +optional
+	NetworkInterfaces []NetworkInterface `json:"networkInterfaces,omitempty"`
 }
 
 // AutomatedCleaningMode is the interface to enable/disable automated cleaning
@@ -555,14 +707,24 @@ type Image struct {
 	// be live-booted and not deployed to disk.
 	// +kubebuilder:validation:Enum=raw;qcow2;vdi;vmdk;live-iso
 	DiskFormat *string `json:"format,omitempty"`
+
+	// OCIAuthSecretName optionally names a Docker-config secret containing
+	// registry credentials for oci:// images. Must be in the same namespace
+	// as the BareMetalHost. Allowed types: kubernetes.io/dockerconfigjson|dockercfg.
+	// Only used when Image.URL has the oci:// scheme.
+	OCIAuthSecretName *string `json:"ociAuthSecretName,omitempty"`
 }
 
 func (image *Image) IsLiveISO() bool {
 	return image != nil && image.DiskFormat != nil && *image.DiskFormat == "live-iso"
 }
 
+// IsOCI returns true if the image URL uses the OCI scheme (oci://).
 func (image *Image) IsOCI() bool {
-	return image != nil && strings.HasPrefix(image.URL, "oci://")
+	if image == nil || image.URL == "" {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(image.URL), "oci://")
 }
 
 // Custom deploy is a description of a customized deploy process.
@@ -571,208 +733,6 @@ type CustomDeploy struct {
 	// This name is specific to the deploy ramdisk used. If you don't have
 	// a custom deploy ramdisk, you shouldn't use CustomDeploy.
 	Method string `json:"method"`
-}
-
-// FIXME(dhellmann): We probably want some other module to own these
-// data structures.
-
-// ClockSpeed is a clock speed in MHz
-// +kubebuilder:validation:Format=double
-type ClockSpeed float64
-
-// ClockSpeed multipliers.
-const (
-	MegaHertz ClockSpeed = 1.0
-	GigaHertz            = 1000 * MegaHertz
-)
-
-// Capacity is a disk size in Bytes.
-type Capacity int64
-
-// Capacity multipliers.
-const (
-	Byte     Capacity = 1
-	KibiByte          = Byte * 1024
-	KiloByte          = Byte * 1000
-	MebiByte          = KibiByte * 1024
-	MegaByte          = KiloByte * 1000
-	GibiByte          = MebiByte * 1024
-	GigaByte          = MegaByte * 1000
-	TebiByte          = GibiByte * 1024
-	TeraByte          = GigaByte * 1000
-)
-
-// DiskType is a disk type, i.e. HDD, SSD, NVME.
-type DiskType string
-
-// DiskType constants.
-const (
-	HDD  DiskType = "HDD"
-	SSD  DiskType = "SSD"
-	NVME DiskType = "NVME"
-)
-
-// CPU describes one processor on the host.
-type CPU struct {
-	Arch           string     `json:"arch,omitempty"`
-	Model          string     `json:"model,omitempty"`
-	ClockMegahertz ClockSpeed `json:"clockMegahertz,omitempty"`
-	Flags          []string   `json:"flags,omitempty"`
-	Count          int        `json:"count,omitempty"`
-}
-
-// Storage describes one storage device (disk, SSD, etc.) on the host.
-type Storage struct {
-	// A Linux device name of the disk, e.g.
-	// "/dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0". This will be a name
-	// that is stable across reboots if one is available.
-	Name string `json:"name,omitempty"`
-
-	// A list of alternate Linux device names of the disk, e.g. "/dev/sda".
-	// Note that this list is not exhaustive, and names may not be stable
-	// across reboots.
-	AlternateNames []string `json:"alternateNames,omitempty"`
-
-	// Whether this disk represents rotational storage.
-	// This field is not recommended for usage, please
-	// prefer using 'Type' field instead, this field
-	// will be deprecated eventually.
-	Rotational bool `json:"rotational,omitempty"`
-
-	// Device type, one of: HDD, SSD, NVME.
-	// +kubebuilder:validation:Optional
-	// +kubebuilder:validation:Enum=HDD;SSD;NVME;
-	Type DiskType `json:"type,omitempty"`
-
-	// The size of the disk in Bytes
-	SizeBytes Capacity `json:"sizeBytes,omitempty"`
-
-	// The name of the vendor of the device
-	Vendor string `json:"vendor,omitempty"`
-
-	// Hardware model
-	Model string `json:"model,omitempty"`
-
-	// The serial number of the device
-	SerialNumber string `json:"serialNumber,omitempty"`
-
-	// The WWN of the device
-	WWN string `json:"wwn,omitempty"`
-
-	// The WWN Vendor extension of the device
-	WWNVendorExtension string `json:"wwnVendorExtension,omitempty"`
-
-	// The WWN with the extension
-	WWNWithExtension string `json:"wwnWithExtension,omitempty"`
-
-	// The SCSI location of the device
-	HCTL string `json:"hctl,omitempty"`
-}
-
-// VLANID is a 12-bit 802.1Q VLAN identifier
-// +kubebuilder:validation:Type=integer
-// +kubebuilder:validation:Minimum=0
-// +kubebuilder:validation:Maximum=4094
-type VLANID int32
-
-// VLAN represents the name and ID of a VLAN.
-type VLAN struct {
-	ID VLANID `json:"id,omitempty"`
-
-	Name string `json:"name,omitempty"`
-}
-
-// LLDP represents Link Layer Discovery Protocol data for a network interface.
-type LLDP struct {
-	// The switch chassis ID from LLDP
-	// +optional
-	SwitchID string `json:"switchID,omitempty"`
-
-	// The switch port ID from LLDP
-	// +optional
-	PortID string `json:"portID,omitempty"`
-
-	// The switch system name from LLDP
-	// +optional
-	SwitchSystemName string `json:"switchSystemName,omitempty"`
-}
-
-// NIC describes one network interface on the host.
-type NIC struct {
-	// The name of the network interface, e.g. "en0"
-	Name string `json:"name,omitempty"`
-
-	// The vendor and product IDs of the NIC, e.g. "0x8086 0x1572"
-	Model string `json:"model,omitempty"`
-
-	// The device MAC address
-	// +kubebuilder:validation:Pattern=`[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}`
-	MAC string `json:"mac,omitempty"`
-
-	// The IP address of the interface. This will be an IPv4 or IPv6 address
-	// if one is present.  If both IPv4 and IPv6 addresses are present in a
-	// dual-stack environment, two nics will be output, one with each IP.
-	IP string `json:"ip,omitempty"`
-
-	// The speed of the device in Gigabits per second
-	SpeedGbps int `json:"speedGbps,omitempty"`
-
-	// The VLANs available
-	VLANs []VLAN `json:"vlans,omitempty"`
-
-	// The untagged VLAN ID
-	//nolint:tagliatelle
-	VLANID VLANID `json:"vlanId,omitempty"`
-
-	// Whether the NIC is PXE Bootable
-	PXE bool `json:"pxe,omitempty"`
-
-	// LLDP data for this interface
-	// +optional
-	LLDP *LLDP `json:"lldp,omitempty"`
-}
-
-// Firmware describes the firmware on the host.
-type Firmware struct {
-	// The BIOS for this firmware
-	BIOS BIOS `json:"bios,omitempty"`
-}
-
-// BIOS describes the BIOS version on the host.
-type BIOS struct {
-	// The release/build date for this BIOS
-	Date string `json:"date,omitempty"`
-
-	// The vendor name for this BIOS
-	Vendor string `json:"vendor,omitempty"`
-
-	// The version of the BIOS
-	Version string `json:"version,omitempty"`
-}
-
-// HardwareDetails collects all of the information about hardware
-// discovered on the host.
-type HardwareDetails struct {
-	// System vendor information.
-	SystemVendor HardwareSystemVendor `json:"systemVendor,omitempty"`
-	// System firmware information.
-	Firmware Firmware `json:"firmware,omitempty"`
-	// The host's amount of memory in Mebibytes.
-	RAMMebibytes int `json:"ramMebibytes,omitempty"`
-	// List of network interfaces for the host.
-	NIC []NIC `json:"nics,omitempty"`
-	// List of storage (disk, SSD, etc.) available to the host.
-	Storage []Storage `json:"storage,omitempty"`
-	// Details of the CPU(s) in the system.
-	CPU      CPU    `json:"cpu,omitempty"`
-	Hostname string `json:"hostname,omitempty"`
-}
-
-// HardwareSystemVendor stores details about the whole hardware system.
-type HardwareSystemVendor struct {
-	Manufacturer string `json:"manufacturer,omitempty"`
-	ProductName  string `json:"productName,omitempty"`
-	SerialNumber string `json:"serialNumber,omitempty"`
 }
 
 // CredentialsStatus contains the reference and version of the last
@@ -808,6 +768,10 @@ const (
 type DetachedAnnotationArguments struct {
 	// DeleteAction indicates the desired delete logic when the detached annotation is present
 	DeleteAction DetachedDeleteAction `json:"deleteAction,omitempty"`
+
+	// Force indicates if detaching should be forced regardless of the host's state
+	// +optional
+	Force bool `json:"force,omitempty"`
 }
 
 // Match compares the saved status information with the name and
@@ -904,6 +868,26 @@ type BareMetalHostStatus struct {
 	// ErrorCount records how many times the host has encoutered an error since the last successful operation
 	// +kubebuilder:default:=0
 	ErrorCount int `json:"errorCount"`
+
+	// ProvisioningFailCount records how many times provisioning has failed
+	// consecutively for the current image. Unlike ErrorCount, it is not reset
+	// on deprovisioning and is only cleared on successful provisioning or when
+	// a new image is specified.
+	// +kubebuilder:default:=0
+	ProvisioningFailCount int `json:"provisioningFailCount"`
+
+	// LastAttemptedImage stores the full image spec of the last provisioning
+	// attempt, used to detect user-initiated image changes (URL, checksum,
+	// format, etc.) that should reset the provisioning retry limit counter.
+	// +optional
+	LastAttemptedImage *Image `json:"lastAttemptedImage,omitempty"`
+
+	// Conditions defines current service state of the BareMetalHost.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	// +kubebuilder:validation:MaxItems=32
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // ProvisionStatus holds the state information for a single target.
@@ -956,6 +940,16 @@ type BareMetalHost struct {
 
 	Spec   BareMetalHostSpec   `json:"spec,omitempty"`
 	Status BareMetalHostStatus `json:"status,omitempty"`
+}
+
+// GetConditions returns the set of conditions for this object.
+func (host *BareMetalHost) GetConditions() []metav1.Condition {
+	return host.Status.Conditions
+}
+
+// SetConditions sets conditions for an API object.
+func (host *BareMetalHost) SetConditions(conditions []metav1.Condition) {
+	host.Status.Conditions = conditions
 }
 
 // BootMode returns the boot method to use for the host.
@@ -1190,13 +1184,14 @@ func (image *Image) GetChecksum() (checksum, checksumType string, err error) {
 		return "", "", errors.New("image is not provided")
 	}
 
-	if image.DiskFormat != nil && *image.DiskFormat == "live-iso" {
-		// Checksum is not required for live-iso
+	if image.IsOCI() {
+		if image.Checksum != "" {
+			return "", "", errors.New("spec.image.checksum must be empty for OCI images (oci:// images have embedded checksums)")
+		}
 		return "", "", nil
 	}
 
-	// Checksum is not required for OCI images as they have embedded checksums
-	if image.IsOCI() && image.Checksum == "" {
+	if image.DiskFormat != nil && *image.DiskFormat == "live-iso" {
 		return "", "", nil
 	}
 
@@ -1216,6 +1211,29 @@ func (image *Image) GetChecksum() (checksum, checksumType string, err error) {
 
 	checksum = image.Checksum
 	return checksum, checksumType, nil
+}
+
+func (raid *RAIDConfig) GetRootVolumeCount() (rootCount int) {
+	for _, volume := range raid.SoftwareRAIDVolumes {
+		if volume.RootVolume {
+			rootCount++
+		}
+	}
+
+	return rootCount
+}
+
+// IsValid returns true if at least one of Name or MACAddress is set.
+func (iface *NetworkInterface) IsValid() bool {
+	return iface.Name != "" || iface.MACAddress != ""
+}
+
+// GetKey returns the key to use for the network interface.
+func (iface *NetworkInterface) GetKey() string {
+	if iface.MACAddress != "" {
+		return iface.MACAddress
+	}
+	return iface.Name
 }
 
 // +kubebuilder:object:root=true
