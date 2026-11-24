@@ -103,6 +103,19 @@
             "matchManagers": ["gomod"],
             "matchPackageNames": ["/^github\\.com/openshift/assisted-service//"],
             "enabled": false
+        },
+        {
+            "description": "Hold baremetal-operator/apis until v0.15.0 (CNF-30262)",
+            "matchManagers": ["gomod"],
+            "matchPackageNames": ["github.com/metal3-io/baremetal-operator/apis"],
+            "allowedVersions": "/^v?0\\.(1[5-9]|[2-9]\\d)\\.\\d+$/"
+        },
+        {
+            "description": "No commit-hash bumps for baremetal-operator/apis while pinned (CNF-30262)",
+            "matchManagers": ["gomod"],
+            "matchPackageNames": ["github.com/metal3-io/baremetal-operator/apis"],
+            "matchUpdateTypes": ["digest"],
+            "enabled": false
         }
     ],
     "vulnerabilityAlerts": {
