@@ -19,11 +19,13 @@ import (
 	"context"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	"github.com/stolostron/siteconfig/api/v1alpha1"
+	"github.com/stolostron/siteconfig/internal/controller/sharedmanifests"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -47,14 +49,48 @@ func validateResources(ctx context.Context, c client.Client, clusterInstance *v1
 			key.Name, key.Namespace, err)
 	}
 
-	// If extraManifests are defined - check that they exist
+	// If extraManifests are defined - check that they exist in their referenced namespace.
+	// A reference may target the ClusterInstance's own namespace (default when unspecified) or the
+	// shared-resources namespace. The reference-target rules are owned by the API validation.
 	if len(clusterInstance.Spec.ExtraManifestsRefs) > 0 {
+		if err := v1alpha1.ValidateExtraManifestReferences(clusterInstance); err != nil {
+			return fmt.Errorf("extra manifest reference validation failed: %w", err)
+		}
+
 		for _, extraManifestRef := range clusterInstance.Spec.ExtraManifestsRefs {
-			key = types.NamespacedName{Name: extraManifestRef.Name, Namespace: clusterInstance.Namespace}
+			namespace := extraManifestRef.Namespace
+			if namespace == "" {
+				namespace = clusterInstance.Namespace
+			}
+
+			key = types.NamespacedName{Name: extraManifestRef.Name, Namespace: namespace}
 			cm := &corev1.ConfigMap{}
 			if err := c.Get(ctx, key, cm); err != nil {
 				return fmt.Errorf("failed to retrieve ExtraManifest: %s in namespace %s, err: %w",
 					key.Name, key.Namespace, err)
+			}
+			if namespace == v1alpha1.SharedResourcesNamespace {
+				// A managed copy is ours when the controller reference matches this ClusterInstance.
+				// An ownerless managed copy is a transferred copy awaiting adoption (Global Hub
+				// migration or ACM hub restore) and must pass validation so the copy step can adopt
+				// it. Anything else is a user-created object and is never overwritten. The copy step
+				// re-checks ownership because a collision can appear after validation.
+				local := &corev1.ConfigMap{}
+				err := c.Get(ctx, client.ObjectKey{Name: extraManifestRef.Name, Namespace: clusterInstance.Namespace}, local)
+				if err != nil && !apierrors.IsNotFound(err) {
+					return fmt.Errorf("failed to validate shared extra-manifest destination: %w", err)
+				}
+				if err == nil && !sharedmanifests.IsOwnedManagedCopy(local, clusterInstance) &&
+					!sharedmanifests.IsAdoptableManagedCopy(local) {
+					return fmt.Errorf("name collision: ConfigMap %s/%s is not a SiteConfig-managed copy owned by this ClusterInstance",
+						local.Namespace, local.Name)
+				}
+				continue
+			}
+			if sharedmanifests.IsOwnedManagedCopy(cm, clusterInstance) &&
+				cm.Annotations[v1alpha1.SourceNamespaceAnnotation] == v1alpha1.SharedResourcesNamespace {
+				return fmt.Errorf("local extra-manifest %s/%s is a managed shared copy; use a distinct local ConfigMap",
+					cm.Namespace, cm.Name)
 			}
 		}
 	}

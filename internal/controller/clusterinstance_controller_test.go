@@ -1882,6 +1882,33 @@ var _ = Describe("handleValidate", func() {
 		Expect(matched).To(BeTrue())
 	})
 
+	It("sets the ClusterInstanceValidated condition to false on a shared copy name collision", func() {
+		Expect(c.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-collision",
+			Namespace: v1alpha1.SharedResourcesNamespace,
+		}})).To(Succeed())
+		Expect(c.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-collision",
+			Namespace: testParams.ClusterNamespace,
+		}})).To(Succeed())
+		clusterInstance.Spec.ExtraManifestsRefs = append(clusterInstance.Spec.ExtraManifestsRefs,
+			v1alpha1.ExtraManifestReference{Name: "shared-collision", Namespace: v1alpha1.SharedResourcesNamespace})
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		err := r.handleValidate(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
+
+		key := types.NamespacedName{
+			Name:      testParams.ClusterName,
+			Namespace: testParams.ClusterNamespace,
+		}
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+		validated := meta.FindStatusCondition(clusterInstance.Status.Conditions, string(v1alpha1.ClusterInstanceValidated))
+		Expect(validated).ToNot(BeNil())
+		Expect(validated.Status).To(Equal(metav1.ConditionFalse))
+		Expect(validated.Message).To(ContainSubstring("name collision"))
+	})
+
 	It("does not require a reconcile when the ClusterInstanceValidated condition remains unchanged", func() {
 		clusterInstance.Status.Conditions = []metav1.Condition{
 			{

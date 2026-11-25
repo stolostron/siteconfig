@@ -19,6 +19,7 @@ import (
 	"context"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -137,8 +138,64 @@ var _ = Describe("Validate", func() {
 		Expect(err).To(MatchError(ContainSubstring("cluster-level ignitionConfigOverride is not a valid JSON-formatted string")))
 	})
 
+	It("rejects shared references with a mismatching cluster name", func() {
+		clusterInstance.Spec.ClusterName = "other"
+		clusterInstance.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{{Name: "shared", Namespace: v1alpha1.SharedResourcesNamespace}}
+		Expect(Validate(ctx, c, clusterInstance)).To(MatchError(ContainSubstring("spec.clusterName")))
+	})
+
+	It("rejects a local reference that is a managed shared copy", func() {
+		clusterInstance.UID = "ci-uid"
+		local := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name:      "local-managed",
+			Namespace: clusterInstance.Namespace,
+			Labels:    map[string]string{v1alpha1.ManagedCopyLabel: v1alpha1.ManagedCopyLabelValue},
+			Annotations: map[string]string{
+				v1alpha1.SourceNamespaceAnnotation: v1alpha1.SharedResourcesNamespace,
+			},
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(
+				clusterInstance, v1alpha1.GroupVersion.WithKind(v1alpha1.ClusterInstanceKind))},
+		}}
+		Expect(c.Create(ctx, local)).To(Succeed())
+		clusterInstance.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{{Name: local.Name}}
+		Expect(Validate(ctx, c, clusterInstance)).To(MatchError(ContainSubstring("local extra-manifest")))
+	})
+
+	It("rejects a shared reference whose local name is a user-created ConfigMap", func() {
+		source := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-collision",
+			Namespace: v1alpha1.SharedResourcesNamespace,
+		}}
+		Expect(c.Create(ctx, source)).To(Succeed())
+		userCM := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name:      source.Name,
+			Namespace: clusterInstance.Namespace,
+		}}
+		Expect(c.Create(ctx, userCM)).To(Succeed())
+		clusterInstance.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{
+			{Name: source.Name, Namespace: v1alpha1.SharedResourcesNamespace}}
+		Expect(Validate(ctx, c, clusterInstance)).To(MatchError(ContainSubstring("name collision")))
+	})
+
+	It("accepts an ownerless managed copy awaiting adoption", func() {
+		source := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-adoptable",
+			Namespace: v1alpha1.SharedResourcesNamespace,
+		}}
+		Expect(c.Create(ctx, source)).To(Succeed())
+		adoptable := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name:      source.Name,
+			Namespace: clusterInstance.Namespace,
+			Labels:    map[string]string{v1alpha1.ManagedCopyLabel: v1alpha1.ManagedCopyLabelValue},
+		}}
+		Expect(c.Create(ctx, adoptable)).To(Succeed())
+		clusterInstance.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{
+			{Name: source.Name, Namespace: v1alpha1.SharedResourcesNamespace}}
+		Expect(Validate(ctx, c, clusterInstance)).To(Succeed())
+	})
+
 	It("fails validation when an ExtraManifest reference does not exist", func() {
-		clusterInstance.Spec.ExtraManifestsRefs = []corev1.LocalObjectReference{{Name: doesNotExist}}
+		clusterInstance.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{{Name: doesNotExist}}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 		err := Validate(ctx, c, clusterInstance)
 		Expect(err).To(MatchError(ContainSubstring("failed to retrieve ExtraManifest")))
