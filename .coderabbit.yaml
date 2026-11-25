@@ -1,0 +1,108 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# siteconfig settings, layered on the org config in stolostron/coderabbit.
+#
+# inheritance: true keeps every org value this file does not set. Lists merge
+# by key: an entry here with the same `path` (path_instructions) or `name`
+# (custom_checks) replaces the org entry; all other org entries still apply.
+# To see the merged result, comment `@coderabbitai configuration` on a PR.
+inheritance: true
+
+tone_instructions: "Be brief. Ask questions rather than give orders. No praise. Raise design, scope and test-value problems before line-level ones."
+
+reviews:
+  # The default pauses reviews after 5 reviewed commits, so on a long-running
+  # PR the final head never gets reviewed. 0 turns the pause off.
+  auto_review:
+    auto_pause_after_reviewed_commits: 0
+
+  high_level_summary_instructions: |
+    Start with a table of added lines split into: production Go, test Go,
+    docs and samples, generated (bundle/, config/crd/, zz_generated).
+    Then list anything this PR adds to the supported surface: API fields,
+    operator config keys, labels, annotations, controllers, RBAC rules.
+    Say "none" if there are none. Then a short summary of the behaviour change.
+
+  merge_risk_instructions: |
+    siteconfig is an operator that provisions and reinstalls clusters.
+    Higher risk: API type, CRD schema or webhook changes; new controllers or
+    operator config keys; RBAC changes; writes to objects the ClusterInstance
+    does not own; deletion, reinstall and backup/restore paths; large diffs.
+    Lower risk: docs-only, test-only, dependency bumps with no code change.
+
+  path_instructions:
+    # From CodeRabbit's "Reduce review noise" guide.
+    - path: "**/*"
+      instructions: |
+        - Ignore style and formatting. golangci-lint and markdownlint run in CI.
+        - Mention a repeated pattern once, at summary level, not once per file.
+
+    # Replaces the org "**/*.go" entry. Same rules, minus the copyright-holder
+    # rule: every Go file in this repo carries the kubebuilder "Copyright YYYY."
+    # header, so that rule fires on each new file and buries real findings.
+    - path: "**/*.go"
+      instructions: |
+        Go standards:
+        - Never ignore error returns; wrap with fmt.Errorf("context: %w", err)
+        - Use stdlib crypto/* and golang.org/x/crypto; avoid third-party crypto libraries
+        - Bounds-check user-supplied sizes before slice or buffer allocation
+        - context.Context for cancellation and timeouts on all K8s API calls
+        - No fmt.Sprintf in log messages; use structured key-value logging
+
+    # Added on top of the org controller entry (different glob, so both apply).
+    - path: "{api,cmd,internal}/**/*.go"
+      instructions: |
+        Read the whole diff before commenting on lines. Then, as questions:
+        - Is the same logic, rule or constant written in more than one place
+          in this diff or already in the repo? Name the copies.
+        - Does the PR add supported surface (API field, config key, label,
+          annotation, controller)? For each, what uses it, and what would
+          break without it?
+        - Does the code write to objects the user authored? Those usually come
+          from ArgoCD/GitOps, so ask how the write interacts with it.
+
+    # Replaces the org "**/*_test.go" entry. Drops the "every assertion needs a
+    # message" rule (about 2% of assertions in this repo have one).
+    - path: "**/*_test.go"
+      instructions: |
+        Keep: fake.Client for unit tests, static Ginkgo titles, explicit
+        timeout and interval on Eventually/Consistently, cleanup of
+        cluster-scoped resources.
+        Judge each new test by what it would catch: which production change in
+        this PR would make it fail? If none, or another test already catches
+        the same thing, ask whether it is needed.
+        Then look the other way: is there new behaviour that no test would
+        notice being removed? Say which.
+
+    - path: "{docs,config/samples}/**/*.md"
+      instructions: |
+        These files are user-facing reference.
+        - Flag content that records how the change was developed or tested
+          (dated results, investigation notes, test plans). It belongs in the
+          PR description or Jira.
+        - Flag statements that the code in this PR does not match.
+
+  pre_merge_checks:
+    custom_checks:
+      # Both start in warning mode. The size threshold is a first guess.
+      - name: "PR size and scope"
+        mode: warning
+        instructions: |
+          Count added lines of production Go: *.go files that are not
+          *_test.go and not under vendor/, bundle/, config/ or named
+          zz_generated*.
+          Fail if the count is over 500 and the PR description does not explain
+          why the change cannot be split. When failing, propose a split.
+          Pass otherwise.
+
+      - name: "Enhancement proposal first"
+        mode: warning
+        instructions: |
+          CONTRIBUTING.md requires an enhancement proposal to be merged before
+          the implementation PR.
+          Applies when the PR adds or changes a CRD field, adds a controller,
+          or adds an operator config key.
+          Pass if a file under docs/enhancements/ on the base branch describes
+          the change, or the PR itself only adds that file.
+          Fail if no such file exists, or if the PR adds API fields, config
+          keys or controllers that the proposal does not mention. List each.
