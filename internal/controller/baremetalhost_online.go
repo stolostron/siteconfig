@@ -36,6 +36,9 @@ import (
 const (
 	// This annotation is internal bookkeeping, not a desired power-state input.
 	bmhOnlineInitializedAnnotation = v1alpha1.Group + "/online-initialized"
+	// A handled restore adopts surviving hosts once, even if backup status is
+	// older than the installation recorded on the host.
+	bmhOnlineRestoreAnnotation = v1alpha1.Group + "/online-restore"
 	// This manager holds the initial value only until another controller changes it.
 	// It must never be reapplied once the normal manager has released online.
 	bmhInitialPowerFieldManager = "siteconfig-initial-power"
@@ -116,6 +119,9 @@ func prepareBareMetalHostApply(
 		annotations = make(map[string]string)
 	}
 	annotations[bmhOnlineInitializedAnnotation] = bareMetalHostOnlineLifecycle(clusterInstance, "")
+	if restore := bareMetalHostOnlineRestoreID(clusterInstance); restore != "" {
+		annotations[bmhOnlineRestoreAnnotation] = restore
+	}
 	prepared.SetAnnotations(annotations)
 
 	return prepared, nil
@@ -134,12 +140,19 @@ func bareMetalHostOnlineLifecycle(clusterInstance *v1alpha1.ClusterInstance, pre
 	// record for the same CI or a handled restore instead of replaying a default.
 	// A later successfully processed reinstall supplies a new generation above.
 	previousUID, previousReinstall, _ := strings.Cut(previousLifecycle, ":")
-	restoreName := clusterInstance.Labels[veleroRestoreNameLabel]
-	restored := restoreName != "" && clusterInstance.Annotations[veleroRestoreHandledAnnotation] == restoreName
+	restored := bareMetalHostOnlineRestoreID(clusterInstance) != ""
 	if previousReinstall != "" && (previousUID == lifecycle || restored) {
 		return lifecycle + ":" + previousReinstall
 	}
 	return lifecycle
+}
+
+func bareMetalHostOnlineRestoreID(clusterInstance *v1alpha1.ClusterInstance) string {
+	restoreName := clusterInstance.Labels[veleroRestoreNameLabel]
+	if restoreName == "" || clusterInstance.Annotations[veleroRestoreHandledAnnotation] != restoreName {
+		return ""
+	}
+	return string(clusterInstance.UID) + ":" + restoreName
 }
 
 func validateBareMetalHostApply(existing, prepared *unstructured.Unstructured) error {
@@ -167,16 +180,12 @@ func bareMetalHostOnlineInitialized(
 	if previousLifecycle == lifecycle || previousLifecycle == "" {
 		return true
 	}
-	// A restored CI has a new UID but represents the same installed cluster.
-	// Adopt its marker only for a handled restore with the same reinstall
-	// generation; an explicit reinstall must still initialize power again.
-	restoreName := clusterInstance.Labels[veleroRestoreNameLabel]
-	if restoreName == "" || clusterInstance.Annotations[veleroRestoreHandledAnnotation] != restoreName {
-		return false
-	}
-	_, previousReinstall, _ := strings.Cut(previousLifecycle, ":")
-	_, currentReinstall, _ := strings.Cut(lifecycle, ":")
-	return previousReinstall == currentReinstall
+	// Reinstall generation names are opaque. Restored status may predate the
+	// surviving host, so its first apply adopts power and records this restore
+	// atomically with the new lifecycle baseline. Later successful reinstalls
+	// still initialize because this checkpoint is already acknowledged.
+	restore := bareMetalHostOnlineRestoreID(clusterInstance)
+	return restore != "" && existing.GetAnnotations()[bmhOnlineRestoreAnnotation] != restore
 }
 
 func preserveBareMetalHostOnline(

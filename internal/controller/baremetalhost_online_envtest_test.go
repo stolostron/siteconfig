@@ -77,6 +77,7 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 	f.testUnsuccessfulReinstall(t)
 	f.testLifecycleBoundaries(t)
 	f.testRestoration(t)
+	f.testOlderRestoration(t)
 	f.testConcurrentPowerChanges(t)
 	f.testConcurrentCreation(t)
 	testBareMetalHostOnlineEnvtestCleanup(t)

@@ -134,14 +134,15 @@ var _ = Describe("BareMetalHost apply safety", func() {
 	)
 
 	type lifecycleCase struct {
-		previousLifecycle string
-		reinstall         string
-		observedReinstall string
-		failedReason      v1alpha1.ClusterInstanceConditionReason
-		expectedLifecycle string
-		restore           string
-		handledRestore    string
-		unallocated       bool
+		previousLifecycle   string
+		reinstall           string
+		observedReinstall   string
+		failedReason        v1alpha1.ClusterInstanceConditionReason
+		expectedLifecycle   string
+		restore             string
+		handledRestore      string
+		restoreAcknowledged bool
+		unallocated         bool
 	}
 	DescribeTable("recognizes the installation that initialized power",
 		func(tc lifecycleCase, expected bool) {
@@ -165,6 +166,11 @@ var _ = Describe("BareMetalHost apply safety", func() {
 			}
 			cluster.Labels = map[string]string{veleroRestoreNameLabel: tc.restore}
 			cluster.Annotations = map[string]string{veleroRestoreHandledAnnotation: tc.handledRestore}
+			if tc.restoreAcknowledged {
+				annotations := current.GetAnnotations()
+				annotations[bmhOnlineRestoreAnnotation] = string(cluster.UID) + ":" + tc.restore
+				current.SetAnnotations(annotations)
+			}
 			lifecycle := bareMetalHostOnlineLifecycle(cluster, tc.previousLifecycle)
 			prepared := desired.DeepCopy()
 			prepared.SetAnnotations(map[string]string{bmhOnlineInitializedAnnotation: lifecycle})
@@ -223,10 +229,18 @@ var _ = Describe("BareMetalHost apply safety", func() {
 			previousLifecycle: "old-cluster-uid:install-1", reinstall: "install-1", observedReinstall: "install-1",
 			restore: "restore-1", handledRestore: "restore-1",
 		}, true),
-		Entry("handled restore with a new reinstall", lifecycleCase{
-			previousLifecycle: "old-cluster-uid:install-1", reinstall: "install-2", observedReinstall: "install-2",
-			restore: "restore-1", handledRestore: "restore-1",
+		Entry("handled restore with a subsequent new reinstall", lifecycleCase{
+			previousLifecycle: "cluster-uid:install-1", reinstall: "install-2", observedReinstall: "install-2",
+			restore: "restore-1", handledRestore: "restore-1", restoreAcknowledged: true,
 		}, false),
+		Entry("handled restore from an older backup", lifecycleCase{
+			previousLifecycle: "old-cluster-uid:later-install", reinstall: "backup-install",
+			observedReinstall: "backup-install", restore: "restore-1", handledRestore: "restore-1",
+		}, true),
+		Entry("in-place handled restore from an older backup", lifecycleCase{
+			previousLifecycle: "cluster-uid:later-install", reinstall: "backup-install",
+			observedReinstall: "backup-install", restore: "restore-1", handledRestore: "restore-1",
+		}, true),
 		Entry("handled restore without reinstall status", lifecycleCase{
 			previousLifecycle: "old-cluster-uid:install-1", reinstall: "install-1",
 			restore: "restore-1", handledRestore: "restore-1", expectedLifecycle: "cluster-uid:install-1",

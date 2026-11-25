@@ -31,18 +31,29 @@ initialization. Changing `spec.reinstall.generation` alone does not reset power.
 A rejected or failed request that leaves the BMH in place retains its existing
 initialization marker and power state. The reinstall handler confirms a new
 generation after deleting rendered manifests and restoring preserved data.
+A deletion failure pauses the request; resuming it retries deletion and waits
+for finalizers rather than treating the previous failure as completed teardown.
 A BMH that is already owned by the same ClusterInstance but has no initialization
 marker is adopted with its current power value. This avoids replaying an
 installation default on hosts created by older SiteConfig versions. For a
-ClusterInstance restored by Velero, a changed UID is adopted without resetting
-power when SiteConfig has handled the restore and the reinstall generation is
-unchanged. If reinstall status was not restored, the existing BMH marker supplies
-the previous initialization generation. A successfully processed new reinstall
-still initializes power normally.
+ClusterInstance restored by Velero, the first apply to a surviving owned host
+adopts its current power value even if restored status predates the installation
+recorded on the BMH. Reinstall generation names are opaque; a mismatch during
+restore adoption is not evidence that a new installation should start. This
+also covers an in-place restore that retains the ClusterInstance UID.
 
-Do not edit or remove the initialization annotation or SiteConfig ownership
-label to request a power change. Use the supported reinstall workflow for a
-new installation. SiteConfig refuses to modify a deleting BMH or one owned by
+SiteConfig records the ClusterInstance UID and handled restore name in the
+internal `siteconfig.open-cluster-management.io/online-restore` annotation,
+atomically with the adopted initialization marker. That checkpoint establishes
+the restored ClusterInstance's lifecycle baseline so repeated metadata updates
+preserve power. If reinstall status was not restored, the existing BMH marker
+supplies the previous initialization generation. A subsequently processed new
+reinstall still initializes power normally after restore adoption. A newly
+created or unallocated host continues to use its installation default.
+
+Do not edit or remove the initialization/restore annotations or SiteConfig
+ownership label to request a power change. Use the supported reinstall workflow
+for a new installation. SiteConfig refuses to modify a deleting BMH or one owned by
 another ClusterInstance.
 
 ## Field ownership
@@ -73,8 +84,9 @@ separately through `make test-envtest` and are not included in this report.
 
 The API-server tests cover initial values of both `true` and `false`, existing
 inventory hosts, adoption of older SiteConfig resources, metadata changes and
-removals, lifecycle changes, dry runs, and concurrent power writes. They use a
-minimal structural BMH schema and do not run BMO or installer controllers.
+removals, lifecycle changes, older-backup restore adoption, dry runs, and
+concurrent power writes. They use a minimal structural BMH schema and do not run
+BMO or installer controllers.
 
 Lab verification should cover an initial IBI installation, its automatic
 installation-to-import transition, and a later ClusterInstance label or
