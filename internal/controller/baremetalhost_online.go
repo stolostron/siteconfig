@@ -183,8 +183,11 @@ func preserveBareMetalHostOnline(
 	ctx context.Context, c client.Client, existing, prepared *unstructured.Unstructured, dryRun bool,
 ) error {
 	online, found, err := unstructured.NestedBool(existing.Object, "spec", "online")
-	if err != nil || !found {
-		return fmt.Errorf("existing BMH has no valid spec.online value")
+	if err != nil {
+		return fmt.Errorf("failed to read existing BMH spec.online: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("existing BMH has no spec.online value")
 	}
 	if dryRun {
 		// A dry-run handoff is not persisted, so a following dry-run omission

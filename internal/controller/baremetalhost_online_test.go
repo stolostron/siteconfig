@@ -95,6 +95,10 @@ var _ = Describe("BareMetalHost apply safety", func() {
 				Expect(errors.Is(err, readError)).To(BeTrue(),
 					"the underlying read error must remain discoverable so callers can diagnose and retry the failure")
 			}
+			if _, _, fieldError := unstructured.NestedBool(current.Object, "spec", "online"); fieldError != nil {
+				Expect(errors.Unwrap(err)).To(MatchError(fieldError),
+					"a malformed power value must retain its type error so the bad persisted data can be diagnosed")
+			}
 			Expect(result).To(Equal(controllerutil.OperationResultNone),
 				"a rejected BMH apply must not report a successful resource change")
 			Expect(writes).To(BeZero(),
@@ -117,7 +121,10 @@ var _ = Describe("BareMetalHost apply safety", func() {
 		}, nil, "rendered BMH does not belong"),
 		Entry("missing online value on an initialized host", func() {
 			unstructured.RemoveNestedField(current.Object, "spec", "online")
-		}, nil, "no valid spec.online"),
+		}, nil, "has no spec.online value"),
+		Entry("malformed online value on an initialized host", func() {
+			current.Object["spec"].(map[string]interface{})["online"] = "false"
+		}, nil, "failed to read existing BMH spec.online"),
 		Entry("unreadable managed fields", func() {
 			current.SetManagedFields([]metav1.ManagedFieldsEntry{{
 				Manager: ClusterInstanceFieldManager, Operation: metav1.ManagedFieldsOperationApply,
@@ -233,8 +240,8 @@ var _ = Describe("BareMetalHost apply safety", func() {
 	// These tests verify the API requests and failure boundaries. Envtest covers
 	// the API server's actual field-ownership and optimistic-locking behavior.
 	DescribeTable("preserves power during an unrelated host update",
-		func(ownsOnline, dryRun bool, handoffError error) {
-			current.Object["spec"].(map[string]interface{})["online"] = true
+		func(online, ownsOnline, dryRun bool, handoffError error) {
+			current.Object["spec"].(map[string]interface{})["online"] = online
 			current.SetResourceVersion("10")
 			operation := metav1.ManagedFieldsOperationUpdate
 			if ownsOnline {
@@ -269,7 +276,7 @@ var _ = Describe("BareMetalHost apply safety", func() {
 					Expect(object.GetResourceVersion()).To(Equal("10"), "handoff must reject a concurrent host update")
 					content, ok := configuration.(runtime.Unstructured)
 					Expect(ok).To(BeTrue(), "handoff must send only the explicitly supplied unstructured fields")
-					Expect(content.UnstructuredContent()["spec"]).To(Equal(map[string]interface{}{"online": true}),
+					Expect(content.UnstructuredContent()["spec"]).To(Equal(map[string]interface{}{"online": online}),
 						"handoff must write only the current power state")
 					if handoffError != nil {
 						return handoffError
@@ -294,7 +301,7 @@ var _ = Describe("BareMetalHost apply safety", func() {
 					Expect(object.GetResourceVersion()).To(Equal(expectedVersion),
 						"the apply must guard against writes after the handoff")
 					if dryRun {
-						Expect(spec).To(HaveKeyWithValue("online", true), "validation must retain the current power value")
+						Expect(spec).To(HaveKeyWithValue("online", online), "validation must retain the current power value")
 					} else {
 						Expect(spec).ToNot(HaveKey("online"), "updates must leave power control to its current owner")
 					}
@@ -323,11 +330,15 @@ var _ = Describe("BareMetalHost apply safety", func() {
 			}
 			Expect(desired.Object).To(Equal(original.Object), "applying a host must not mutate the rendered template")
 		},
-		Entry("legacy Update ownership", false, false, nil),
-		Entry("active SSA ownership", true, false, nil),
-		Entry("dry-run with legacy ownership", false, true, nil),
-		Entry("dry-run with active SSA ownership", true, true, nil),
-		Entry("concurrent write during handoff", true, false,
+		Entry("legacy Update ownership", true, false, false, nil),
+		Entry("active SSA ownership", true, true, false, nil),
+		Entry("dry-run with legacy ownership", true, false, true, nil),
+		Entry("dry-run with active SSA ownership", true, true, true, nil),
+		Entry("powered-off host with legacy ownership", false, false, false, nil),
+		Entry("powered-off host with active SSA ownership", false, true, false, nil),
+		Entry("powered-off dry-run with legacy ownership", false, false, true, nil),
+		Entry("powered-off dry-run with active SSA ownership", false, true, true, nil),
+		Entry("concurrent write during handoff", true, true, false,
 			apierrors.NewConflict(schema.GroupResource{Group: "metal3.io", Resource: "baremetalhosts"},
 				"node", errors.New("host changed"))),
 	)
