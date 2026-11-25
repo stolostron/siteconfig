@@ -102,6 +102,7 @@ var _ = Describe("Reconcile", func() {
 		cm1 := &corev1.ConfigMap{}
 		Expect(c.Get(ctx, key, cm1)).To(Succeed())
 		Expect(cm1.Data).To(Equal(cm.Data))
+		Expect(r.ConfigStore.GetMaxConcurrentReconciles()).To(Equal(10))
 	})
 
 	It("recreates the SiteConfig configuration ConfigMap with default config when deleted", func() {
