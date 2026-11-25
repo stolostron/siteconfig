@@ -19,7 +19,9 @@ package clusterinstance
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"text/template"
 	"unicode"
 
@@ -131,7 +133,7 @@ func (te *TemplateEngine) renderTemplates(
 		// process Template ConfigMap
 		for templateKey, template := range templatesConfigMap.Data {
 
-			object, err := te.renderManifestFromTemplate(
+			objects, err := te.renderManifestFromTemplate(
 				ctx,
 				c,
 				log,
@@ -143,7 +145,7 @@ func (te *TemplateEngine) renderTemplates(
 			if err != nil {
 				return renderedObjects, err
 			}
-			renderedObjects = append(renderedObjects, object)
+			renderedObjects = append(renderedObjects, objects...)
 		}
 	}
 	return renderedObjects, nil
@@ -186,74 +188,88 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 	clusterInstance *v1alpha1.ClusterInstance,
 	node *v1alpha1.NodeSpec,
 	templateRefName, templateKey, template string,
-) (RenderedObject, error) {
+) ([]RenderedObject, error) {
 
-	var object RenderedObject
+	var objects []RenderedObject
 
 	log = log.Named("renderManifestFromTemplate")
 
 	clusterData, err := buildClusterData(ctx, c, clusterInstance, node)
 	if err != nil {
 		log.Error("Failed to build ClusterInstance data", zap.Error(err))
-		return object, err
+		return objects, err
 	}
 
-	manifest, err := te.render(templateKey, template, clusterData)
+	manifests, err := te.render(templateKey, template, clusterData)
 	if err != nil {
 		log.Error(fmt.Sprintf("Failed to render templateRef %s", templateRefName), zap.Error(err))
-		return object, err
+		return objects, err
 	}
-	if manifest == nil {
-		return object, nil
-	}
-
-	if err := object.SetObject(manifest); err != nil {
-		log.Error(fmt.Sprintf("Failed to parse rendered template templateRef %s", templateRefName), zap.Error(err))
-		return object, err
+	if len(manifests) == 0 {
+		return objects, nil
 	}
 
-	apiVersion := object.GetAPIVersion()
-	kind := object.GetKind()
-	name := object.GetName()
-	namespace := object.GetNamespace()
-
-	// Default action is to render the manifest
-	object.action = actionRender
-
-	// Determine if manifest should be pruned or suppressed
-	suppressManifestLogMsg := fmt.Sprintf("Suppressed manifest %s", GetResourceId(name, namespace, kind))
 	pruneList := clusterInstance.Spec.PruneManifests
 	suppressManifestsList := clusterInstance.Spec.SuppressedManifests
 	if node != nil {
 		pruneList = append(pruneList, node.PruneManifests...)
 		suppressManifestsList = append(suppressManifestsList, node.SuppressedManifests...)
 	}
-	if pruneManifest(v1alpha1.ResourceRef{APIVersion: apiVersion, Kind: kind}, pruneList) {
-		object.action = actionPrune
-		log.Debug(suppressManifestLogMsg)
-		return object, nil
+
+	// Process each manifest (templates can render multiple YAML documents)
+	for _, document := range manifests {
+		var object RenderedObject
+
+		if err := object.SetObject(document.manifest); err != nil {
+			log.Error("Failed to parse rendered template",
+				zap.String("templateRef", templateRefName), zap.String("templateKey", templateKey),
+				zap.Int("documentIndex", document.index), zap.Error(err))
+			return objects, fmt.Errorf("failed to parse rendered template %s, document %d: %w", templateKey, document.index, err)
+		}
+
+		apiVersion := object.GetAPIVersion()
+		kind := object.GetKind()
+		name := object.GetName()
+		namespace := object.GetNamespace()
+
+		// Default action is to render the manifest
+		object.action = actionRender
+
+		// Determine if manifest should be pruned or suppressed
+		resourceId := GetResourceId(name, namespace, kind)
+		if pruneManifest(v1alpha1.ResourceRef{APIVersion: apiVersion, Kind: kind}, pruneList) {
+			object.action = actionPrune
+			log.Debug("Pruned manifest", zap.String("resource", resourceId))
+			objects = append(objects, object)
+			continue
+		}
+		if suppressManifest(kind, suppressManifestsList) {
+			object.action = actionSuppress
+			log.Debug("Suppressed manifest", zap.String("resource", resourceId))
+			objects = append(objects, object)
+			continue
+		}
+
+		// Append Annotations and Labels to rendered manifest
+		updatedManifest := appendAnnotationsAndLabels(clusterInstance, node, object.GetObject().Object, kind)
+
+		// Add owned-by label
+		updatedManifest = appendManifestLabels(map[string]string{
+			OwnedByLabel: GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
+		}, updatedManifest)
+
+		// Update the rendered object with the labels and annotations applied above
+		if err := object.SetObject(updatedManifest); err != nil {
+			log.Error("Failed to parse rendered template",
+				zap.String("templateRef", templateRefName), zap.String("templateKey", templateKey),
+				zap.Int("documentIndex", document.index), zap.Error(err))
+			return objects, fmt.Errorf("failed to parse rendered template %s, document %d: %w", templateKey, document.index, err)
+		}
+
+		objects = append(objects, object)
 	}
-	if suppressManifest(kind, suppressManifestsList) {
-		object.action = actionSuppress
-		log.Debug(suppressManifestLogMsg)
-		return object, nil
-	}
 
-	// Append Annotations and Labels to rendered manifest
-	updatedManifest := appendAnnotationsAndLabels(clusterInstance, node, object.GetObject().Object, kind)
-
-	// Add owned-by label
-	updatedManifest = appendManifestLabels(map[string]string{
-		OwnedByLabel: GenerateOwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name),
-	}, updatedManifest)
-
-	// Update the rendered object with the labels and annotations applied above
-	if err := object.SetObject(updatedManifest); err != nil {
-		log.Error(fmt.Sprintf("Failed to parse rendered template templateRef %s", templateRefName), zap.Error(err))
-		return object, err
-	}
-
-	return object, nil
+	return objects, nil
 }
 
 func validateRenderedTemplate(manifest map[string]interface{}, templateKey string) error {
@@ -286,9 +302,14 @@ func ParseTemplate(templateKey, templateStr string) (*template.Template, error) 
 	return t, nil
 }
 
-func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterData) (map[string]interface{}, error) {
+type renderedDocument struct {
+	index    int
+	manifest map[string]interface{}
+}
 
-	renderedTemplate := make(map[string]interface{})
+func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterData) ([]renderedDocument, error) {
+
+	var renderedTemplates []renderedDocument
 	t, err := ParseTemplate(templateKey, templateStr)
 	if err != nil {
 		return nil, fmt.Errorf("encountered an error parsing template %s: %w", templateKey, err)
@@ -300,16 +321,75 @@ func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterD
 		return nil, fmt.Errorf("failed to execute template %s: %w", templateKey, err)
 	}
 
-	// Ensure there's non-whitespace content
+	// Check if there's non-whitespace content
+	hasContent := false
 	for _, r := range buffer.String() {
 		if !unicode.IsSpace(r) {
-			if err := yaml.Unmarshal(buffer.Bytes(), &renderedTemplate); err != nil {
-				return renderedTemplate, fmt.Errorf("failed to unmarshal YAML: %w", err)
-			}
-			return renderedTemplate, validateRenderedTemplate(renderedTemplate, templateKey)
+			hasContent = true
+			break
 		}
 	}
+	if !hasContent {
+		// Output is all whitespace; return empty slice
+		return renderedTemplates, nil
+	}
 
-	// Output is all whitespace; return nil instead
-	return nil, nil
+	// Use yaml.Decoder to handle multiple YAML documents separated by ---
+	decoder := yaml.NewDecoder(&buffer)
+	// Count every Decode call, including empty and null documents, using a one-based index.
+	for documentIndex := 1; ; documentIndex++ {
+		var node yaml.Node
+		if err := decoder.Decode(&node); err != nil {
+			// io.EOF is expected when we reach the end of the document stream
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return renderedTemplates, yamlDocumentDecodeError(templateKey, documentIndex, err)
+		}
+		// yaml.v3 retains anchors across Decode calls. Check alias targets
+		// before decoding the node into a map, which expands the aliases.
+		if !aliasesStayInDocument(&node, make(map[*yaml.Node]struct{})) {
+			return renderedTemplates, fmt.Errorf(
+				"failed to validate YAML document %d: alias refers to another document in template %s",
+				documentIndex, templateKey)
+		}
+		var doc map[string]interface{}
+		if err := node.Decode(&doc); err != nil {
+			return renderedTemplates, yamlDocumentDecodeError(templateKey, documentIndex, err)
+		}
+
+		// Consecutive or trailing separators can produce empty documents; they are not manifests.
+		if doc == nil {
+			continue
+		}
+
+		// Validate the document
+		if err := validateRenderedTemplate(doc, templateKey); err != nil {
+			return renderedTemplates, fmt.Errorf("failed to validate YAML document %d: %w", documentIndex, err)
+		}
+
+		renderedTemplates = append(renderedTemplates, renderedDocument{index: documentIndex, manifest: doc})
+	}
+
+	return renderedTemplates, nil
+}
+
+func aliasesStayInDocument(node *yaml.Node, anchors map[*yaml.Node]struct{}) bool {
+	if node.Anchor != "" {
+		anchors[node] = struct{}{}
+	}
+	if node.Kind == yaml.AliasNode {
+		_, local := anchors[node.Alias]
+		return local
+	}
+	for _, child := range node.Content {
+		if !aliasesStayInDocument(child, anchors) {
+			return false
+		}
+	}
+	return true
+}
+
+func yamlDocumentDecodeError(templateKey string, documentIndex int, err error) error {
+	return fmt.Errorf("failed to unmarshal YAML document %d in template %s: %w", documentIndex, templateKey, err)
 }
