@@ -333,9 +333,16 @@ func (r *ReinstallHandler) ensureRenderedManifestsAreDeleted(ctx context.Context
 		return
 	}
 
-	switch renderedManifestsDeletedCondition.Reason {
-	case string(v1alpha1.Failed), string(v1alpha1.Completed):
+	// A paused request resumes with its previous failure condition. Only a
+	// positively completed teardown may be skipped; failure must retry deletion
+	// before ObservedGeneration can authorize a new power initialization.
+	if renderedManifestsDeletedCondition.Status == metav1.ConditionTrue &&
+		renderedManifestsDeletedCondition.Reason == string(v1alpha1.Completed) {
 		return
+	}
+	if renderedManifestsDeletedCondition.Reason == string(v1alpha1.Failed) {
+		renderedManifestsDeletedCondition = reinstallRenderedManifestsDeletedConditionStatus(
+			metav1.ConditionFalse, v1alpha1.InProgress, "Rendered manifests are being deleted")
 	}
 
 	deletionCompleted, err := r.DeletionHandler.DeleteRenderedObjects(
