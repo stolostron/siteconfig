@@ -13,8 +13,9 @@ function cleanup {
 trap cleanup EXIT
 
 function assert_executable {
-    if [ ! -x "$1" ]; then
-        echo "Expected the requested tool to be installed at $1" >&2
+    local tool_path="$1"
+    if [[ ! -x "${tool_path}" ]]; then
+        echo "Expected the requested tool to be installed at ${tool_path}" >&2
         exit 1
     fi
 }

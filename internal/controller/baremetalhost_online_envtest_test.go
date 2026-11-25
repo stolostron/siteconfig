@@ -51,9 +51,36 @@ import (
 	ibi_templates "github.com/stolostron/siteconfig/internal/templates/image-based-installer"
 )
 
+type bareMetalHostOnlineEnvtestFixture struct {
+	ctx     context.Context
+	c       client.WithWatch
+	cluster *v1alpha1.ClusterInstance
+	r       *ClusterInstanceReconciler
+	log     *zap.Logger
+	counter int
+}
+
 // A real API server is required: the fake client does not implement SSA field
 // ownership, optimistic locking, or the consequences of omitting an owned field.
 func TestBareMetalHostOnlineEnvtest(t *testing.T) {
+	f := newBareMetalHostOnlineEnvtestFixture(t)
+	f.testRenderedTemplatePipeline(t)
+	f.testRestartAfterPartialWrite(t)
+	f.testMultipleHosts(t)
+	f.testInitializeAndRelease(t)
+	f.testInstallerPowerChange(t)
+	f.testInventorySetup(t)
+	f.testLegacyHostAdoption(t)
+	f.testDryRunCreation(t)
+	f.testUnsuccessfulReinstall(t)
+	f.testLifecycleBoundaries(t)
+	f.testRestoration(t)
+	f.testConcurrentPowerChanges(t)
+	f.testConcurrentCreation(t)
+}
+
+func newBareMetalHostOnlineEnvtestFixture(t *testing.T) *bareMetalHostOnlineEnvtestFixture {
+	t.Helper()
 	g := NewWithT(t)
 	// Exercise the local-only guard on every run. If it is removed, the invalid
 	// kubeconfig makes the test fail before it can access any existing cluster.
@@ -70,7 +97,9 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "baremetalhosts.metal3.io"},
 		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
 			Group: "metal3.io", Scope: apiextensionsv1.NamespaceScoped,
-			Names: apiextensionsv1.CustomResourceDefinitionNames{Plural: "baremetalhosts", Singular: "baremetalhost", Kind: "BareMetalHost"},
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Plural: "baremetalhosts", Singular: "baremetalhost", Kind: "BareMetalHost",
+			},
 			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
 				Name: "v1alpha1", Served: true, Storage: true,
 				Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
@@ -79,7 +108,8 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 							"online": {Type: "boolean"}, "externallyProvisioned": {Type: "boolean"}, "bootMode": {Type: "string"},
 							"bootMACAddress": {Type: "string"}, "automatedCleaningMode": {Type: "string"}, "architecture": {Type: "string"},
 							"bmc": {Type: "object", Properties: map[string]apiextensionsv1.JSONSchemaProps{
-								"address": {Type: "string"}, "credentialsName": {Type: "string"}, "disableCertificateVerification": {Type: "boolean"},
+								"address": {Type: "string"}, "credentialsName": {Type: "string"},
+								"disableCertificateVerification": {Type: "boolean"},
 							}},
 						}},
 					},
@@ -92,7 +122,9 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "clusterimagesets.hive.openshift.io"},
 		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
 			Group: "hive.openshift.io", Scope: apiextensionsv1.ClusterScoped,
-			Names: apiextensionsv1.CustomResourceDefinitionNames{Plural: "clusterimagesets", Singular: "clusterimageset", Kind: "ClusterImageSet"},
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Plural: "clusterimagesets", Singular: "clusterimageset", Kind: "ClusterImageSet",
+			},
 			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
 				Name: "v1", Served: true, Storage: true,
 				Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
@@ -125,52 +157,76 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 	ctx := context.Background()
 	g.Expect(c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "online-tests"}})).To(Succeed())
-	cluster := &v1alpha1.ClusterInstance{ObjectMeta: metav1.ObjectMeta{Name: "cluster", Namespace: "online-tests", UID: types.UID("cluster-uid")}}
-	owner := ci.GenerateOwnedByLabelValue(cluster.Namespace, cluster.Name)
+	cluster := &v1alpha1.ClusterInstance{ObjectMeta: metav1.ObjectMeta{
+		Name: "cluster", Namespace: "online-tests", UID: types.UID("cluster-uid"),
+	}}
 	r := &ClusterInstanceReconciler{Client: c, APIReader: c}
 	log := zap.NewNop()
-	counter := 0
-	host := func(online bool) *unstructured.Unstructured {
-		counter++
-		return &unstructured.Unstructured{Object: map[string]interface{}{
-			"apiVersion": "metal3.io/v1alpha1", "kind": "BareMetalHost",
-			"metadata": map[string]interface{}{
-				"name": fmt.Sprintf("host-%d", counter), "namespace": cluster.Namespace,
-				"labels":      map[string]interface{}{ci.OwnedByLabel: owner, "example.com/rack": "a"},
-				"annotations": map[string]interface{}{"example.com/note": "a"},
-			},
-			"spec": map[string]interface{}{"online": online, "externallyProvisioned": true, "bootMode": "UEFI"},
-		}}
+	return &bareMetalHostOnlineEnvtestFixture{ctx: ctx, c: c, cluster: cluster, r: r, log: log}
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) host(online bool) *unstructured.Unstructured {
+	f.counter++
+	owner := ci.GenerateOwnedByLabelValue(f.cluster.Namespace, f.cluster.Name)
+	return &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "metal3.io/v1alpha1", "kind": "BareMetalHost",
+		"metadata": map[string]interface{}{
+			"name": fmt.Sprintf("host-%d", f.counter), "namespace": f.cluster.Namespace,
+			"labels":      map[string]interface{}{ci.OwnedByLabel: owner, "example.com/rack": "a"},
+			"annotations": map[string]interface{}{"example.com/note": "a"},
+		},
+		"spec": map[string]interface{}{"online": online, "externallyProvisioned": true, "bootMode": "UEFI"},
+	}}
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) read(
+	t *testing.T, desired *unstructured.Unstructured,
+) *unstructured.Unstructured {
+	t.Helper()
+	actual := &unstructured.Unstructured{}
+	actual.SetGroupVersionKind(desired.GroupVersionKind())
+	NewWithT(t).Expect(f.c.Get(f.ctx, client.ObjectKeyFromObject(desired), actual)).To(Succeed(),
+		"read the persisted BareMetalHost")
+	return actual
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) assertOnline(
+	t *testing.T, desired *unstructured.Unstructured, expected bool,
+) {
+	t.Helper()
+	g := NewWithT(t)
+	value, found, err := unstructured.NestedBool(f.read(t, desired).Object, "spec", "online")
+	g.Expect(err).ToNot(HaveOccurred(), "read the current power value")
+	g.Expect(found).To(BeTrue(), "spec.online must remain present after applying metadata")
+	g.Expect(value).To(Equal(expected), "the persisted power value must match this installation step")
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) power(
+	t *testing.T, desired *unstructured.Unstructured, online bool,
+) {
+	t.Helper()
+	g := NewWithT(t)
+	actual := f.read(t, desired)
+	patch := client.MergeFromWithOptions(actual.DeepCopy(), client.MergeFromWithOptimisticLock{})
+	g.Expect(unstructured.SetNestedField(actual.Object, online, "spec", "online")).To(Succeed(),
+		"prepare the simulated power-controller update")
+	g.Expect(f.c.Patch(f.ctx, actual, patch, client.FieldOwner("power-controller"))).To(Succeed(),
+		"persist the simulated power-controller update")
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) apply(desired *unstructured.Unstructured, dryRun bool) error {
+	var writer client.Client = f.c
+	if dryRun {
+		writer = client.NewDryRunClient(f.c)
 	}
-	read := func(t *testing.T, desired *unstructured.Unstructured) *unstructured.Unstructured {
-		t.Helper()
-		actual := &unstructured.Unstructured{}
-		actual.SetGroupVersionKind(desired.GroupVersionKind())
-		NewWithT(t).Expect(c.Get(ctx, client.ObjectKeyFromObject(desired), actual)).To(Succeed())
-		return actual
-	}
-	assertOnline := func(t *testing.T, desired *unstructured.Unstructured, expected bool) {
-		t.Helper()
-		value, found, err := unstructured.NestedBool(read(t, desired).Object, "spec", "online")
-		NewWithT(t).Expect(err).ToNot(HaveOccurred())
-		NewWithT(t).Expect(found).To(BeTrue())
-		NewWithT(t).Expect(value).To(Equal(expected))
-	}
-	power := func(t *testing.T, desired *unstructured.Unstructured, online bool) {
-		t.Helper()
-		actual := read(t, desired)
-		patch := client.MergeFromWithOptions(actual.DeepCopy(), client.MergeFromWithOptimisticLock{})
-		NewWithT(t).Expect(unstructured.SetNestedField(actual.Object, online, "spec", "online")).To(Succeed())
-		NewWithT(t).Expect(c.Patch(ctx, actual, patch, client.FieldOwner("power-controller"))).To(Succeed())
-	}
-	apply := func(desired *unstructured.Unstructured, dryRun bool) error {
-		var writer client.Client = c
-		if dryRun {
-			writer = client.NewDryRunClient(c)
-		}
-		_, err := r.applyRenderedObject(ctx, writer, log, cluster, *desired, dryRun)
-		return err
-	}
+	_, err := f.r.applyRenderedObject(f.ctx, writer, f.log, f.cluster, *desired, dryRun)
+	return err
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testRenderedTemplatePipeline(t *testing.T) {
+	c := f.c
+	ctx := f.ctx
+	log := f.log
 	for _, installer := range []struct {
 		name     string
 		template string
@@ -237,14 +293,21 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 				if apierrors.IsNotFound(readErr) {
 					g.Expect(apierrors.IsNotFound(c.Get(ctx, client.ObjectKeyFromObject(desired), before))).To(BeTrue())
 				} else {
-					g.Expect(read(t, desired).GetResourceVersion()).To(Equal(before.GetResourceVersion()), "validation must not write the BMH")
+					g.Expect(f.read(t, desired).GetResourceVersion()).To(
+						Equal(before.GetResourceVersion()),
+						"validation must not write the BMH",
+					)
 				}
 				applied, err := pipeline.applyRenderedManifests(ctx, log, instance, objects)
 				g.Expect(err).ToNot(HaveOccurred())
 				g.Expect(applied).To(BeTrue())
 				g.Expect(c.Get(ctx, client.ObjectKeyFromObject(instance), instance)).To(Succeed())
-				g.Expect(meta.IsStatusConditionTrue(instance.Status.Conditions, string(v1alpha1.RenderedTemplatesValidated))).To(BeTrue())
-				g.Expect(meta.IsStatusConditionTrue(instance.Status.Conditions, string(v1alpha1.RenderedTemplatesApplied))).To(BeTrue())
+				g.Expect(meta.IsStatusConditionTrue(instance.Status.Conditions, string(v1alpha1.RenderedTemplatesValidated))).To(
+					BeTrue(),
+				)
+				g.Expect(meta.IsStatusConditionTrue(instance.Status.Conditions, string(v1alpha1.RenderedTemplatesApplied))).To(
+					BeTrue(),
+				)
 				g.Expect(instance.Status.ManifestsRendered).To(HaveLen(1))
 				g.Expect(instance.Status.ManifestsRendered[0].Status).To(Equal(v1alpha1.ManifestRenderedSuccess))
 			}
@@ -258,51 +321,61 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			}
 
 			runPipeline()
-			assertOnline(t, desired, installer.online)
-			g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, string(instance.UID)))
+			f.assertOnline(t, desired, installer.online)
+			g.Expect(f.read(t, desired).GetAnnotations()).To(
+				HaveKeyWithValue(bmhOnlineInitializedAnnotation, string(instance.UID)),
+			)
 			if !installer.online {
 				// IBI turns the host on; assisted installation leaves the initial
 				// true unchanged, so the first update also exercises sole ownership.
-				power(t, desired, true)
+				f.power(t, desired, true)
 			}
 			updateInstance(func() {
 				instance.Spec.ExtraLabels = map[string]map[string]string{"BareMetalHost": {"example.com/pipeline-test": "cluster"}}
-				instance.Spec.ExtraAnnotations = map[string]map[string]string{"BareMetalHost": {"example.com/pipeline-test": "cluster"}}
+				instance.Spec.ExtraAnnotations = map[string]map[string]string{
+					"BareMetalHost": {"example.com/pipeline-test": "cluster"},
+				}
 			})
-			assertOnline(t, desired, true)
-			g.Expect(read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/pipeline-test", "cluster"))
-			g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue("example.com/pipeline-test", "cluster"))
-			owns, err := siteConfigOwnsOnline(read(t, desired))
+			f.assertOnline(t, desired, true)
+			g.Expect(f.read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/pipeline-test", "cluster"))
+			g.Expect(f.read(t, desired).GetAnnotations()).To(HaveKeyWithValue("example.com/pipeline-test", "cluster"))
+			owns, err := siteConfigOwnsOnline(f.read(t, desired))
 			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(owns).To(BeFalse())
 
 			updateInstance(func() {
-				instance.Spec.Nodes[0].ExtraLabels = map[string]map[string]string{"BareMetalHost": {"example.com/pipeline-test": "node"}}
-				instance.Spec.Nodes[0].ExtraAnnotations = map[string]map[string]string{"BareMetalHost": {"example.com/pipeline-test": "node"}}
+				instance.Spec.Nodes[0].ExtraLabels = map[string]map[string]string{
+					"BareMetalHost": {"example.com/pipeline-test": "node"},
+				}
+				instance.Spec.Nodes[0].ExtraAnnotations = map[string]map[string]string{
+					"BareMetalHost": {"example.com/pipeline-test": "node"},
+				}
 			})
-			assertOnline(t, desired, true)
-			g.Expect(read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/pipeline-test", "node"))
-			g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue("example.com/pipeline-test", "node"))
+			f.assertOnline(t, desired, true)
+			g.Expect(f.read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/pipeline-test", "node"))
+			g.Expect(f.read(t, desired).GetAnnotations()).To(HaveKeyWithValue("example.com/pipeline-test", "node"))
 
 			updateInstance(func() {
 				instance.Spec.ExtraLabels, instance.Spec.ExtraAnnotations = nil, nil
 				instance.Spec.Nodes[0].ExtraLabels, instance.Spec.Nodes[0].ExtraAnnotations = nil, nil
 			})
-			assertOnline(t, desired, true)
-			g.Expect(read(t, desired).GetLabels()).ToNot(HaveKey("example.com/pipeline-test"))
-			g.Expect(read(t, desired).GetAnnotations()).ToNot(HaveKey("example.com/pipeline-test"))
+			f.assertOnline(t, desired, true)
+			g.Expect(f.read(t, desired).GetLabels()).ToNot(HaveKey("example.com/pipeline-test"))
+			g.Expect(f.read(t, desired).GetAnnotations()).ToNot(HaveKey("example.com/pipeline-test"))
 
-			power(t, desired, false)
+			f.power(t, desired, false)
 			updateInstance(func() {
-				instance.Spec.ExtraLabels = map[string]map[string]string{"BareMetalHost": {"example.com/pipeline-test": "powered-off"}}
+				instance.Spec.ExtraLabels = map[string]map[string]string{
+					"BareMetalHost": {"example.com/pipeline-test": "powered-off"},
+				}
 			})
-			assertOnline(t, desired, false)
-			g.Expect(read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/pipeline-test", "powered-off"))
+			f.assertOnline(t, desired, false)
+			g.Expect(f.read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/pipeline-test", "powered-off"))
 
 			// A rejected reinstall still resumes normal rendering. Exercise the
 			// actual default-disabled handler before reapplying the production template.
-			power(t, desired, !installer.online)
-			marker := read(t, desired).GetAnnotations()[bmhOnlineInitializedAnnotation]
+			f.power(t, desired, !installer.online)
+			marker := f.read(t, desired).GetAnnotations()[bmhOnlineInitializedAnnotation]
 			store, err := configuration.NewConfigurationStore(configuration.NewDefaultConfiguration())
 			g.Expect(err).ToNot(HaveOccurred(), "the default configuration must be available")
 			g.Expect(store.GetAllowReinstalls()).To(BeFalse(), "this regression requires reinstalls to be disabled")
@@ -330,17 +403,24 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			g.Expect(err).ToNot(HaveOccurred(), "a rejected request is already considered processed")
 			g.Expect(result.IsZero()).To(BeTrue(), "normal template rendering is allowed to resume")
 			runPipeline()
-			assertOnline(t, desired, !installer.online)
-			g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, marker),
+			f.assertOnline(t, desired, !installer.online)
+			g.Expect(f.read(t, desired).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, marker),
 				"a rejected request must not advance the initialization marker")
 		})
 	}
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testRestartAfterPartialWrite(t *testing.T) {
+	c := f.c
+	ctx := f.ctx
+	cluster := f.cluster
+	log := f.log
 	for _, failure := range []string{"initial-write-timeout", "handoff-then-metadata-failure"} {
 		t.Run("restart-after-"+failure, func(t *testing.T) {
 			g := NewWithT(t)
-			desired := host(false)
+			desired := f.host(false)
 			if failure == "handoff-then-metadata-failure" {
-				g.Expect(apply(desired, false)).To(Succeed())
+				g.Expect(f.apply(desired, false)).To(Succeed())
 			}
 			labels, annotations := desired.GetLabels(), desired.GetAnnotations()
 			labels["example.com/rack"], annotations["example.com/note"] = "b", "b"
@@ -348,14 +428,18 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			desired.SetAnnotations(annotations)
 			injected, handedOff := false, false
 			failingClient := interceptor.NewClient(c, interceptor.Funcs{
-				Patch: func(ctx context.Context, base client.WithWatch, object client.Object, patch client.Patch, opts ...client.PatchOption) error {
+				Apply: func(ctx context.Context, base client.WithWatch,
+					object runtime.ApplyConfiguration, opts ...client.ApplyOption,
+				) error {
+					err := base.Apply(ctx, object, opts...)
+					handedOff = err == nil
+					return err
+				},
+				Patch: func(ctx context.Context, base client.WithWatch,
+					object client.Object, patch client.Patch, opts ...client.PatchOption,
+				) error {
 					options := &client.PatchOptions{}
 					options.ApplyOptions(opts)
-					if options.FieldManager == bmhInitialPowerFieldManager {
-						err := base.Patch(ctx, object, patch, opts...)
-						handedOff = err == nil
-						return err
-					}
 					if !injected && options.FieldManager == ClusterInstanceFieldManager {
 						injected = true
 						if failure == "initial-write-timeout" {
@@ -372,18 +456,20 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			_, err := applyBareMetalHost(ctx, failingClient, c, log, cluster, *desired, false)
 			g.Expect(err).To(HaveOccurred())
 			g.Expect(injected).To(BeTrue())
-			g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, string(cluster.UID)))
-			assertOnline(t, desired, false)
+			g.Expect(f.read(t, desired).GetAnnotations()).To(
+				HaveKeyWithValue(bmhOnlineInitializedAnnotation, string(cluster.UID)),
+			)
+			f.assertOnline(t, desired, false)
 			expected := false
 			if failure == "initial-write-timeout" {
 				g.Expect(apierrors.IsTimeout(err)).To(BeTrue())
-				power(t, desired, true)
+				f.power(t, desired, true)
 				expected = true
 			} else {
 				g.Expect(apierrors.IsInternalError(err)).To(BeTrue())
 				g.Expect(handedOff).To(BeTrue())
-				g.Expect(read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/rack", "a"))
-				owns, err := siteConfigOwnsOnline(read(t, desired))
+				g.Expect(f.read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/rack", "a"))
+				owns, err := siteConfigOwnsOnline(f.read(t, desired))
 				g.Expect(err).ToNot(HaveOccurred())
 				g.Expect(owns).To(BeTrue(), "the failed omission must leave the original ownership intact")
 				// Keep power unchanged across the failure, but change the template
@@ -393,18 +479,26 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			restarted := &ClusterInstanceReconciler{Client: c, APIReader: c}
 			_, err = restarted.applyRenderedObject(ctx, c, log, cluster, *desired, false)
 			g.Expect(err).ToNot(HaveOccurred())
-			assertOnline(t, desired, expected)
-			g.Expect(read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/rack", "b"))
-			g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue("example.com/note", "b"))
-			owns, err := siteConfigOwnsOnline(read(t, desired))
+			f.assertOnline(t, desired, expected)
+			g.Expect(f.read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/rack", "b"))
+			g.Expect(f.read(t, desired).GetAnnotations()).To(HaveKeyWithValue("example.com/note", "b"))
+			owns, err := siteConfigOwnsOnline(f.read(t, desired))
 			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(owns).To(BeFalse())
 		})
 	}
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testMultipleHosts(t *testing.T) {
+	c := f.c
+	ctx := f.ctx
+	cluster := f.cluster
+	r := f.r
+	log := f.log
 	for _, initial := range []bool{false, true} {
 		t.Run(fmt.Sprintf("multiple-hosts-retry-partial-initialization-%t", initial), func(t *testing.T) {
 			g := NewWithT(t)
-			first, second := host(initial), host(initial)
+			first, second := f.host(initial), f.host(initial)
 			var objects []ci.RenderedObject
 			for _, desired := range []*unstructured.Unstructured{first, second} {
 				object, err := ci.NewRenderedObject(desired.Object)
@@ -413,7 +507,9 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			}
 			injected := false
 			failingClient := interceptor.NewClient(c, interceptor.Funcs{
-				Patch: func(ctx context.Context, base client.WithWatch, object client.Object, patch client.Patch, opts ...client.PatchOption) error {
+				Patch: func(ctx context.Context, base client.WithWatch,
+					object client.Object, patch client.Patch, opts ...client.PatchOption,
+				) error {
 					if !injected && client.ObjectKeyFromObject(object) == client.ObjectKeyFromObject(second) {
 						injected = true
 						return apierrors.NewServiceUnavailable("second host temporarily unavailable")
@@ -421,25 +517,29 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 					return base.Patch(ctx, object, patch, opts...)
 				},
 			})
-			manifests, applied, err := r.executeRenderedManifests(ctx, failingClient, log, cluster, objects, v1alpha1.ManifestRenderedSuccess, false)
+			manifests, applied, err := r.executeRenderedManifests(
+				ctx, failingClient, log, cluster, objects, v1alpha1.ManifestRenderedSuccess, false,
+			)
 			g.Expect(err).To(HaveOccurred())
 			g.Expect(injected).To(BeTrue())
 			g.Expect(applied).To(BeFalse())
 			g.Expect(manifests).To(HaveLen(2))
 			g.Expect(manifests[0].Status).To(Equal(v1alpha1.ManifestRenderedSuccess))
 			g.Expect(manifests[1].Status).To(Equal(v1alpha1.ManifestRenderedFailure))
-			g.Expect(read(t, first).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, string(cluster.UID)))
+			g.Expect(f.read(t, first).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, string(cluster.UID)))
 			absent := &unstructured.Unstructured{}
 			absent.SetGroupVersionKind(second.GroupVersionKind())
 			g.Expect(apierrors.IsNotFound(c.Get(ctx, client.ObjectKeyFromObject(second), absent))).To(BeTrue())
-			power(t, first, !initial)
+			f.power(t, first, !initial)
 
 			restarted := &ClusterInstanceReconciler{Client: c, APIReader: c}
 			// Carry the partial manifest status forward, as the controller does,
 			// while initialization itself must be determined separately per BMH.
 			instance := cluster.DeepCopy()
 			instance.Status.ManifestsRendered = manifests
-			manifests, applied, err = restarted.executeRenderedManifests(ctx, c, log, instance, objects, v1alpha1.ManifestRenderedSuccess, false)
+			manifests, applied, err = restarted.executeRenderedManifests(
+				ctx, c, log, instance, objects, v1alpha1.ManifestRenderedSuccess, false,
+			)
 			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(applied).To(BeTrue())
 			g.Expect(manifests).To(HaveLen(2))
@@ -447,35 +547,42 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 				g.Expect(manifest.Status).To(Equal(v1alpha1.ManifestRenderedSuccess))
 				g.Expect(manifest.Message).To(BeEmpty())
 			}
-			assertOnline(t, first, !initial)
-			assertOnline(t, second, initial)
-			g.Expect(read(t, second).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, string(cluster.UID)))
-			power(t, second, !initial)
-			_, applied, err = restarted.executeRenderedManifests(ctx, c, log, instance, objects, v1alpha1.ManifestRenderedSuccess, false)
+			f.assertOnline(t, first, !initial)
+			f.assertOnline(t, second, initial)
+			g.Expect(f.read(t, second).GetAnnotations()).To(
+				HaveKeyWithValue(bmhOnlineInitializedAnnotation, string(cluster.UID)),
+			)
+			f.power(t, second, !initial)
+			_, applied, err = restarted.executeRenderedManifests(
+				ctx, c, log, instance, objects, v1alpha1.ManifestRenderedSuccess, false,
+			)
 			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(applied).To(BeTrue())
-			assertOnline(t, first, !initial)
-			assertOnline(t, second, !initial)
+			f.assertOnline(t, first, !initial)
+			f.assertOnline(t, second, !initial)
 		})
 	}
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testInitializeAndRelease(t *testing.T) {
 	for _, initial := range []bool{false, true} {
 		t.Run(fmt.Sprintf("initialize-and-release-%t", initial), func(t *testing.T) {
 			g := NewWithT(t)
-			desired := host(initial)
+			desired := f.host(initial)
 			original := desired.DeepCopy()
-			g.Expect(apply(desired, false)).To(Succeed())
+			g.Expect(f.apply(desired, false)).To(Succeed())
 			g.Expect(desired.Object).To(Equal(original.Object))
-			assertOnline(t, desired, initial)
-			before := read(t, desired)
+			f.assertOnline(t, desired, initial)
+			before := f.read(t, desired)
 			owns, err := siteConfigOwnsOnline(before)
 			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(owns).To(BeTrue())
 			g.Expect(unstructured.SetNestedField(desired.Object, !initial, "spec", "online")).To(Succeed())
-			g.Expect(apply(desired, true)).To(Succeed())
-			g.Expect(read(t, desired).GetResourceVersion()).To(Equal(before.GetResourceVersion()))
-			g.Expect(apply(desired, false)).To(Succeed())
-			assertOnline(t, desired, initial)
-			owns, err = siteConfigOwnsOnline(read(t, desired))
+			g.Expect(f.apply(desired, true)).To(Succeed())
+			g.Expect(f.read(t, desired).GetResourceVersion()).To(Equal(before.GetResourceVersion()))
+			g.Expect(f.apply(desired, false)).To(Succeed())
+			f.assertOnline(t, desired, initial)
+			owns, err = siteConfigOwnsOnline(f.read(t, desired))
 			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(owns).To(BeFalse())
 
@@ -485,21 +592,21 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			annotations := desired.GetAnnotations()
 			annotations["example.com/note"] = "b"
 			desired.SetAnnotations(annotations)
-			g.Expect(apply(desired, false)).To(Succeed())
-			g.Expect(read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/rack", "b"))
-			g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue("example.com/note", "b"))
+			g.Expect(f.apply(desired, false)).To(Succeed())
+			g.Expect(f.read(t, desired).GetLabels()).To(HaveKeyWithValue("example.com/rack", "b"))
+			g.Expect(f.read(t, desired).GetAnnotations()).To(HaveKeyWithValue("example.com/note", "b"))
 			delete(labels, "example.com/rack")
 			desired.SetLabels(labels)
 			delete(annotations, "example.com/note")
 			desired.SetAnnotations(annotations)
-			g.Expect(apply(desired, false)).To(Succeed())
-			g.Expect(read(t, desired).GetLabels()).ToNot(HaveKey("example.com/rack"))
-			g.Expect(read(t, desired).GetAnnotations()).ToNot(HaveKey("example.com/note"))
+			g.Expect(f.apply(desired, false)).To(Succeed())
+			g.Expect(f.read(t, desired).GetLabels()).ToNot(HaveKey("example.com/rack"))
+			g.Expect(f.read(t, desired).GetAnnotations()).ToNot(HaveKey("example.com/note"))
 			for _, next := range []bool{!initial, initial} {
-				power(t, desired, next)
-				g.Expect(apply(desired, false)).To(Succeed())
-				assertOnline(t, desired, next)
-				actual := read(t, desired)
+				f.power(t, desired, next)
+				g.Expect(f.apply(desired, false)).To(Succeed())
+				f.assertOnline(t, desired, next)
+				actual := f.read(t, desired)
 				owns, err = siteConfigOwnsOnline(actual)
 				g.Expect(err).ToNot(HaveOccurred())
 				g.Expect(owns).To(BeFalse())
@@ -509,32 +616,47 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testInstallerPowerChange(t *testing.T) {
 	t.Run("IBI-changes-online-before-handoff", func(t *testing.T) {
 		g := NewWithT(t)
-		desired := host(false)
-		g.Expect(apply(desired, false)).To(Succeed())
-		power(t, desired, true)
-		g.Expect(apply(desired, false)).To(Succeed())
-		assertOnline(t, desired, true)
+		desired := f.host(false)
+		g.Expect(f.apply(desired, false)).To(Succeed())
+		f.power(t, desired, true)
+		g.Expect(f.apply(desired, false)).To(Succeed())
+		f.assertOnline(t, desired, true)
 	})
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testInventorySetup(t *testing.T) {
+	c := f.c
+	ctx := f.ctx
 	t.Run("inventory-host-first-setup", func(t *testing.T) {
 		g := NewWithT(t)
-		desired := host(true)
+		desired := f.host(true)
 		inventory := desired.DeepCopy()
 		inventory.SetLabels(nil)
 		inventory.SetAnnotations(nil)
 		g.Expect(unstructured.SetNestedField(inventory.Object, false, "spec", "online")).To(Succeed())
 		g.Expect(c.Create(ctx, inventory, client.FieldOwner("inventory"))).To(Succeed())
-		g.Expect(apply(desired, false)).To(Succeed())
-		assertOnline(t, desired, true)
-		power(t, desired, false)
-		g.Expect(apply(desired, false)).To(Succeed())
-		assertOnline(t, desired, false)
+		g.Expect(f.apply(desired, false)).To(Succeed())
+		f.assertOnline(t, desired, true)
+		f.power(t, desired, false)
+		g.Expect(f.apply(desired, false)).To(Succeed())
+		f.assertOnline(t, desired, false)
 	})
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testLegacyHostAdoption(t *testing.T) {
+	c := f.c
+	ctx := f.ctx
+	cluster := f.cluster
+	log := f.log
 	for _, legacyCreate := range []bool{false, true} {
 		t.Run(fmt.Sprintf("adopt-existing-SiteConfig-host-create-%t", legacyCreate), func(t *testing.T) {
 			g := NewWithT(t)
-			desired := host(false)
+			desired := f.host(false)
 			old := desired.DeepCopy()
 			g.Expect(unstructured.SetNestedField(old.Object, true, "spec", "online")).To(Succeed())
 			if legacyCreate {
@@ -543,31 +665,45 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 				_, err := applyObject(ctx, c, log, *old)
 				g.Expect(err).ToNot(HaveOccurred())
 			}
-			g.Expect(apply(desired, true)).To(Succeed())
-			g.Expect(read(t, desired).GetAnnotations()).ToNot(HaveKey(bmhOnlineInitializedAnnotation))
-			g.Expect(apply(desired, false)).To(Succeed())
-			assertOnline(t, desired, true)
-			g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, string(cluster.UID)))
-			owns, err := siteConfigOwnsOnline(read(t, desired))
+			g.Expect(f.apply(desired, true)).To(Succeed())
+			g.Expect(f.read(t, desired).GetAnnotations()).ToNot(HaveKey(bmhOnlineInitializedAnnotation))
+			g.Expect(f.apply(desired, false)).To(Succeed())
+			f.assertOnline(t, desired, true)
+			g.Expect(f.read(t, desired).GetAnnotations()).To(
+				HaveKeyWithValue(bmhOnlineInitializedAnnotation, string(cluster.UID)),
+			)
+			owns, err := siteConfigOwnsOnline(f.read(t, desired))
 			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(owns).To(BeFalse())
 		})
 	}
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testDryRunCreation(t *testing.T) {
+	c := f.c
+	ctx := f.ctx
 	t.Run("dry-run-new-host-does-not-record-initialization", func(t *testing.T) {
 		g := NewWithT(t)
-		desired := host(false)
-		g.Expect(apply(desired, true)).To(Succeed())
+		desired := f.host(false)
+		g.Expect(f.apply(desired, true)).To(Succeed())
 		actual := &unstructured.Unstructured{}
 		actual.SetGroupVersionKind(desired.GroupVersionKind())
 		g.Expect(apierrors.IsNotFound(c.Get(ctx, client.ObjectKeyFromObject(desired), actual))).To(BeTrue())
-		g.Expect(apply(desired, false)).To(Succeed())
-		assertOnline(t, desired, false)
+		g.Expect(f.apply(desired, false)).To(Succeed())
+		f.assertOnline(t, desired, false)
 	})
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testUnsuccessfulReinstall(t *testing.T) {
+	c := f.c
+	ctx := f.ctx
+	cluster := f.cluster
+	log := f.log
 	for _, previousReinstall := range []string{"", "first-success"} {
 		for _, reason := range []v1alpha1.ClusterInstanceConditionReason{v1alpha1.Failed, v1alpha1.TimedOut} {
 			t.Run(fmt.Sprintf("unsuccessful-reinstall-previous-%s-reason-%s", previousReinstall, reason), func(t *testing.T) {
 				g := NewWithT(t)
-				desired := host(false)
+				desired := f.host(false)
 				original := cluster.DeepCopy()
 				if previousReinstall != "" {
 					original.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: previousReinstall}
@@ -575,8 +711,8 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 				}
 				_, err := applyBareMetalHost(ctx, c, c, log, original, *desired, false)
 				g.Expect(err).ToNot(HaveOccurred(), "initialize the existing installation")
-				power(t, desired, true)
-				marker := read(t, desired).GetAnnotations()[bmhOnlineInitializedAnnotation]
+				f.power(t, desired, true)
+				marker := f.read(t, desired).GetAnnotations()[bmhOnlineInitializedAnnotation]
 				next := original.DeepCopy()
 				next.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: "unsuccessful-attempt"}
 				next.Status.Reinstall = &v1alpha1.ReinstallStatus{
@@ -592,18 +728,25 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 				g.Expect(result.IsZero()).To(BeTrue(), "normal manifest rendering can resume")
 				_, err = applyBareMetalHost(ctx, c, c, log, next, *desired, false)
 				g.Expect(err).ToNot(HaveOccurred(), "metadata must remain applicable after the failed request")
-				assertOnline(t, desired, true)
-				g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, marker),
+				f.assertOnline(t, desired, true)
+				g.Expect(f.read(t, desired).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, marker),
 					"a failed request must retain the last initialized installation")
 			})
 		}
 	}
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testLifecycleBoundaries(t *testing.T) {
+	c := f.c
+	ctx := f.ctx
+	cluster := f.cluster
+	log := f.log
 	for _, boundary := range []string{"reinstall", "new-ci", "reallocated-inventory"} {
 		t.Run(boundary, func(t *testing.T) {
 			g := NewWithT(t)
-			desired := host(false)
-			g.Expect(apply(desired, false)).To(Succeed())
-			power(t, desired, true)
+			desired := f.host(false)
+			g.Expect(f.apply(desired, false)).To(Succeed())
+			f.power(t, desired, true)
 			nextCluster := cluster.DeepCopy()
 			switch boundary {
 			case "reinstall":
@@ -612,7 +755,7 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			case "new-ci":
 				nextCluster.UID = types.UID("next-cluster-uid")
 			case "reallocated-inventory":
-				actual := read(t, desired)
+				actual := f.read(t, desired)
 				patch := client.MergeFrom(actual.DeepCopy())
 				labels := actual.GetLabels()
 				delete(labels, ci.OwnedByLabel)
@@ -621,17 +764,24 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			}
 			_, err := applyBareMetalHost(ctx, c, c, log, nextCluster, *desired, false)
 			g.Expect(err).ToNot(HaveOccurred())
-			assertOnline(t, desired, false)
-			power(t, desired, true)
+			f.assertOnline(t, desired, false)
+			f.power(t, desired, true)
 			_, err = applyBareMetalHost(ctx, c, c, log, nextCluster, *desired, false)
 			g.Expect(err).ToNot(HaveOccurred())
-			assertOnline(t, desired, true)
+			f.assertOnline(t, desired, true)
 		})
 	}
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testRestoration(t *testing.T) {
+	c := f.c
+	ctx := f.ctx
+	cluster := f.cluster
+	log := f.log
 	for _, alreadyReinstalled := range []bool{false, true} {
 		t.Run(fmt.Sprintf("restore-preserves-installation-reinstalled-%t", alreadyReinstalled), func(t *testing.T) {
 			g := NewWithT(t)
-			desired := host(false)
+			desired := f.host(false)
 			originalCluster := cluster.DeepCopy()
 			if alreadyReinstalled {
 				originalCluster.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: "first-reinstall"}
@@ -639,7 +789,7 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			}
 			_, err := applyBareMetalHost(ctx, c, c, log, originalCluster, *desired, false)
 			g.Expect(err).ToNot(HaveOccurred())
-			power(t, desired, true)
+			f.power(t, desired, true)
 			restored := originalCluster.DeepCopy()
 			restored.UID = types.UID("restored-uid")
 			restored.Labels = map[string]string{veleroRestoreNameLabel: "restore-1"}
@@ -648,45 +798,59 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			restarted := &ClusterInstanceReconciler{Client: c, APIReader: c}
 			_, err = restarted.applyRenderedObject(ctx, c, log, restored, *desired, false)
 			g.Expect(err).ToNot(HaveOccurred())
-			assertOnline(t, desired, true)
-			g.Expect(read(t, desired).GetAnnotations()[bmhOnlineInitializedAnnotation]).To(HavePrefix("restored-uid"))
+			f.assertOnline(t, desired, true)
+			g.Expect(f.read(t, desired).GetAnnotations()[bmhOnlineInitializedAnnotation]).To(HavePrefix("restored-uid"))
 			// Restore may omit status and may contain an unprocessed reinstall
 			// request. The surviving BMH marker must remain authoritative then.
 			restored.Status.Reinstall = nil
 			restored.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: "unprocessed-after-restore"}
 			_, err = restarted.applyRenderedObject(ctx, c, log, restored, *desired, false)
 			g.Expect(err).ToNot(HaveOccurred(), "restoring without reinstall status must preserve power")
-			assertOnline(t, desired, true)
+			f.assertOnline(t, desired, true)
 			expectedLifecycle := "restored-uid"
 			if alreadyReinstalled {
 				expectedLifecycle += ":first-reinstall"
 			}
-			g.Expect(read(t, desired).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, expectedLifecycle),
+			g.Expect(f.read(t, desired).GetAnnotations()).To(HaveKeyWithValue(bmhOnlineInitializedAnnotation, expectedLifecycle),
 				"the restored marker must retain the previous initialized generation")
 			restored.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: "next-reinstall"}
 			restored.Status.Reinstall = &v1alpha1.ReinstallStatus{ObservedGeneration: "next-reinstall"}
 			_, err = restarted.applyRenderedObject(ctx, c, log, restored, *desired, false)
 			g.Expect(err).ToNot(HaveOccurred())
-			assertOnline(t, desired, false)
+			f.assertOnline(t, desired, false)
 		})
 	}
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testConcurrentPowerChanges(t *testing.T) {
+	c := f.c
+	ctx := f.ctx
+	cluster := f.cluster
+	log := f.log
 	for _, atHandoff := range []bool{true, false} {
 		t.Run(fmt.Sprintf("concurrent-power-change-at-handoff-%t", atHandoff), func(t *testing.T) {
 			g := NewWithT(t)
-			desired := host(false)
-			g.Expect(apply(desired, false)).To(Succeed())
+			desired := f.host(false)
+			g.Expect(f.apply(desired, false)).To(Succeed())
 			raced := false
 			racingClient := interceptor.NewClient(c, interceptor.Funcs{
-				Patch: func(ctx context.Context, base client.WithWatch, object client.Object, patch client.Patch, options ...client.PatchOption) error {
+				Apply: func(ctx context.Context, base client.WithWatch,
+					object runtime.ApplyConfiguration, options ...client.ApplyOption,
+				) error {
+					if !raced && atHandoff {
+						raced = true
+						f.power(t, desired, true)
+					}
+					return base.Apply(ctx, object, options...)
+				},
+				Patch: func(ctx context.Context, base client.WithWatch,
+					object client.Object, patch client.Patch, options ...client.PatchOption,
+				) error {
 					applied := &client.PatchOptions{}
 					applied.ApplyOptions(options)
-					shouldRace := applied.FieldManager == bmhInitialPowerFieldManager
-					if !atHandoff {
-						shouldRace = applied.FieldManager == ClusterInstanceFieldManager
-					}
-					if !raced && shouldRace {
+					if !raced && !atHandoff && applied.FieldManager == ClusterInstanceFieldManager {
 						raced = true
-						power(t, desired, true)
+						f.power(t, desired, true)
 					}
 					return base.Patch(ctx, object, patch, options...)
 				},
@@ -694,17 +858,26 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 			_, err := applyBareMetalHost(ctx, racingClient, c, log, cluster, *desired, false)
 			g.Expect(raced).To(BeTrue())
 			g.Expect(apierrors.IsConflict(err)).To(BeTrue(), "%v", err)
-			assertOnline(t, desired, true)
-			g.Expect(apply(desired, false)).To(Succeed())
-			assertOnline(t, desired, true)
+			f.assertOnline(t, desired, true)
+			g.Expect(f.apply(desired, false)).To(Succeed())
+			f.assertOnline(t, desired, true)
 		})
 	}
+}
+
+func (f *bareMetalHostOnlineEnvtestFixture) testConcurrentCreation(t *testing.T) {
+	c := f.c
+	ctx := f.ctx
+	cluster := f.cluster
+	log := f.log
 	t.Run("host-created-after-not-found-is-not-overwritten", func(t *testing.T) {
 		g := NewWithT(t)
-		desired := host(false)
+		desired := f.host(false)
 		readOnce := false
 		racingReader := interceptor.NewClient(c, interceptor.Funcs{
-			Get: func(ctx context.Context, base client.WithWatch, key client.ObjectKey, object client.Object, options ...client.GetOption) error {
+			Get: func(ctx context.Context, base client.WithWatch,
+				key client.ObjectKey, object client.Object, options ...client.GetOption,
+			) error {
 				if !readOnce {
 					readOnce = true
 					appeared := desired.DeepCopy()
@@ -717,8 +890,8 @@ func TestBareMetalHostOnlineEnvtest(t *testing.T) {
 		})
 		_, err := applyBareMetalHost(ctx, c, racingReader, log, cluster, *desired, false)
 		g.Expect(err).To(HaveOccurred())
-		assertOnline(t, desired, true)
-		g.Expect(apply(desired, false)).To(Succeed())
-		assertOnline(t, desired, true)
+		f.assertOnline(t, desired, true)
+		g.Expect(f.apply(desired, false)).To(Succeed())
+		f.assertOnline(t, desired, true)
 	})
 }

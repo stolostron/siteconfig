@@ -26,6 +26,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,7 +52,9 @@ var _ = Describe("BareMetalHost apply safety", func() {
 			"apiVersion": "metal3.io/v1alpha1", "kind": "BareMetalHost",
 			"metadata": map[string]interface{}{
 				"name": "node", "namespace": cluster.Namespace,
-				"labels": map[string]interface{}{ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(cluster.Namespace, cluster.Name)},
+				"labels": map[string]interface{}{
+					ci.OwnedByLabel: ci.GenerateOwnedByLabelValue(cluster.Namespace, cluster.Name),
+				},
 			},
 			"spec": map[string]interface{}{"online": false},
 		}}
@@ -64,7 +67,9 @@ var _ = Describe("BareMetalHost apply safety", func() {
 			prepare()
 			writes := 0
 			c := fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
-				Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, object client.Object, _ ...client.GetOption) error {
+				Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey,
+					object client.Object, _ ...client.GetOption,
+				) error {
 					if readError != nil {
 						return readError
 					}
@@ -74,6 +79,10 @@ var _ = Describe("BareMetalHost apply safety", func() {
 				Patch: func(context.Context, client.WithWatch, client.Object, client.Patch, ...client.PatchOption) error {
 					writes++
 					return errors.New("unexpected write")
+				},
+				Apply: func(context.Context, client.WithWatch, runtime.ApplyConfiguration, ...client.ApplyOption) error {
+					writes++
+					return errors.New("unexpected ownership handoff")
 				},
 			}).Build()
 			r := &ClusterInstanceReconciler{Client: c, APIReader: c}
@@ -112,7 +121,7 @@ var _ = Describe("BareMetalHost apply safety", func() {
 		Entry("unreadable managed fields", func() {
 			current.SetManagedFields([]metav1.ManagedFieldsEntry{{
 				Manager: ClusterInstanceFieldManager, Operation: metav1.ManagedFieldsOperationApply,
-				FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:spec":"not-a-field-map"}`)},
+				FieldsV1: metav1.NewFieldsV1(`{"f:spec":"not-a-field-map"}`),
 			}})
 		}, nil, "failed to read BMH online field ownership"),
 	)
@@ -233,7 +242,7 @@ var _ = Describe("BareMetalHost apply safety", func() {
 			}
 			current.SetManagedFields([]metav1.ManagedFieldsEntry{{
 				Manager: ClusterInstanceFieldManager, Operation: operation,
-				FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:online":{}}}`)},
+				FieldsV1: metav1.NewFieldsV1(`{"f:spec":{"f:online":{}}}`),
 			}})
 			desired.SetAnnotations(map[string]string{"example.com/note": "updated"})
 			original := desired.DeepCopy()
@@ -245,6 +254,29 @@ var _ = Describe("BareMetalHost apply safety", func() {
 					*object.(*unstructured.Unstructured) = *current.DeepCopy()
 					return nil
 				},
+				Apply: func(_ context.Context, _ client.WithWatch, configuration runtime.ApplyConfiguration,
+					opts ...client.ApplyOption,
+				) error {
+					writes++
+					options := (&client.ApplyOptions{}).ApplyOptions(opts)
+					object, ok := configuration.(client.Object)
+					Expect(ok).To(BeTrue(), "handoff must retain access to the returned object metadata")
+					Expect(options.FieldManager).To(Equal(bmhInitialPowerFieldManager),
+						"only the initial-power manager may share online ownership")
+					Expect(writes).To(Equal(1), "ownership must be shared before the normal manager omits online")
+					Expect(options.Force).To(BeNil(), "handoff must not force ownership away from a power controller")
+					Expect(object.GetUID()).To(Equal(current.GetUID()), "handoff must identify the host read before apply")
+					Expect(object.GetResourceVersion()).To(Equal("10"), "handoff must reject a concurrent host update")
+					content, ok := configuration.(runtime.Unstructured)
+					Expect(ok).To(BeTrue(), "handoff must send only the explicitly supplied unstructured fields")
+					Expect(content.UnstructuredContent()["spec"]).To(Equal(map[string]interface{}{"online": true}),
+						"handoff must write only the current power state")
+					if handoffError != nil {
+						return handoffError
+					}
+					object.SetResourceVersion("11")
+					return nil
+				},
 				Patch: func(_ context.Context, _ client.WithWatch, object client.Object,
 					patch client.Patch, opts ...client.PatchOption,
 				) error {
@@ -253,17 +285,7 @@ var _ = Describe("BareMetalHost apply safety", func() {
 					Expect(patch.Type()).To(Equal(types.ApplyPatchType), "host writes must use SSA")
 					Expect(object.GetUID()).To(Equal(current.GetUID()), "writes must identify the host read before the apply")
 					spec := object.(*unstructured.Unstructured).Object["spec"]
-					if options.FieldManager == bmhInitialPowerFieldManager {
-						Expect(writes).To(Equal(1), "ownership must be shared before the normal manager omits online")
-						Expect(options.Force).To(BeNil(), "handoff must not force ownership away from a power controller")
-						Expect(object.GetResourceVersion()).To(Equal("10"), "handoff must reject a concurrent host update")
-						Expect(spec).To(Equal(map[string]interface{}{"online": true}), "handoff must write only the current power state")
-						if handoffError != nil {
-							return handoffError
-						}
-						object.SetResourceVersion("11")
-						return nil
-					}
+
 					Expect(options.FieldManager).To(Equal(ClusterInstanceFieldManager), "metadata updates must use the normal manager")
 					expectedVersion := "10"
 					if ownsOnline && !dryRun {

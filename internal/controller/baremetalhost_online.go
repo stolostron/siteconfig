@@ -213,8 +213,8 @@ func preserveBareMetalHostOnline(
 		// Share the current value, without force, before removing it from the
 		// normal manager. The resourceVersion prevents replaying a stale value
 		// if an installer or power controller writes concurrently.
-		//nolint:staticcheck // TODO: migrate to client.Client.Apply()
-		if err := c.Patch(ctx, handoff, client.Apply, client.FieldOwner(bmhInitialPowerFieldManager)); err != nil {
+		configuration := client.ApplyConfigurationFromUnstructured(handoff)
+		if err := c.Apply(ctx, configuration, client.FieldOwner(bmhInitialPowerFieldManager)); err != nil {
 			return fmt.Errorf("failed to hand off BMH online ownership: %w", err)
 		}
 		prepared.SetResourceVersion(handoff.GetResourceVersion())
@@ -235,7 +235,7 @@ func siteConfigOwnsOnline(object *unstructured.Unstructured) (bool, error) {
 		var fields struct {
 			Spec map[string]json.RawMessage `json:"f:spec"`
 		}
-		if err := json.Unmarshal(entry.FieldsV1.Raw, &fields); err != nil {
+		if err := json.Unmarshal(entry.FieldsV1.GetRawBytes(), &fields); err != nil {
 			return false, fmt.Errorf("failed to read BMH online field ownership: %w", err)
 		}
 		if _, found := fields.Spec["f:online"]; found {
