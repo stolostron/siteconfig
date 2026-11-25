@@ -2,6 +2,8 @@ module github.com/stolostron/siteconfig
 
 go 1.26.0
 
+toolchain go1.26.9
+
 require (
 	github.com/go-logr/logr v1.4.4
 	github.com/onsi/ginkgo/v2 v2.28.1
