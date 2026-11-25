@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,6 +35,8 @@ import (
 )
 
 const (
+	// Bound the full read/handoff/apply sequence without extending parent deadlines.
+	bmhApplyTimeout = 30 * time.Second
 	// This annotation is internal bookkeeping, not a desired power-state input.
 	bmhOnlineInitializedAnnotation = v1alpha1.Group + "/online-initialized"
 	// A handled restore adopts surviving hosts once, even if backup status is
@@ -65,6 +68,9 @@ func applyBareMetalHost(
 	ctx context.Context, c client.Client, reader client.Reader, log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance, object unstructured.Unstructured, dryRun bool,
 ) (controllerutil.OperationResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, bmhApplyTimeout)
+	defer cancel()
+
 	prepared, err := prepareBareMetalHostApply(clusterInstance, object)
 	if err != nil {
 		return controllerutil.OperationResultNone, err

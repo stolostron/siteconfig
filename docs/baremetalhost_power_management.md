@@ -69,7 +69,9 @@ reassert the value.
 Both handoff writes use resource-version preconditions, so a concurrent power
 change causes a conflict and retry rather than overwriting the new value.
 Dry-run validation preserves the current value without persisting initialization
-or ownership changes.
+or ownership changes. The BMH read, ownership handoff and final apply share a
+30-second operation deadline and retain parent cancellation or an earlier parent
+deadline, so a stalled API request cannot occupy the worker indefinitely.
 
 ## Regression checks
 

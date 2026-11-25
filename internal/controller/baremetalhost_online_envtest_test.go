@@ -22,8 +22,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -181,13 +184,20 @@ func startBareMetalHostOnlineEnvtest(t *testing.T, server *envtest.Environment) 
 			t.Errorf("stop the local envtest control plane: %v", err)
 		}
 	})
-	return server.Start()
+	cfg, err := server.Start()
+	if cfg != nil {
+		// Keep fixture and failed-startup probe requests bounded without changing
+		// the control plane's own configuration or its cleanup behavior.
+		cfg = rest.CopyConfig(cfg)
+		cfg.Timeout = 10 * time.Second
+	}
+	return cfg, err
 }
 
 func testBareMetalHostOnlineEnvtestCleanup(t *testing.T) {
 	t.Run("cleanup-after-CRD-install-failure", func(t *testing.T) {
 		g := NewWithT(t)
-		var c client.Client
+		var endpoints [2]string
 		server := &envtest.Environment{
 			UseExistingCluster:    ptr.To(false),
 			BinaryAssetsDirectory: os.Getenv("KUBEBUILDER_ASSETS"),
@@ -209,17 +219,35 @@ func testBareMetalHostOnlineEnvtestCleanup(t *testing.T) {
 			g.Expect(err).To(MatchError(ContainSubstring("unable to install CRDs")),
 				"the regression must fail during CRD installation after starting the control plane")
 			g.Expect(cfg).ToNot(BeNil(), "a failed CRD installation must still have started a local API server")
-			c, err = client.New(cfg, client.Options{})
+			c, err := client.New(cfg, client.Options{})
 			g.Expect(err).ToNot(HaveOccurred(), "create a direct client to check the partially started API server")
-			g.Expect(c.Get(context.Background(), client.ObjectKey{Name: "default"}, &corev1.Namespace{})).To(Succeed(),
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			g.Expect(c.Get(ctx, client.ObjectKey{Name: "default"}, &corev1.Namespace{})).To(Succeed(),
 				"the API server must be running before cleanup so this test detects a leaked control plane")
+			apiURL, err := url.Parse(cfg.Host)
+			g.Expect(err).ToNot(HaveOccurred(), "locate the actual local API listener started by envtest")
+			g.Expect(server.ControlPlane.Etcd.URL).ToNot(BeNil(), "locate the local etcd client listener")
+			endpoints = [2]string{apiURL.Host, server.ControlPlane.Etcd.URL.Host}
+			for _, address := range endpoints {
+				connection, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
+				g.Expect(err).ToNot(HaveOccurred(), "both control-plane listeners must accept connections before cleanup")
+				g.Expect(connection.Close()).To(Succeed(), "release the pre-cleanup listener probe connection")
+			}
 		}) {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		g.Expect(c.Get(ctx, client.ObjectKey{Name: "default"}, &corev1.Namespace{})).ToNot(Succeed(),
-			"cleanup must stop the local API server even when Start failed during CRD installation")
+		for i, address := range endpoints {
+			connection, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
+			if connection != nil {
+				g.Expect(connection.Close()).To(Succeed(), "release a connection to an unexpectedly surviving listener")
+			}
+			g.Expect(errors.Is(err, syscall.ECONNREFUSED)).To(BeTrue(),
+				"listener %d (%s) must refuse connections before fallback cleanup; a timeout is not proof of exit: %v",
+				i, address, err)
+		}
 	})
 }
 
@@ -1015,7 +1043,15 @@ func (f *bareMetalHostOnlineEnvtestFixture) testConcurrentCreation(t *testing.T)
 			},
 		})
 		_, err := applyBareMetalHost(ctx, c, racingReader, log, cluster, *desired, false)
-		g.Expect(err).To(HaveOccurred(), "creation must conflict rather than overwrite a host that appeared after the read")
+		g.Expect(apierrors.IsInvalid(err)).To(BeTrue(),
+			"the API must reject version-zero apply against a host created after the initial read: %v", err)
+		var status apierrors.APIStatus
+		g.Expect(errors.As(err, &status)).To(BeTrue(), "the rejected create must retain its API status details")
+		g.Expect(status.Status().Details).ToNot(BeNil(), "the API must identify the rejected field")
+		g.Expect(status.Status().Details.Causes).To(ContainElement(And(
+			HaveField("Field", "metadata.resourceVersion"),
+			HaveField("Type", metav1.CauseTypeFieldValueInvalid),
+		)), "the create-only resourceVersion precondition must cause the failure, rather than an unrelated error")
 		f.assertOnline(t, desired, true)
 		g.Expect(f.apply(desired, false)).To(Succeed(),
 			"retry against the newly discovered host without replaying the template power default")
