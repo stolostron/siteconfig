@@ -142,6 +142,7 @@ var _ = Describe("BareMetalHost apply safety", func() {
 		restore             string
 		handledRestore      string
 		restoreAcknowledged bool
+		restoreBaseline     string
 		unallocated         bool
 	}
 	DescribeTable("recognizes the installation that initialized power",
@@ -166,6 +167,9 @@ var _ = Describe("BareMetalHost apply safety", func() {
 			}
 			cluster.Labels = map[string]string{veleroRestoreNameLabel: tc.restore}
 			cluster.Annotations = map[string]string{veleroRestoreHandledAnnotation: tc.handledRestore}
+			if tc.restoreBaseline != "" {
+				cluster.Annotations[bmhOnlineRestoreBaselineAnnotation] = tc.restoreBaseline
+			}
 			if tc.restoreAcknowledged {
 				annotations := current.GetAnnotations()
 				annotations[bmhOnlineRestoreAnnotation] = string(cluster.UID) + ":" + tc.restore
@@ -244,6 +248,41 @@ var _ = Describe("BareMetalHost apply safety", func() {
 		Entry("handled restore without reinstall status", lifecycleCase{
 			previousLifecycle: "old-cluster-uid:install-1", reinstall: "install-1",
 			restore: "restore-1", handledRestore: "restore-1", expectedLifecycle: "cluster-uid:install-1",
+		}, true),
+
+		Entry("post-restore reinstall before host adoption", lifecycleCase{
+			previousLifecycle: "old-cluster-uid:host-install", reinstall: "next-install", observedReinstall: "next-install",
+			restore: "restore-1", handledRestore: "restore-1", restoreBaseline: "cluster-uid:backup-install",
+		}, false),
+		Entry("post-restore reinstall before in-place host adoption", lifecycleCase{
+			previousLifecycle: "cluster-uid:host-install", reinstall: "next-install", observedReinstall: "next-install",
+			restore: "restore-1", handledRestore: "restore-1", restoreBaseline: "cluster-uid:backup-install",
+		}, false),
+		Entry("post-restore first reinstall before host adoption", lifecycleCase{
+			previousLifecycle: "old-cluster-uid", reinstall: "next-install", observedReinstall: "next-install",
+			restore: "restore-1", handledRestore: "restore-1", restoreBaseline: "cluster-uid",
+		}, false),
+		Entry("legacy host after a post-restore reinstall", lifecycleCase{
+			reinstall: "next-install", observedReinstall: "next-install",
+			restore: "restore-1", handledRestore: "restore-1", restoreBaseline: "cluster-uid:backup-install",
+		}, false),
+		Entry("post-restore installation already initialized", lifecycleCase{
+			previousLifecycle: "cluster-uid:next-install", reinstall: "next-install", observedReinstall: "next-install",
+			restore: "restore-1", handledRestore: "restore-1", restoreBaseline: "cluster-uid:backup-install",
+		}, true),
+		Entry("restore baseline retains a surviving newer installation", lifecycleCase{
+			previousLifecycle: "old-cluster-uid:host-install", reinstall: "backup-install", observedReinstall: "backup-install",
+			restore: "restore-1", handledRestore: "restore-1", restoreBaseline: "cluster-uid:backup-install",
+		}, true),
+		Entry("failed post-restore reinstall before host adoption", lifecycleCase{
+			previousLifecycle: "old-cluster-uid:host-install", reinstall: "next-install", observedReinstall: "backup-install",
+			failedReason: v1alpha1.Failed, restore: "restore-1", handledRestore: "restore-1",
+			restoreBaseline: "cluster-uid:backup-install",
+		}, true),
+		Entry("missing status after recording a restore baseline", lifecycleCase{
+			previousLifecycle: "old-cluster-uid:host-install", reinstall: "next-install",
+			restore: "restore-1", handledRestore: "restore-1", restoreBaseline: "cluster-uid:backup-install",
+			expectedLifecycle: "cluster-uid:host-install",
 		}, true),
 		Entry("handled restore without status after an unprocessed request", lifecycleCase{
 			previousLifecycle: "old-cluster-uid:install-1", reinstall: "install-2",

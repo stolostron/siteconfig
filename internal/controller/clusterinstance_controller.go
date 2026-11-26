@@ -212,7 +212,7 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return res, err
 	}
 
-	if res, err := r.ensureVeleroRestoreStatusAnnotation(ctx, log, clusterInstance); !res.IsZero() || err != nil {
+	if res, err := r.ensureVeleroRestoreAnnotations(ctx, log, clusterInstance); !res.IsZero() || err != nil {
 		return res, err
 	}
 
@@ -239,8 +239,11 @@ func (r *ClusterInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				"failed to update ObservedGeneration for Velero-restored ClusterInstance: %w", err)
 		}
 
-		// Mark this restore as handled so future spec changes are not mistaken for new restores
+		// Capture the restored lifecycle atomically with acknowledging this restore.
+		// Reinstall can complete before a surviving host's first ordinary apply.
 		metadataPatch := client.MergeFrom(clusterInstance.DeepCopy())
+		metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, bmhOnlineRestoreBaselineAnnotation,
+			bareMetalHostOnlineLifecycle(clusterInstance, ""))
 		metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, veleroRestoreHandledAnnotation, restoreName)
 		if err := r.Patch(ctx, clusterInstance, metadataPatch); err != nil {
 			return ctrl.Result{}, fmt.Errorf(
@@ -534,6 +537,27 @@ func (r *ClusterInstanceReconciler) ensureFinalizer(
 	return ctrl.Result{Requeue: true}, nil
 }
 
+// Previously handled restores may predate baseline tracking. Record their
+// current lifecycle before allowing a new reinstall, without marking pending
+// spec changes observed or requiring a host apply to establish the baseline.
+func (r *ClusterInstanceReconciler) ensureBareMetalHostOnlineRestoreBaseline(
+	ctx context.Context, clusterInstance *v1alpha1.ClusterInstance,
+) (ctrl.Result, error) {
+	if bareMetalHostOnlineRestoreID(clusterInstance) == "" ||
+		clusterInstance.Annotations[bmhOnlineRestoreBaselineAnnotation] != "" {
+		return ctrl.Result{}, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, bmhApplyTimeout)
+	defer cancel()
+	metadataPatch := client.MergeFrom(clusterInstance.DeepCopy())
+	metav1.SetMetaDataAnnotation(&clusterInstance.ObjectMeta, bmhOnlineRestoreBaselineAnnotation,
+		bareMetalHostOnlineLifecycle(clusterInstance, ""))
+	if err := r.Patch(ctx, clusterInstance, metadataPatch); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to record handled restore power baseline: %w", err)
+	}
+	return ctrl.Result{Requeue: true}, nil
+}
+
 // isBeingRestored returns true when the ClusterInstance was restored by Velero
 // and has not yet been handled by this controller. A restore is considered
 // handled once the controller records the restore name in the velero-restore-handled
@@ -547,15 +571,15 @@ func isBeingRestored(ci *v1alpha1.ClusterInstance) bool {
 	return ci.Annotations[veleroRestoreHandledAnnotation] != restoreName
 }
 
-// ensureVeleroRestoreStatusAnnotation ensures the ClusterInstance has the velero.io/restore-status
-// annotation so that Velero includes the status subresource when backing up this resource.
-func (r *ClusterInstanceReconciler) ensureVeleroRestoreStatusAnnotation(
+// ensureVeleroRestoreAnnotations enables status backups and establishes the
+// baseline for previously handled restores before post-restore work can run.
+func (r *ClusterInstanceReconciler) ensureVeleroRestoreAnnotations(
 	ctx context.Context,
 	log *zap.Logger,
 	clusterInstance *v1alpha1.ClusterInstance,
 ) (ctrl.Result, error) {
 	if clusterInstance.Annotations[veleroRestoreStatusAnnotation] == "true" {
-		return ctrl.Result{}, nil
+		return r.ensureBareMetalHostOnlineRestoreBaseline(ctx, clusterInstance)
 	}
 
 	patch := client.MergeFrom(clusterInstance.DeepCopy())

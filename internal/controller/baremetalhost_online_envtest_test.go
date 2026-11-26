@@ -67,22 +67,50 @@ type bareMetalHostOnlineEnvtestFixture struct {
 
 // A real API server is required: the fake client does not implement SSA field
 // ownership, optimistic locking, or the consequences of omitting an owned field.
-func TestBareMetalHostOnlineEnvtest(t *testing.T) {
+func TestBareMetalHostOnlineEnvtestRenderedTemplates(t *testing.T) {
+	newBareMetalHostOnlineEnvtestFixture(t).testRenderedTemplatePipeline(t)
+}
+
+func TestBareMetalHostOnlineEnvtestPartialWriteRecovery(t *testing.T) {
+	newBareMetalHostOnlineEnvtestFixture(t).testRestartAfterPartialWrite(t)
+}
+
+func TestBareMetalHostOnlineEnvtestMultipleHosts(t *testing.T) {
+	newBareMetalHostOnlineEnvtestFixture(t).testMultipleHosts(t)
+}
+
+func TestBareMetalHostOnlineEnvtestInitialization(t *testing.T) {
 	f := newBareMetalHostOnlineEnvtestFixture(t)
-	f.testRenderedTemplatePipeline(t)
-	f.testRestartAfterPartialWrite(t)
-	f.testMultipleHosts(t)
 	f.testInitializeAndRelease(t)
 	f.testInstallerPowerChange(t)
 	f.testInventorySetup(t)
 	f.testLegacyHostAdoption(t)
 	f.testDryRunCreation(t)
+}
+
+func TestBareMetalHostOnlineEnvtestLifecycle(t *testing.T) {
+	f := newBareMetalHostOnlineEnvtestFixture(t)
 	f.testUnsuccessfulReinstall(t)
 	f.testLifecycleBoundaries(t)
+}
+
+func TestBareMetalHostOnlineEnvtestRestoration(t *testing.T) {
+	f := newBareMetalHostOnlineEnvtestFixture(t)
 	f.testRestoration(t)
 	f.testOlderRestoration(t)
+}
+
+func TestBareMetalHostOnlineEnvtestReinstallBeforeRestoreAdoption(t *testing.T) {
+	newBareMetalHostOnlineEnvtestFixture(t).testReinstallBeforeRestoreAdoption(t)
+}
+
+func TestBareMetalHostOnlineEnvtestConcurrency(t *testing.T) {
+	f := newBareMetalHostOnlineEnvtestFixture(t)
 	f.testConcurrentPowerChanges(t)
 	f.testConcurrentCreation(t)
+}
+
+func TestBareMetalHostOnlineEnvtestCleanup(t *testing.T) {
 	testBareMetalHostOnlineEnvtestCleanup(t)
 }
 
@@ -165,14 +193,27 @@ func newBareMetalHostOnlineEnvtestFixture(t *testing.T) *bareMetalHostOnlineEnvt
 	c, err := client.NewWithWatch(cfg, client.Options{Scheme: scheme})
 	g.Expect(err).ToNot(HaveOccurred(), "create an uncached client for API-server field-ownership tests")
 	ctx := context.Background()
-	g.Expect(c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "online-tests"}})).To(Succeed(),
-		"create the namespace shared by independent host scenarios")
+	createBareMetalHostOnlineEnvtestResource(t, c, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "online-tests"}})
 	cluster := &v1alpha1.ClusterInstance{ObjectMeta: metav1.ObjectMeta{
 		Name: "cluster", Namespace: "online-tests", UID: types.UID("cluster-uid"),
 	}}
 	r := &ClusterInstanceReconciler{Client: c, APIReader: c}
 	log := zap.NewNop()
 	return &bareMetalHostOnlineEnvtestFixture{ctx: ctx, c: c, cluster: cluster, r: r, log: log}
+}
+
+func createBareMetalHostOnlineEnvtestResource(t *testing.T, c client.Client, object client.Object) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	NewWithT(t).Expect(c.Create(ctx, object)).To(Succeed(), "create the isolated envtest fixture resource")
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := client.IgnoreNotFound(c.Delete(ctx, object)); err != nil {
+			t.Errorf("delete envtest fixture %T %s: %v", object, client.ObjectKeyFromObject(object), err)
+		}
+	})
 }
 
 // Register cleanup before Start: CRD installation can fail after etcd and the
@@ -324,12 +365,11 @@ func (f *bareMetalHostOnlineEnvtestFixture) testRenderedTemplatePipeline(t *test
 		t.Run("rendered-template-pipeline-"+installer.name, func(t *testing.T) {
 			g := NewWithT(t)
 			name := "pipeline-" + installer.name
-			g.Expect(c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}})).To(Succeed(),
-				"create an isolated namespace for this installer template pipeline")
-			g.Expect(c.Create(ctx, &hivev1.ClusterImageSet{
+			createBareMetalHostOnlineEnvtestResource(t, c, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}})
+			createBareMetalHostOnlineEnvtestResource(t, c, &hivev1.ClusterImageSet{
 				ObjectMeta: metav1.ObjectMeta{Name: name},
 				Spec:       hivev1.ClusterImageSetSpec{ReleaseImage: "quay.io/example/release:4.22.0"},
-			})).To(Succeed(), "provide the release image required by the production node template")
+			})
 			g.Expect(c.Create(ctx, &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: "cluster-templates", Namespace: name},
 			})).To(Succeed(), "provide cluster template references so the actual rendering pipeline can run")
@@ -942,6 +982,10 @@ func (f *bareMetalHostOnlineEnvtestFixture) testRestoration(t *testing.T) {
 			restored.UID = types.UID("restored-uid")
 			restored.Labels = map[string]string{veleroRestoreNameLabel: "restore-1"}
 			restored.Annotations = map[string]string{veleroRestoreHandledAnnotation: "restore-1"}
+			restored.Annotations[bmhOnlineRestoreBaselineAnnotation] = "restored-uid"
+			if alreadyReinstalled {
+				restored.Annotations[bmhOnlineRestoreBaselineAnnotation] += ":first-reinstall"
+			}
 			// Reconstruct the reconciler to verify there is no in-memory lifecycle state.
 			restarted := &ClusterInstanceReconciler{Client: c, APIReader: c}
 			_, err = restarted.applyRenderedObject(ctx, c, log, restored, *desired, false)

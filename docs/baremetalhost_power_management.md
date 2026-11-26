@@ -47,9 +47,18 @@ internal `siteconfig.open-cluster-management.io/online-restore` annotation,
 atomically with the adopted initialization marker. That checkpoint establishes
 the restored ClusterInstance's lifecycle baseline so repeated metadata updates
 preserve power. If reinstall status was not restored, the existing BMH marker
-supplies the previous initialization generation. A subsequently processed new
-reinstall still initializes power normally after restore adoption. A newly
-created or unallocated host continues to use its installation default.
+supplies the previous initialization generation.
+
+When handling a Velero restore, SiteConfig also records the restored lifecycle in
+the ClusterInstance's internal
+`clusterinstance.siteconfig.open-cluster-management.io/online-restore-baseline`
+annotation, in the same metadata patch that acknowledges the restore. A
+subsequently completed reinstall initializes power even if no host apply has
+acknowledged the restore yet. This includes a surviving host omitted from the
+restored `status.manifestsRendered` list. Hosts still at the restore baseline
+retain their current power value. A previously handled restore without this
+annotation records its current baseline before processing any new reinstall.
+A newly created or unallocated host continues to use its installation default.
 
 Do not edit or remove the initialization/restore annotations or SiteConfig
 ownership label to request a power change. Use the supported reinstall workflow
@@ -76,9 +85,11 @@ deadline, so a stalled API request cannot occupy the worker indefinitely.
 ## Regression checks
 
 Run `make unittest` for the controller safety tests and `make test-envtest` for
-power-field ownership tests against a local Kubernetes API server. The latter
-downloads matching API-server binaries through `setup-envtest`; it does not use
-or modify a running cluster. These checks are also included in `make ci-job`.
+power-field ownership tests against a local Kubernetes API server. Each behavior
+area has its own test entry point and control plane; fixture namespaces and
+cluster-scoped image sets have registered cleanup. The target downloads matching
+API-server binaries through `setup-envtest`; it does not use or modify a running
+cluster. These checks are also included in `make ci-job`.
 
 Run `make test-coverage` to collect unit-test coverage in `test-coverage.out`.
 Sonar CI also measures coverage using ordinary Go tests. API-server tests run

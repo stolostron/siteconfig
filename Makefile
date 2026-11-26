@@ -162,7 +162,7 @@ unittest:
 .PHONY: test-envtest
 test-envtest: envtest ## Test BMH field ownership against a local Kubernetes API server.
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN)/k8s -p path)" \
-		go test -mod=mod -tags=envtest -run '^TestBareMetalHostOnlineEnvtest$$' -count=1 -v ./internal/controller
+		go test -mod=mod -tags=envtest -run '^TestBareMetalHostOnlineEnvtest' -count=1 -v ./internal/controller
 
 .PHONY: test-tool-installation
 test-tool-installation: ## Verify Go tool installation honors directory overrides.

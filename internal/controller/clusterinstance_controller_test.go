@@ -255,6 +255,130 @@ var _ = Describe("Reconcile", func() {
 	})
 
 	Context("Velero Restore Detection", func() {
+		BeforeEach(func() {
+			clusterInstance.UID = types.UID("restored-uid")
+		})
+
+		DescribeTable("records the restored lifecycle before acknowledging a restore",
+			func(observedReinstall string) {
+				clusterInstance.UID = types.UID("restored-uid")
+				clusterInstance.Generation = 1
+				clusterInstance.Labels = map[string]string{veleroRestoreNameLabel: "latest-restore"}
+				clusterInstance.Annotations[veleroRestoreHandledAnnotation] = "previous-restore"
+				clusterInstance.Annotations[bmhOnlineRestoreBaselineAnnotation] = "old-uid:old-install"
+				if observedReinstall != "" {
+					clusterInstance.Status.Reinstall = &v1alpha1.ReinstallStatus{ObservedGeneration: observedReinstall}
+				}
+				Expect(c.Create(ctx, clusterInstance)).To(Succeed(), "store the restored ClusterInstance")
+
+				res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)})
+				Expect(err).ToNot(HaveOccurred(), "handle the restore without applying installation manifests")
+				Expect(res).To(Equal(ctrl.Result{}), "restore handling must stop before reinstall and rendering")
+				Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed(),
+					"read the durable restore checkpoint")
+				expected := "restored-uid"
+				if observedReinstall != "" {
+					expected += ":" + observedReinstall
+				}
+				Expect(clusterInstance.Annotations).To(HaveKeyWithValue(bmhOnlineRestoreBaselineAnnotation, expected),
+					"the baseline must describe this restore rather than a copied checkpoint from an older restore")
+				Expect(clusterInstance.Annotations).To(HaveKeyWithValue(veleroRestoreHandledAnnotation, "latest-restore"),
+					"the baseline and handled restore name must be acknowledged together")
+				Expect(clusterInstance.Status.ManifestsRendered).To(BeEmpty(),
+					"recording the baseline must not require any host to have been applied")
+			},
+			Entry("without reinstall status", ""),
+			Entry("with a restored reinstall generation", "backup-install"),
+		)
+
+		It("records an older handled restore's baseline before processing a pending reinstall", func() {
+			clusterInstance.UID = types.UID("restored-uid")
+			clusterInstance.Generation = 2
+			clusterInstance.Labels = map[string]string{veleroRestoreNameLabel: "test-restore"}
+			clusterInstance.Annotations[veleroRestoreHandledAnnotation] = "test-restore"
+			clusterInstance.Spec.Reinstall = &v1alpha1.ReinstallSpec{Generation: "pending-reinstall"}
+			clusterInstance.Status.ObservedGeneration = 1
+			clusterInstance.Status.Reinstall = &v1alpha1.ReinstallStatus{ObservedGeneration: "backup-install"}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed(), "store a handled restore without baseline tracking")
+			baseClient, ok := c.(client.WithWatch)
+			Expect(ok).To(BeTrue(), "the fake client must support checkpoint failure injection")
+			failBaseline := true
+			r.Client = interceptor.NewClient(baseClient, interceptor.Funcs{
+				Patch: func(ctx context.Context, base client.WithWatch, object client.Object,
+					patch client.Patch, opts ...client.PatchOption,
+				) error {
+					if failBaseline && object.GetAnnotations()[bmhOnlineRestoreBaselineAnnotation] != "" {
+						return fmt.Errorf("injected baseline patch failure")
+					}
+					return base.Patch(ctx, object, patch, opts...)
+				},
+			})
+			request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)}
+			_, err := r.Reconcile(ctx, request)
+			Expect(err).To(MatchError(ContainSubstring("injected baseline patch failure")),
+				"a failed baseline patch must prevent reinstall from starting")
+			Expect(c.Get(ctx, request.NamespacedName, clusterInstance)).To(Succeed(), "read the failed baseline backfill")
+			Expect(clusterInstance.Annotations).ToNot(HaveKey(bmhOnlineRestoreBaselineAnnotation),
+				"failed backfill must be retried before accepting a new lifecycle")
+			Expect(clusterInstance.Status.Reinstall.Conditions).To(BeEmpty(),
+				"reinstall must not run after a failed baseline patch")
+			failBaseline = false
+
+			res, err := r.Reconcile(ctx, request)
+			Expect(err).ToNot(HaveOccurred(), "record the baseline before any reimport or reinstall handling")
+			Expect(res).To(Equal(ctrl.Result{Requeue: true}), "continue the pending spec change after recording the baseline")
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(clusterInstance), clusterInstance)).To(Succeed(),
+				"read the baseline captured for the previously handled restore")
+			Expect(clusterInstance.Annotations).To(HaveKeyWithValue(
+				bmhOnlineRestoreBaselineAnnotation, "restored-uid:backup-install"),
+				"the current confirmed reinstall generation must become the legacy restore baseline")
+			Expect(clusterInstance.Status.ObservedGeneration).To(Equal(int64(1)),
+				"backfilling a baseline must not hide a pending spec change by advancing observed generation")
+			Expect(clusterInstance.Status.Reinstall.Conditions).To(BeEmpty(),
+				"the pending reinstall must not run until the baseline is durable")
+		})
+
+		It("retries a failed restore acknowledgement without losing its baseline", func() {
+			clusterInstance.UID = types.UID("restored-uid")
+			clusterInstance.Generation = 1
+			clusterInstance.Labels = map[string]string{veleroRestoreNameLabel: "test-restore"}
+			clusterInstance.Status.Reinstall = &v1alpha1.ReinstallStatus{ObservedGeneration: "backup-install"}
+			Expect(c.Create(ctx, clusterInstance)).To(Succeed(), "store the restored ClusterInstance")
+			failAcknowledgement := true
+			baseClient, ok := c.(client.WithWatch)
+			Expect(ok).To(BeTrue(), "the fake client must support interception of metadata patches")
+			r.Client = interceptor.NewClient(baseClient, interceptor.Funcs{
+				Patch: func(ctx context.Context, base client.WithWatch, object client.Object,
+					patch client.Patch, opts ...client.PatchOption,
+				) error {
+					if failAcknowledgement && object.GetAnnotations()[veleroRestoreHandledAnnotation] == "test-restore" {
+						return fmt.Errorf("injected restore acknowledgement failure")
+					}
+					return base.Patch(ctx, object, patch, opts...)
+				},
+			})
+			request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(clusterInstance)}
+			_, err := r.Reconcile(ctx, request)
+			Expect(err).To(MatchError(ContainSubstring("injected restore acknowledgement failure")),
+				"a failed metadata patch must prevent acknowledgement of the restore")
+			Expect(c.Get(ctx, request.NamespacedName, clusterInstance)).To(Succeed(), "read the failed acknowledgement")
+			Expect(clusterInstance.Status.ObservedGeneration).To(Equal(int64(1)),
+				"the existing status guard must still prevent rendering while the metadata patch is retried")
+			Expect(clusterInstance.Annotations).ToNot(HaveKey(veleroRestoreHandledAnnotation),
+				"a failed patch must not mark the restore handled")
+			Expect(clusterInstance.Annotations).ToNot(HaveKey(bmhOnlineRestoreBaselineAnnotation),
+				"the baseline and handled marker must not be partially persisted")
+			failAcknowledgement = false
+			_, err = r.Reconcile(ctx, request)
+			Expect(err).ToNot(HaveOccurred(), "retry restore handling even after the observed generation was updated")
+			Expect(c.Get(ctx, request.NamespacedName, clusterInstance)).To(Succeed(), "read the retried acknowledgement")
+			Expect(clusterInstance.Annotations).To(HaveKeyWithValue(veleroRestoreHandledAnnotation, "test-restore"),
+				"the successful retry must acknowledge this restore")
+			Expect(clusterInstance.Annotations).To(HaveKeyWithValue(
+				bmhOnlineRestoreBaselineAnnotation, "restored-uid:backup-install"),
+				"the retry must retain the pre-reinstall lifecycle as its baseline")
+		})
+
 		It("stops reconcile early when status is empty and restore name label is set", func() {
 			clusterInstance.ObjectMeta.Generation = 1
 			clusterInstance.ObjectMeta.Labels = map[string]string{
@@ -1266,7 +1390,7 @@ var _ = Describe("handleFinalizer", func() {
 	})
 })
 
-var _ = Describe("ensureVeleroRestoreStatusAnnotation", func() {
+var _ = Describe("ensureVeleroRestoreAnnotations", func() {
 	var (
 		c          client.Client
 		r          *ClusterInstanceReconciler
@@ -1296,7 +1420,7 @@ var _ = Describe("ensureVeleroRestoreStatusAnnotation", func() {
 		}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		res, err := r.ensureVeleroRestoreStatusAnnotation(ctx, testLogger, clusterInstance)
+		res, err := r.ensureVeleroRestoreAnnotations(ctx, testLogger, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(res).To(Equal(ctrl.Result{Requeue: true}))
 
@@ -1316,7 +1440,7 @@ var _ = Describe("ensureVeleroRestoreStatusAnnotation", func() {
 		}
 		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
 
-		res, err := r.ensureVeleroRestoreStatusAnnotation(ctx, testLogger, clusterInstance)
+		res, err := r.ensureVeleroRestoreAnnotations(ctx, testLogger, clusterInstance)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(res).To(Equal(ctrl.Result{}))
 	})

@@ -42,6 +42,8 @@ const (
 	// A handled restore adopts surviving hosts once, even if backup status is
 	// older than the installation recorded on the host.
 	bmhOnlineRestoreAnnotation = v1alpha1.Group + "/online-restore"
+	// Capture the restored lifecycle before reinstall can run or hosts are applied.
+	bmhOnlineRestoreBaselineAnnotation = "clusterinstance." + v1alpha1.Group + "/online-restore-baseline"
 	// This manager holds the initial value only until another controller changes it.
 	// It must never be reapplied once the normal manager has released online.
 	bmhInitialPowerFieldManager = "siteconfig-initial-power"
@@ -182,15 +184,23 @@ func bareMetalHostOnlineInitialized(
 	}
 	previousLifecycle := existing.GetAnnotations()[bmhOnlineInitializedAnnotation]
 	lifecycle := prepared.GetAnnotations()[bmhOnlineInitializedAnnotation]
+	restore := bareMetalHostOnlineRestoreID(clusterInstance)
+	if baseline := clusterInstance.Annotations[bmhOnlineRestoreBaselineAnnotation]; restore != "" && baseline != "" {
+		if status := clusterInstance.Status.Reinstall; status != nil &&
+			status.ObservedGeneration != "" && baseline != lifecycle {
+			// A completed reinstall after restore must initialize even a legacy or
+			// untracked surviving host that has not acknowledged the restore yet.
+			return previousLifecycle == lifecycle
+		}
+	}
 	// Adopt legacy SiteConfig-owned hosts without replaying an install default.
 	if previousLifecycle == lifecycle || previousLifecycle == "" {
 		return true
 	}
 	// Reinstall generation names are opaque. Restored status may predate the
 	// surviving host, so its first apply adopts power and records this restore
-	// atomically with the new lifecycle baseline. Later successful reinstalls
-	// still initialize because this checkpoint is already acknowledged.
-	restore := bareMetalHostOnlineRestoreID(clusterInstance)
+	// atomically with the new lifecycle baseline. The restore baseline above
+	// distinguishes this adoption from a reinstall completed afterward.
 	return restore != "" && existing.GetAnnotations()[bmhOnlineRestoreAnnotation] != restore
 }
 
