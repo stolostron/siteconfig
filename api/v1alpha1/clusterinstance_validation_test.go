@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"strings"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -33,6 +35,10 @@ var _ = Describe("ValidateClusterInstance", func() {
 
 	BeforeEach(func() {
 		clusterInstance = &ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "site-test-1",
+				Namespace: "site-test-1",
+			},
 			Spec: ClusterInstanceSpec{
 				TemplateRefs: []TemplateRef{
 					{
@@ -98,6 +104,24 @@ var _ = Describe("ValidateClusterInstance", func() {
 		err := ValidateClusterInstance(clusterInstance)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("single node OpenShift cluster-type must have exactly 1 control-plane agent"))
+	})
+
+	It("should accept an ownership label value of exactly 63 characters", func() {
+		clusterInstance.Namespace = strings.Repeat("n", 30)
+		clusterInstance.Name = strings.Repeat("c", 32) // 30 + 1 + 32 = 63
+
+		Expect(ValidateClusterInstance(clusterInstance)).To(Succeed())
+	})
+
+	It("should return an error if the ownership label value exceeds 63 characters", func() {
+		clusterInstance.Namespace = "ns"
+		clusterInstance.Name = strings.Repeat("c", 61) // 2 + 1 + 61 = 64
+
+		err := ValidateClusterInstance(clusterInstance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("cannot be labeled"))
+		Expect(err.Error()).To(ContainSubstring("no more than 63 bytes"))
+		Expect(err.Error()).To(ContainSubstring("ns_" + clusterInstance.Name))
 	})
 })
 

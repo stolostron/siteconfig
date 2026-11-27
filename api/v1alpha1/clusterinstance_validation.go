@@ -31,6 +31,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
+	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 )
 
 const maxK8sNameLength = 253
@@ -174,6 +175,12 @@ func (ot OperationType) IsValid() bool {
 
 // ValidateClusterInstance ensures the ClusterInstance has required fields and valid configurations.
 func ValidateClusterInstance(clusterInstance *ClusterInstance) error {
+	// Ensure the ownership label value the operator writes onto rendered and preserved
+	// objects fits within Kubernetes' label value length limit.
+	if err := validateOwnedByLabel(clusterInstance); err != nil {
+		return err
+	}
+
 	// Ensure a cluster-level template reference exists.
 	if len(clusterInstance.Spec.TemplateRefs) == 0 {
 		return fmt.Errorf("missing cluster-level template reference")
@@ -196,6 +203,32 @@ func ValidateClusterInstance(clusterInstance *ClusterInstance) error {
 		return fmt.Errorf("control-plane agent validation failed: %w", err)
 	}
 
+	return nil
+}
+
+// OwnedByLabelValue returns the value of the ownership label the operator writes onto rendered
+// and preserved objects, composed from the ClusterInstance's namespace and name.
+func OwnedByLabelValue(namespace, name string) string {
+	return namespace + "_" + name
+}
+
+// ValidateOwnedByLabelValue checks that value is a valid Kubernetes label value.
+func ValidateOwnedByLabelValue(value string) error {
+	if errs := k8svalidation.IsValidLabelValue(value); len(errs) > 0 {
+		return fmt.Errorf("invalid label value %q: %s", value, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// validateOwnedByLabel ensures the ownership label the operator writes onto rendered and
+// preserved objects is valid for the ClusterInstance's namespace and name.
+func validateOwnedByLabel(clusterInstance *ClusterInstance) error {
+	value := OwnedByLabelValue(clusterInstance.Namespace, clusterInstance.Name)
+	if err := ValidateOwnedByLabelValue(value); err != nil {
+		return fmt.Errorf(
+			"clusterInstance %s/%s cannot be labeled: %w; use a shorter name or namespace",
+			clusterInstance.Namespace, clusterInstance.Name, err)
+	}
 	return nil
 }
 

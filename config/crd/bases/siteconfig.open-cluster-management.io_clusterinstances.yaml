@@ -111,6 +111,9 @@ spec:
                   Kubernetes namespace name: lowercase alphanumeric characters or
                   hyphens, must start and end with an alphanumeric character, and at
                   most 63 characters long.
+                maxLength: 63
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
               clusterNetwork:
                 description: ClusterNetwork is the list of IP address pools for pods.

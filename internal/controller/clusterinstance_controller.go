@@ -664,6 +664,17 @@ func applyObject(
 		zap.String("kind", renderedObj.GetKind()),
 	)
 
+	// Validate the ownership label before applying. Every rendered object is labeled by the
+	// operator, so an invalid value would otherwise be rejected by the API server with an
+	// error that does not identify the owning ClusterInstance.
+	if ownedBy := renderedObj.GetLabels()[ci.OwnedByLabel]; ownedBy != "" {
+		if err := ci.ValidateOwnedByLabelValue(ownedBy); err != nil {
+			return controllerutil.OperationResultNone, fmt.Errorf(
+				"failed to validate %s label on object %s: %w",
+				ci.OwnedByLabel, renderedObj.GetName(), err)
+		}
+	}
+
 	// Create a safe copy of the rendered object for Server-Side Apply
 	// The rendered object already contains the correct ExtraLabels/ExtraAnnotations from template rendering
 	preparedObj := &unstructured.Unstructured{}

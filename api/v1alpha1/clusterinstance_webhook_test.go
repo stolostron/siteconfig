@@ -37,6 +37,10 @@ var _ = Describe("ValidateCreate", func() {
 	BeforeEach(func() {
 		v = &clusterInstanceValidator{}
 		clusterInstance = &ClusterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "site-test-1",
+				Namespace: "site-test-1",
+			},
 			Spec: ClusterInstanceSpec{
 				TemplateRefs: []TemplateRef{
 					{

@@ -50,7 +50,16 @@ func VerifyOwnership(obj client.Object, ownerRefLabel string) error {
 // GenerateOwnedByLabelValue generates a consistent value for the "owned-by" label using the
 // namespace and name of a ClusterInstance.
 func GenerateOwnedByLabelValue(namespace, name string) string {
-	return fmt.Sprintf("%s_%s", namespace, name)
+	return v1alpha1.OwnedByLabelValue(namespace, name)
+}
+
+// ValidateOwnedByLabelValue checks that the value of the "owned-by" label is a valid
+// Kubernetes label value.
+func ValidateOwnedByLabelValue(value string) error {
+	if err := v1alpha1.ValidateOwnedByLabelValue(value); err != nil {
+		return fmt.Errorf("%s: %w", OwnedByLabel, err)
+	}
+	return nil
 }
 
 // GetNamespacedNameFromOwnedByLabel parses the value of the "owned-by" label to extract the
