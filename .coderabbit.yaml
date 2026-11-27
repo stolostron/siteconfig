@@ -57,14 +57,11 @@ reviews:
     # Replaces the org "**/*.go" entry. An entry with this path has to exist,
     # or the org one applies with its copyright-holder rule: every Go file
     # here carries the kubebuilder "Copyright YYYY." header, so that rule
-    # fires on each new file. The org rules on error handling, crypto, size
-    # bounds and log format are left out because golangci-lint enforces them
-    # in CI (gosec, wrapcheck, errorlint, loggercheck).
+    # fires on each new file. The other org Go rules are left out because
+    # linters are the place for them: golangci-lint runs in CI.
     - path: "**/*.go"
       instructions: |
         golangci-lint runs in CI, so do not comment on what it reports.
-        Check that Kubernetes API calls use the caller's context.Context and
-        not context.Background() or context.TODO().
 
     # Added on top of the org controller entry (different glob, so both apply).
     - path: "{api,cmd,internal}/**/*.go"
