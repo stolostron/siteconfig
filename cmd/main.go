@@ -26,6 +26,7 @@ import (
 
 	"go.uber.org/zap"
 
+	stderrors "errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -224,6 +225,21 @@ func run(metricsAddr, metricsCertDir, clusterInstanceWebhookCertDir, probeAddr s
 		return fmt.Errorf("unable to initialize the default reference installation template ConfigMaps: %w", err)
 	}
 
+	// Ensure the shared-resources namespace exists for shared extra-manifest ConfigMaps.
+	// A terminating namespace or an externally managed namespace is not fatal: start the manager
+	// and let the shared feature use what exists instead of blocking all reconciliation.
+	if err := controller.EnsureSharedResourcesNamespace(ctx, tmpClient); err != nil {
+		switch {
+		case stderrors.Is(err, controller.ErrSharedResourcesNamespaceTerminating):
+			setupLog.Info("Shared-resources namespace is terminating; starting manager and waiting for recreation")
+		case stderrors.Is(err, controller.ErrSharedResourcesNamespaceNotManaged):
+			setupLog.Info("Shared-resources namespace exists but is not managed by the SiteConfig operator; leaving it unchanged. Add the operator's managed-by and Pod Security labels if you want the operator to manage it.",
+				zap.String("namespace", v1alpha1.SharedResourcesNamespace))
+		default:
+			return fmt.Errorf("unable to ensure the shared-resources namespace: %w", err)
+		}
+	}
+
 	// Initialize the SiteConfig Operator configuration store
 	sharedConfigStore, err := createConfigurationStore(ctx, tmpClient, siteConfigNamespace, setupLog)
 	if err != nil {
@@ -261,6 +277,25 @@ func setupControllers(
 		ConfigStore: configStore,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create controller ConfigurationMonitor: %w", err)
+	}
+
+	// Create NamespaceMonitor controller to re-create the shared-resources namespace if it is deleted
+	if err := (&controller.NamespaceMonitor{
+		Client: mgr.GetClient(),
+		Log:    logger.Named("NamespaceMonitor"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create controller NamespaceMonitor: %w", err)
+	}
+
+	// Create SharedManifestSync controller to propagate shared ConfigMap updates to managed copies
+	if err := (&controller.SharedManifestSync{
+		Client:   mgr.GetClient(),
+		Log:      logger.Named("SharedManifestSync"),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorder("SharedManifestSync"),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create controller SharedManifestSync: %w", err)
 	}
 
 	// Create DeletionHandler for graceful deletion of rendered objects
@@ -408,7 +443,7 @@ func createConfigurationStore(
 	}
 
 	// Parse configuration from the retrieved data
-	config := &configuration.Configuration{}
+	config := configuration.NewDefaultConfiguration()
 	if err := config.FromMap(data); err != nil {
 		log.Error("Failed to parse SiteConfig Operator configuration", zap.Error(err))
 		return nil, fmt.Errorf("failed to parse SiteConfig Operator configuration: %w", err)

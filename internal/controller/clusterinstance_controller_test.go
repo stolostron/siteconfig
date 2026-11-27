@@ -194,6 +194,76 @@ var _ = Describe("Reconcile", func() {
 		Expect(res).To(Equal(ctrl.Result{}))
 	})
 
+	It("copies a shared extra-manifest during Reconcile and removes the obsolete copy", func() {
+		testParams.ClusterImageSetName = "testimage:foobar"
+		testParams.ClusterImageSetImage = "quay.io/test/release:latest"
+		testParams.BmcCredentialsName = "bmc"
+		Expect(c.Create(ctx, testParams.GenerateClusterImageSet())).To(Succeed())
+		Expect(c.Create(ctx, testParams.GenerateBMCSecret())).To(Succeed())
+
+		// The shared fixture templates only contain kind placeholders. Replace them with minimal
+		// valid manifests so the reconcile reaches the shared copy cleanup path.
+		clusterTemplate := &corev1.ConfigMap{}
+		Expect(c.Get(ctx, client.ObjectKey{Name: "test-cluster-template", Namespace: "default"}, clusterTemplate)).To(Succeed())
+		clusterTemplate.Data["ClusterDeployment"] = "apiVersion: hive.openshift.io/v1\nkind: ClusterDeployment\nmetadata:\n  name: test-cluster\n  namespace: test-cluster"
+		Expect(c.Update(ctx, clusterTemplate)).To(Succeed())
+		nodeTemplate := &corev1.ConfigMap{}
+		Expect(c.Get(ctx, client.ObjectKey{Name: "test-node-template", Namespace: "default"}, nodeTemplate)).To(Succeed())
+		nodeTemplate.Data["BareMetalHost"] = "apiVersion: metal3.io/v1alpha1\nkind: BareMetalHost\nmetadata:\n  name: test-node\n  namespace: test-cluster"
+		Expect(c.Update(ctx, nodeTemplate)).To(Succeed())
+
+		source := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-cm",
+				Namespace: v1alpha1.SharedResourcesNamespace,
+			},
+			Data: map[string]string{"payload": "shared"},
+		}
+		Expect(c.Create(ctx, source)).To(Succeed())
+
+		// The test fixture uses the same cluster name and namespace, so the shared reference
+		// satisfies the copy-target rule (spec.clusterName == ClusterInstance namespace).
+		clusterInstance.Spec.ExtraManifestsRefs = []v1alpha1.ExtraManifestReference{{
+			Name:      source.Name,
+			Namespace: v1alpha1.SharedResourcesNamespace,
+		}}
+		// The fixture node has no role; the control-plane validation requires a master.
+		clusterInstance.Spec.Nodes[0].Role = "master"
+		// The fake client does not bump metadata.generation on create; set it so the
+		// ObservedGeneration pre-empt guard does not skip the reconcile.
+		clusterInstance.Generation = 1
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		key := client.ObjectKeyFromObject(clusterInstance)
+		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(BeZero())
+
+		copy := &corev1.ConfigMap{}
+		copyKey := client.ObjectKey{Name: source.Name, Namespace: clusterInstance.Namespace}
+		Expect(c.Get(ctx, copyKey, copy)).To(Succeed())
+		Expect(copy.Data).To(Equal(source.Data))
+		Expect(copy.Labels).To(HaveKeyWithValue(v1alpha1.ManagedCopyLabel, v1alpha1.ManagedCopyLabelValue))
+		Expect(copy.Annotations).To(HaveKeyWithValue(v1alpha1.SourceNamespaceAnnotation, v1alpha1.SharedResourcesNamespace))
+		Expect(copy.OwnerReferences).To(HaveLen(1))
+		Expect(copy.OwnerReferences[0].Kind).To(Equal(v1alpha1.ClusterInstanceKind))
+		Expect(copy.OwnerReferences[0].Name).To(Equal(clusterInstance.Name))
+
+		// Remove the shared reference. The next reconcile must clean up the now-obsolete copy.
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+		clusterInstance.Spec.ExtraManifestsRefs = nil
+		clusterInstance.Generation++
+		Expect(c.Update(ctx, clusterInstance)).To(Succeed())
+
+		res, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(BeZero())
+
+		err = c.Get(ctx, copyKey, copy)
+		Expect(err).To(HaveOccurred())
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+
 	Context("Test Paused Annotation", func() {
 		It("returns a zero result with no error when the paused annotation is set", func() {
 			Expect(c.Create(ctx, clusterInstance)).To(Succeed())
@@ -1880,6 +1950,33 @@ var _ = Describe("handleValidate", func() {
 			}
 		}
 		Expect(matched).To(BeTrue())
+	})
+
+	It("sets the ClusterInstanceValidated condition to false on a shared copy name collision", func() {
+		Expect(c.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-collision",
+			Namespace: v1alpha1.SharedResourcesNamespace,
+		}})).To(Succeed())
+		Expect(c.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-collision",
+			Namespace: testParams.ClusterNamespace,
+		}})).To(Succeed())
+		clusterInstance.Spec.ExtraManifestsRefs = append(clusterInstance.Spec.ExtraManifestsRefs,
+			v1alpha1.ExtraManifestReference{Name: "shared-collision", Namespace: v1alpha1.SharedResourcesNamespace})
+		Expect(c.Create(ctx, clusterInstance)).To(Succeed())
+
+		err := r.handleValidate(ctx, testLogger, clusterInstance)
+		Expect(err).To(HaveOccurred())
+
+		key := types.NamespacedName{
+			Name:      testParams.ClusterName,
+			Namespace: testParams.ClusterNamespace,
+		}
+		Expect(c.Get(ctx, key, clusterInstance)).To(Succeed())
+		validated := meta.FindStatusCondition(clusterInstance.Status.Conditions, string(v1alpha1.ClusterInstanceValidated))
+		Expect(validated).ToNot(BeNil())
+		Expect(validated.Status).To(Equal(metav1.ConditionFalse))
+		Expect(validated.Message).To(ContainSubstring("name collision"))
 	})
 
 	It("does not require a reconcile when the ClusterInstanceValidated condition remains unchanged", func() {
