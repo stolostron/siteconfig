@@ -167,10 +167,10 @@ func Cleanup(
 
 	deleteFn := func(rType resourceType, name string) error {
 
-		rawObject := map[string]interface{}{
+		rawObject := map[string]any{
 			"apiVersion": "v1",
 			"kind":       string(rType),
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      name,
 				"namespace": clusterInstance.Namespace,
 			},

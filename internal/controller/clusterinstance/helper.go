@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -56,7 +58,7 @@ func getWorkloadPinningInstallConfigOverrides(clusterInstance *v1alpha1.ClusterI
 
 	scInstallConfigOverrides := clusterInstance.Spec.InstallConfigOverrides
 	if clusterInstance.Spec.CPUPartitioning == v1alpha1.CPUPartitioningAllNodes {
-		installOverrideValues := map[string]interface{}{}
+		installOverrideValues := map[string]any{}
 		if scInstallConfigOverrides != "" {
 			if err = json.Unmarshal([]byte(scInstallConfigOverrides), &installOverrideValues); err != nil {
 				return scInstallConfigOverrides, fmt.Errorf("failed to unmarshal install config overrides JSON: %w", err)
@@ -101,7 +103,7 @@ func getInstallConfigOverrides(clusterInstance *v1alpha1.ClusterInstance) (strin
 			return "", fmt.Errorf("invalid json parameter set at installConfigOverride")
 		}
 
-		var installConfigOverridesMap map[string]interface{}
+		var installConfigOverridesMap map[string]any
 		err := json.Unmarshal([]byte(installConfigOverrides), &installConfigOverridesMap)
 		if err != nil {
 			return "", fmt.Errorf("failed to unmarshal installConfigOverrides data: %v", installConfigOverrides)
@@ -212,19 +214,14 @@ func suppressManifest(kind string, supressManifestsList []string) bool {
 		return false
 	}
 
-	for _, manifest := range supressManifestsList {
-		if manifest == kind {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(supressManifestsList, kind)
 }
 
 // mergeJSONCommonKey merge 2 json in common key and return string
 func mergeJSONCommonKey(mergeWith, mergeTo, key string) (string, error) {
 	var (
-		mapMergeWith map[string]interface{}
-		mapMergeTo   map[string]interface{}
+		mapMergeWith map[string]any
+		mapMergeTo   map[string]any
 	)
 
 	// Unmarshal JSON strings into maps
@@ -243,20 +240,18 @@ func mergeJSONCommonKey(mergeWith, mergeTo, key string) (string, error) {
 	}
 
 	// Convert values to map if not already
-	mergeWithValueMap, ok := mergeWithValue.(map[string]interface{})
+	mergeWithValueMap, ok := mergeWithValue.(map[string]any)
 	if !ok {
 		return "", fmt.Errorf("value associated with mergeWithValue is not a map")
 	}
 
-	mergeToValueMap, ok := mergeToValue.(map[string]interface{})
+	mergeToValueMap, ok := mergeToValue.(map[string]any)
 	if !ok {
 		return "", fmt.Errorf("value associated with mergeToValue is not a map")
 	}
 
 	// Merge maps
-	for k, v := range mergeWithValueMap {
-		mergeToValueMap[k] = v
-	}
+	maps.Copy(mergeToValueMap, mergeWithValueMap)
 
 	// Update the merged map in mergeTo
 	mapMergeTo[key] = mergeToValueMap
@@ -273,23 +268,23 @@ func mergeJSONCommonKey(mergeWith, mergeTo, key string) (string, error) {
 func appendToManifestMetadata(
 	appendData map[string]string,
 	field string,
-	manifest map[string]interface{},
-) map[string]interface{} {
+	manifest map[string]any,
+) map[string]any {
 	if manifest["metadata"] == nil && len(appendData) > 0 {
-		manifest["metadata"] = make(map[string]interface{})
+		manifest["metadata"] = make(map[string]any)
 	}
-	metadata, _ := manifest["metadata"].(map[string]interface{})
+	metadata, _ := manifest["metadata"].(map[string]any)
 
 	if metadata[field] == nil && len(appendData) > 0 {
-		metadata[field] = make(map[string]interface{})
+		metadata[field] = make(map[string]any)
 	}
-	data, _ := metadata[field].(map[string]interface{})
+	data, _ := metadata[field].(map[string]any)
 
 	for key, value := range appendData {
 		if _, found := data[key]; !found {
 			// It's a new data-item, adding
 			if data == nil {
-				data = make(map[string]interface{})
+				data = make(map[string]any)
 			}
 			data[key] = value
 		}
@@ -297,17 +292,17 @@ func appendToManifestMetadata(
 	return manifest
 }
 
-func appendManifestAnnotations(extraAnnotations map[string]string, manifest map[string]interface{},
-) map[string]interface{} {
+func appendManifestAnnotations(extraAnnotations map[string]string, manifest map[string]any,
+) map[string]any {
 	return appendToManifestMetadata(extraAnnotations, AnnotationsKey, manifest)
 }
 
-func appendManifestLabels(extraLabels map[string]string, manifest map[string]interface{}) map[string]interface{} {
+func appendManifestLabels(extraLabels map[string]string, manifest map[string]any) map[string]any {
 	return appendToManifestMetadata(extraLabels, LabelsKey, manifest)
 }
 
 // toYaml marshals a given field to Yaml
-func toYaml(v interface{}) string {
+func toYaml(v any) string {
 	data, err := k8syaml.Marshal(v)
 	if err != nil {
 		// Swallow errors inside of a template.

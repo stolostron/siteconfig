@@ -380,7 +380,7 @@ func applyManifestWorkToSpoke(
 		return fmt.Errorf("manifestWork %s/%s does not contain spec.workload.manifests", namespace, manifestWorkName)
 	}
 
-	manifests, ok := workload.([]interface{})
+	manifests, ok := workload.([]any)
 	if !ok {
 		return fmt.Errorf("spec.workload.manifests is not a list")
 	}
@@ -391,7 +391,7 @@ func applyManifestWorkToSpoke(
 
 	// Apply each manifest to the spoke cluster
 	for i, manifest := range manifests {
-		manifestMap, ok := manifest.(map[string]interface{})
+		manifestMap, ok := manifest.(map[string]any)
 		if !ok {
 			log.Warn("Skipping invalid manifest", zap.Int("index", i))
 			continue

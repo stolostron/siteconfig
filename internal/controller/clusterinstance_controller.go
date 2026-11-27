@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -387,13 +389,9 @@ func (r *ClusterInstanceReconciler) applyACMBackupLabelToInstallTemplates(
 	applyDRLabelFn := func(ref v1alpha1.TemplateRef) error {
 
 		// check if the install template reference is one of the default provided templates
-		if ref.Namespace == siteConfigNS {
-			for _, defaultTempl := range defaultInstallTemplates {
-				if ref.Name == defaultTempl {
-					// ignore install template
-					return nil
-				}
-			}
+		if ref.Namespace == siteConfigNS && slices.Contains(defaultInstallTemplates, ref.Name) {
+			// ignore install template
+			return nil
 		}
 
 		cm := &corev1.ConfigMap{}
@@ -672,10 +670,8 @@ func applyObject(
 	preparedObj.SetNamespace(renderedObj.GetNamespace())
 
 	// Perform a safe shallow copy of the object content
-	preparedObj.Object = make(map[string]interface{})
-	for k, v := range renderedObj.Object {
-		preparedObj.Object[k] = v
-	}
+	preparedObj.Object = make(map[string]any)
+	maps.Copy(preparedObj.Object, renderedObj.Object)
 
 	// Apply using Server-Side Apply with field manager
 	log.Debug("Applying object using Server-Side Apply")
