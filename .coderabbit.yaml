@@ -1,0 +1,131 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Layered on the org config in stolostron/coderabbit. An entry here with the
+# same `path` or check `name` replaces the org entry; the rest still apply.
+inheritance: true
+
+tone_instructions: "Be brief. Ask questions rather than give orders. No praise. Raise design, scope and test-value problems before line-level ones."
+
+reviews:
+  auto_review:
+    # Never pause, so the final commit of a PR is always reviewed.
+    auto_pause_after_reviewed_commits: 0
+
+  high_level_summary_instructions: |
+    Start with a table of added lines (approximate) split into production Go,
+    test Go, docs and samples, and generated files.
+    Then list what the PR adds to the supported surface (API fields, config
+    keys, labels, annotations, controllers, RBAC rules), or "none".
+    Then name the file under docs/enhancements/ in the repository that
+    describes this change, or "none". It is usually not part of the PR.
+    Then a short summary of the behaviour change.
+    Do not add questions, concerns or notes about the counts.
+
+  merge_risk_instructions: |
+    siteconfig is an operator that provisions, reinstalls and deletes
+    clusters.
+    Higher risk: API, CRD or webhook changes; built-in template changes; new
+    controllers; RBAC changes; deletion, reinstall and backup/restore paths.
+    Lower risk: docs-only, test-only, dependency bumps with no code change.
+
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        - Ignore style and formatting.
+        - Mention a repeated pattern once, at summary level, not once per file.
+
+    # Replaces the org entry to drop its copyright-holder rule. Do not remove.
+    - path: "**/*.go"
+      instructions: |
+        golangci-lint runs in CI, so do not comment on what it reports.
+
+    - path: "{api,cmd,internal,docs/enhancements}/**"
+      instructions: |
+        Read the whole change before commenting on lines. Then, as questions:
+        - Does it add supported surface (API field, config key, label,
+          annotation, controller)? For each, what reads it, and can an
+          existing field or mechanism do the job?
+        - Does it write to objects the user authored? Those usually come from
+          ArgoCD/GitOps, so ask how the write interacts with it.
+        - Does it change how siteconfig writes, labels or deletes an object it
+          renders (BareMetalHost, AgentClusterInstall and so on)? Other
+          operators write to those too. Ask what happens when the other
+          controller acts first.
+        - What changes for a ClusterInstance that is already provisioned when
+          the operator is upgraded? Look for new CRD defaults, validation
+          that rejects a stored spec, changed rendered output, and whether a
+          new spec field may change after provisioning or on reinstall.
+
+    - path: "{api,cmd,internal}/**/*.go"
+      instructions: |
+        - Is the same logic, rule or constant written in more than one place
+          in this diff or already in the repo? Name the copies.
+        - If a file in docs/enhancements/ covers this feature, does the code
+          do what the proposal says? Name each difference.
+        - Are there comments that only restate the next line of code? Raise
+          it once for the whole PR with up to three examples. Leave godoc
+          and API field comments alone.
+
+    # Replaces the org entry to drop its assertion-message rule.
+    - path: "**/*_test.go"
+      instructions: |
+        Which production change in this PR would make each new test fail? If
+        none, or another test already catches it, ask whether it is needed.
+        Is there new behaviour that no test would notice being removed?
+        If the PR adds a test suite or make test target, which CI job runs it?
+
+    - path: "docs/{*.md,reinstallation/**/*.md}"
+      instructions: |
+        User-facing reference.
+        - Flag content that records how the change was developed or tested
+          (dated results, investigation notes, test plans).
+        - Flag statements that the code in this PR does not match.
+
+    - path: "docs/enhancements/*.md"
+      instructions: |
+        A design proposal, reviewed before the code exists. Do not ask for
+        implementation or tests, and do not comment on section structure.
+        Flag statements that contradict each other, the current code, or
+        another proposal.
+
+  pre_merge_checks:
+    custom_checks:
+      # Replaces the org check to drop its assertion-message rule.
+      - name: "Test Structure and Quality"
+        mode: warning
+        instructions: |
+          Review the Go tests this PR adds or changes. Fail if any of them:
+          1. Asserts several unrelated behaviors in one It block or Test
+             function.
+          2. Creates cluster-scoped resources without cleanup.
+          3. Calls Eventually or Consistently without an explicit timeout and
+             polling interval.
+          4. Is a unit test that talks to a real API server or external
+             endpoint instead of the controller-runtime fake.Client.
+          Do not fail because assertions have no failure message.
+
+      - name: "PR size and scope"
+        mode: warning
+        instructions: |
+          Count the lines this PR adds to production Go with git diff
+          --numstat between the base and the head of the PR. Production Go is
+          every *.go file except *_test.go, files under vendor/, test/,
+          bundle/ or config/, and generated files (zz_generated*,
+          *_generated.go).
+          Pass if the count is 500 or less, or if the PR description explains
+          why the change cannot be split.
+          Otherwise fail. Report the count and propose a split into PRs that
+          each build and pass tests on their own.
+
+      - name: "Enhancement proposal first"
+        mode: warning
+        instructions: |
+          CONTRIBUTING.md requires an enhancement proposal to be merged before
+          the implementation PR.
+          Applies when the PR adds, removes or renames a field in
+          api/v1alpha1/*_types.go, adds a controller, or adds an operator
+          config key. Does not apply to bug fixes, refactors, docs or
+          dependency updates.
+          Pass if it does not apply, if a file under docs/enhancements/ on
+          the base branch describes the change, or if the PR only adds that
+          file. Otherwise fail.
