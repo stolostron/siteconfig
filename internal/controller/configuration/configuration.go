@@ -28,6 +28,12 @@ const (
 
 	// DefaultMaxConcurrentReconciles defines the default maximum number of concurrent reconciles.
 	DefaultMaxConcurrentReconciles = 1
+
+	// DefaultStrictSecretPresenceValidation specifies whether pull secret and BMC
+	// credential NotFound results fail ClusterInstance validation.
+	// When true (default), presence checks hard-fail as they do on main today.
+	// When false, NotFound is a warn-and-continue soft-fail.
+	DefaultStrictSecretPresenceValidation = true
 )
 
 // Configuration defines the runtime settings for the ClusterInstance controller.
@@ -42,21 +48,28 @@ type Configuration struct {
 	// To apply changes to this value after the controller has started, the siteconfig-manager
 	// pod must be restarted.
 	maxConcurrentReconciles int
+
+	// strictSecretPresenceValidation hard-fails pull secret and BMC credential
+	// presence checks when true (default). When false, only apierrors.IsNotFound
+	// soft-fails with a warn log; other Get errors still fail.
+	strictSecretPresenceValidation bool
 }
 
 // NewDefaultConfiguration creates a new Configuration instance with default settings.
 func NewDefaultConfiguration() *Configuration {
 	return &Configuration{
-		allowReinstalls:         DefaultAllowReinstalls,
-		maxConcurrentReconciles: DefaultMaxConcurrentReconciles,
+		allowReinstalls:                DefaultAllowReinstalls,
+		maxConcurrentReconciles:        DefaultMaxConcurrentReconciles,
+		strictSecretPresenceValidation: DefaultStrictSecretPresenceValidation,
 	}
 }
 
 // ToMap converts the Configuration object into a map of string keys and values.
 func (c *Configuration) ToMap() map[string]string {
 	return map[string]string{
-		"allowReinstalls":         strconv.FormatBool(c.allowReinstalls),
-		"maxConcurrentReconciles": strconv.Itoa(c.maxConcurrentReconciles),
+		"allowReinstalls":                strconv.FormatBool(c.allowReinstalls),
+		"maxConcurrentReconciles":        strconv.Itoa(c.maxConcurrentReconciles),
+		"strictSecretPresenceValidation": strconv.FormatBool(c.strictSecretPresenceValidation),
 	}
 }
 
@@ -78,6 +91,13 @@ func (c *Configuration) FromMap(input map[string]string) error {
 				return fmt.Errorf("invalid value for %q: %w", key, err)
 			}
 			c.maxConcurrentReconciles = intValue
+
+		case "strictSecretPresenceValidation":
+			boolValue, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("invalid value for %q: %w", key, err)
+			}
+			c.strictSecretPresenceValidation = boolValue
 
 		default:
 			return fmt.Errorf("unsupported key in input map: %q", key)

@@ -14,6 +14,10 @@ Key configuration options include:
 - **`allowReinstalls`**: Specifies whether reinstallation operations are permitted.
 - **`maxConcurrentReconciles`**: Determines the maximum number of concurrent reconcile operations.
 **Note**: Changing this value requires restarting the SiteConfig manager pod.
+- **`strictSecretPresenceValidation`**: When `true` (default), a missing pull secret or BMC
+  credential secret fails validation as it does today. When `false`, `NotFound` emits a warn log
+  and validation continues. Forbidden, timeout, and other non-`NotFound` lookup errors still fail
+  validation regardless of this setting. Changing this value does not require a manager-pod restart.
 
 ---
 
@@ -37,10 +41,11 @@ If the configuration ConfigMap does not already exist, follow these steps to cre
    data:
      allowReinstalls: "false"
      maxConcurrentReconciles: "1"
+     strictSecretPresenceValidation: "true"
    EOF
    ```
 
-This will create the ConfigMap with reinstall disabled.
+This will create the ConfigMap with reinstall disabled and strict pull/BMC secret presence checks.
 
 ---
 
@@ -66,6 +71,14 @@ To modify the configuration, use the `oc patch` command to update the ConfigMap:
 
    **Important**: If you modify `maxConcurrentReconciles`, you must restart the SiteConfig manager pod for the
    changes to take effect.
+
+3. **Allow soft-fail for missing pull/BMC secrets:**
+   ```sh
+   oc patch configmap siteconfig-operator-configuration \
+     -n $NAMESPACE \
+     --type=json \
+     -p '[{"op": "replace", "path": "/data/strictSecretPresenceValidation", "value": "false"}]'
+   ```
 
 ---
 

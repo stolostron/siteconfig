@@ -72,10 +72,26 @@ func (s *ConfigurationStore) GetMaxConcurrentReconciles() int {
 	return s.configuration.maxConcurrentReconciles
 }
 
+// SetStrictSecretPresenceValidation updates the strictSecretPresenceValidation field.
+func (s *ConfigurationStore) SetStrictSecretPresenceValidation(strict bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.configuration.strictSecretPresenceValidation = strict
+}
+
+// GetStrictSecretPresenceValidation retrieves whether pull/BMC NotFound fails validation.
+func (s *ConfigurationStore) GetStrictSecretPresenceValidation() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.configuration.strictSecretPresenceValidation
+}
+
 // UpdateConfiguration applies a set of configuration changes provided as key-value pairs.
 // Supported keys are:
-// - "allowReinstalls": A boolean string value (true/false) indicating whether reinstallation operations are allowed.
-// - "maxConcurrentReconciles": An integer string value specifying the maximum number of concurrent reconciles.
+//   - "allowReinstalls": A boolean string value (true/false) indicating whether reinstallation operations are allowed.
+//   - "maxConcurrentReconciles": An integer string value specifying the maximum number of concurrent reconciles.
+//   - "strictSecretPresenceValidation": A boolean string value (true/false). When true (default),
+//     pull secret and BMC credential NotFound fails validation; when false, NotFound soft-fails.
 //
 // Returns an error if any value cannot be parsed or if an unsupported key is provided.
 func (s *ConfigurationStore) UpdateConfiguration(data map[string]string) error {
@@ -97,6 +113,15 @@ func (s *ConfigurationStore) UpdateConfiguration(data map[string]string) error {
 			}
 			if s.GetMaxConcurrentReconciles() != maxConcurrentReconciles {
 				s.SetMaxConcurrentReconciles(maxConcurrentReconciles)
+			}
+
+		case "strictSecretPresenceValidation":
+			strict, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("invalid value for %q: %w", key, err)
+			}
+			if s.GetStrictSecretPresenceValidation() != strict {
+				s.SetStrictSecretPresenceValidation(strict)
 			}
 
 		default:

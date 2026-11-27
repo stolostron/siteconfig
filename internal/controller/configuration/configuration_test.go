@@ -24,8 +24,9 @@ import (
 var _ = Describe("NewDefaultConfiguration", func() {
 	It("creates a new Configuration object with default values for the SiteConfig Operator", func() {
 		expected := &Configuration{
-			allowReinstalls:         DefaultAllowReinstalls,
-			maxConcurrentReconciles: DefaultMaxConcurrentReconciles,
+			allowReinstalls:                DefaultAllowReinstalls,
+			maxConcurrentReconciles:        DefaultMaxConcurrentReconciles,
+			strictSecretPresenceValidation: DefaultStrictSecretPresenceValidation,
 		}
 		gotConfig := NewDefaultConfiguration()
 		Expect(gotConfig).To(Equal(expected))
@@ -37,22 +38,26 @@ var _ = Describe("Configuration.ToMap", func() {
 
 		testConfigs := []Configuration{
 			{
-				allowReinstalls:         false,
-				maxConcurrentReconciles: 5,
+				allowReinstalls:                false,
+				maxConcurrentReconciles:        5,
+				strictSecretPresenceValidation: false,
 			},
 			{
-				allowReinstalls:         true,
-				maxConcurrentReconciles: 1,
+				allowReinstalls:                true,
+				maxConcurrentReconciles:        1,
+				strictSecretPresenceValidation: true,
 			},
 		}
 		expectedMaps := []map[string]string{
 			{
-				"allowReinstalls":         "false",
-				"maxConcurrentReconciles": "5",
+				"allowReinstalls":                "false",
+				"maxConcurrentReconciles":        "5",
+				"strictSecretPresenceValidation": "false",
 			},
 			{
-				"allowReinstalls":         "true",
-				"maxConcurrentReconciles": "1",
+				"allowReinstalls":                "true",
+				"maxConcurrentReconciles":        "1",
+				"strictSecretPresenceValidation": "true",
 			},
 		}
 
@@ -67,23 +72,27 @@ var _ = Describe("FromMap", func() {
 	It("correctly converts maps to Configuration objects", func() {
 		testMaps := []map[string]string{
 			{
-				"allowReinstalls":         "false",
-				"maxConcurrentReconciles": "5",
+				"allowReinstalls":                "false",
+				"maxConcurrentReconciles":        "5",
+				"strictSecretPresenceValidation": "false",
 			},
 			{
-				"allowReinstalls":         "true",
-				"maxConcurrentReconciles": "1",
+				"allowReinstalls":                "true",
+				"maxConcurrentReconciles":        "1",
+				"strictSecretPresenceValidation": "true",
 			},
 		}
 
 		expectedConfigs := []Configuration{
 			{
-				allowReinstalls:         false,
-				maxConcurrentReconciles: 5,
+				allowReinstalls:                false,
+				maxConcurrentReconciles:        5,
+				strictSecretPresenceValidation: false,
 			},
 			{
-				allowReinstalls:         true,
-				maxConcurrentReconciles: 1,
+				allowReinstalls:                true,
+				maxConcurrentReconciles:        1,
+				strictSecretPresenceValidation: true,
 			},
 		}
 
@@ -95,6 +104,18 @@ var _ = Describe("FromMap", func() {
 		}
 	})
 
+	It("leaves strictSecretPresenceValidation at default when the key is omitted", func() {
+		config := NewDefaultConfiguration()
+		err := config.FromMap(map[string]string{
+			"allowReinstalls":         "true",
+			"maxConcurrentReconciles": "10",
+		})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(config.allowReinstalls).To(BeTrue())
+		Expect(config.maxConcurrentReconciles).To(Equal(10))
+		Expect(config.strictSecretPresenceValidation).To(BeTrue())
+	})
+
 	It("errors when it fails to convert maps to Configuration objects", func() {
 		testMaps := []map[string]string{
 			{
@@ -104,6 +125,9 @@ var _ = Describe("FromMap", func() {
 			{
 				"allowReinstalls":         "true",
 				"maxConcurrentReconciles": "ONE",
+			},
+			{
+				"strictSecretPresenceValidation": "not-a-bool",
 			},
 		}
 
