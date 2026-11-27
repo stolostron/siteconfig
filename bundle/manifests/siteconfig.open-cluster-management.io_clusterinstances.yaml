@@ -592,6 +592,14 @@ spec:
                       items:
                         type: string
                       type: array
+                    templateData:
+                      description: |-
+                        TemplateData holds arbitrary JSON parameters for custom node-level installation templates.
+                        Use templateVar and hasTemplateVar to access values. Default templates ignore this field.
+                        Parameters are independent of NodeNetwork and follow the existing node update restrictions.
+                        Schemaless with an explicit object type preserves arbitrary values, including null entries.
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
                     templateRefs:
                       description: |-
                         TemplateRefs is a list of references to node-level templates. A node-level template consists of a ConfigMap

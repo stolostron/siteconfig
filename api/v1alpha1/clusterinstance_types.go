@@ -21,6 +21,7 @@ import (
 	aiv1beta1 "github.com/openshift/assisted-service/api/v1beta1"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -193,6 +194,16 @@ type NodeSpec struct {
 	// NodeNetwork is a set of configurations pertaining to the network settings for the node.
 	// +optional
 	NodeNetwork *aiv1beta1.NMStateConfigSpec `json:"nodeNetwork,omitempty"`
+
+	// TemplateData holds arbitrary JSON parameters for custom node-level installation templates.
+	// Use templateVar and hasTemplateVar to access values. Default templates ignore this field.
+	// Parameters are independent of NodeNetwork and follow the existing node update restrictions.
+	// Schemaless with an explicit object type preserves arbitrary values, including null entries.
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:validation:Type=object
+	// +kubebuilder:validation:XPreserveUnknownFields
+	// +optional
+	TemplateData map[string]apiextensionsv1.JSON `json:"templateData,omitempty"`
 
 	// NodeLabels allows the specification of custom roles for your nodes in your managed clusters.
 	// These are additional roles that are not used by any OpenShift Container Platform components, only by the user.

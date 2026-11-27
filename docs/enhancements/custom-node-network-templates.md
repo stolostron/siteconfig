@@ -113,11 +113,11 @@ omitted, so that non-network templates do not need a separate parameter API.
      validation succeed, it applies the output, including changes to NMStateConfig.
      A final template-data edit may be included in the update that releases hold.
   2. **Updating template data after hold release:** The webhook must reject
-     changes to an existing node's `templateData`, including after provisioning
-     completes and in a new reinstall request. The rejected template data is
+     changes to a matched existing node's `templateData`, including after
+     provisioning completes and in a new reinstall request. The rejected template data is
      not stored, generation does not change, and that request causes no
-     reconciliation or NMStateConfig update. Adding a new node with its initial
-     template data remains subject to existing scaling rules.
+     reconciliation or NMStateConfig update. Adding or replacing a node with its
+     initial template data remains subject to existing node-operation rules.
   3. **Successful and later eligible reconciliations:** The controller records
      observed generation after success and skips rendering for that generation.
      Later accepted spec changes, including scaling or a valid reinstall
@@ -150,8 +150,8 @@ omitted, so that non-network templates do not need a separate parameter API.
   not in the machine-readable reason. If `holdInstallation` is enabled
   (pre-provisioning), users can correct `templateData` values or the template
   and reconciliation retries automatically. After installation is released,
-  `templateData` is immutable; template ConfigMap corrections are picked up on
-  the next eligible reconciliation.
+  matched existing nodes' `templateData` is immutable; template ConfigMap
+  corrections are picked up on the next eligible reconciliation.
   For templates with optional parameters, the `hasTemplateVar` helper allows
   presence checks without triggering errors.
 - **Scale**: Moving repeated configuration into a shared template reduces the
@@ -377,10 +377,17 @@ type NodeSpec struct {
 The `Schemaless` and explicit object-type markers prevent generation of a
 non-nullable `additionalProperties` schema, which would prune parameter entries
 set to null. Local API-server tests (Kubernetes 1.35.0, envtest) with the generated
-CRD verified create/update/read preservation at `spec.nodes[].templateData`,
+CRD verified create/replace/read preservation at `spec.nodes[].templateData`,
 including explicit null and nested values, with and without `nodeNetwork`.
 Strings, numbers, booleans, and arrays were rejected in place of the map;
 existing network validation was unchanged.
+
+Client-side apply (Argo CD's default) removes null-valued object entries; merge
+patches replacing `spec.nodes` can also remove them. Workflows relying on null
+must consistently use server-side apply (`--server-side`; Argo CD
+`ServerSideApply=true`), JSON Patch, or object replacement. Outside the permitted
+hold window, the webhook rejects null-key removal from a matched existing node
+as a parameter change.
 
 The relevant generated CRD fragment would be:
 
@@ -421,17 +428,17 @@ values accept arbitrary JSON. Arbitrary unknown fields at the node or
 
 JSON values support DNS-server lists, arrays of IP-address objects, and boolean
 switches without encoding structured data as strings. This flexibility is
-preferred over a string-only map despite the decoding and numeric-conversion
-requirements described below.
+preferred over a string-only map.
 
 Template access is provided through dedicated helper functions registered in
-`funcMap()`, which decode the raw JSON values into template-usable Go types:
+`funcMap()`, which decode the raw JSON values into template-usable Go types using
+`k8s.io/apimachinery/pkg/util/json` (aliased as `k8sjson`):
 
 ```go
 // templateVar retrieves and decodes a parameter from NodeSpec.TemplateData.
 // Returns an error if the parameter map is undefined, the key is missing,
 // or the JSON is invalid.
-// Uses json.Decoder.UseNumber to preserve numeric precision.
+// Preserves integers within int64 using Kubernetes JSON decoding.
 func templateVar(node v1alpha1.NodeSpec, key string) (interface{}, error) {
     if node.TemplateData == nil {
         return nil, fmt.Errorf("templateData is not defined")
@@ -446,10 +453,8 @@ func templateVar(node v1alpha1.NodeSpec, key string) (interface{}, error) {
     if !json.Valid(val.Raw) {
         return nil, fmt.Errorf("templateData key %q contains invalid JSON", key)
     }
-    dec := json.NewDecoder(bytes.NewReader(val.Raw))
-    dec.UseNumber()
     var result interface{}
-    if err := dec.Decode(&result); err != nil {
+    if err := k8sjson.Unmarshal(val.Raw, &result); err != nil {
         return nil, fmt.Errorf("failed to decode templateData key %q: %w", key, err)
     }
     return result, nil
@@ -472,14 +477,13 @@ already a value, not a pointer. They only read its map and JSON bytes. No nil
 
 - Strings, booleans, arrays, and objects are decoded into their corresponding
   Go types (`string`, `bool`, `[]interface{}`, `map[string]interface{}`).
-- Numbers are preserved as `json.Number` (renders as the original string
-  representation, avoiding `float64` precision issues).
-  Emit values directly or with `toJson`. Before integer arithmetic or comparisons,
-  use `toString | int64`: slim-sprig v2 recognizes plain strings, not `json.Number`.
-  Direct numeric conversions and arithmetic can silently use zero; comparison
-  with an integer literal fails. Integer conversion requires integer text within
-  range; decimal/exponent forms and overflow yield zero. Unconverted numeric zero
-  is truthy and nonempty for `if`/`default`. Store exact identifiers as strings.
+- Integer-form numbers within `int64` decode as `int64`; other numbers use
+  `float64`, including nested values. Integers support arithmetic and comparisons
+  directly, for example `add (templateVar $node "prefixLength") 1`.
+  Comparisons require compatible numeric types; integer arithmetic can truncate
+  floats or overflow. Store exact identifiers or decimal values as strings.
+  Numeric zero and boolean false are empty for `if`/`default`; use
+  `hasTemplateVar` for defaults based on presence.
 - An undefined parameter map returns `templateData is not defined`. A defined
   map lacking a requested key returns, for example,
   `templateData key "nodeIp" is missing`. These are distinct diagnostics.
@@ -496,9 +500,8 @@ already a value, not a pointer. They only read its map and JSON bytes. No nil
   be tested through actual JSON unmarshalling into `NodeSpec`, not by
   constructing `Raw: []byte("null")` directly.
   Emit explicit null with `toJson` or `toYaml`; reject it in templates requiring
-  a non-null value. A custom template may use an omitted `gateway` to select its
-  default, an explicit null to omit that static route, and a string to override
-  the gateway. These meanings belong to the template, not the operator.
+  a non-null value. Prefer explicit switches such as `emitDefaultRoute: false`
+  to null-based defaults; use `hasTemplateVar` to distinguish omission from false.
 - For optional parameters, use `hasTemplateVar` before `templateVar`:
 
 ```gotemplate
@@ -800,7 +803,7 @@ permissions.
 | Risk | Mitigation |
 |------|------------|
 | Custom template references a key not present in `templateData` | The `templateVar` helper returns an error identifying the missing key. The template engine aborts and the controller sets `RenderedTemplates=False` with a diagnostic message. For optional keys, `hasTemplateVar` provides a safe presence check. |
-| Generic parameters are used to bypass existing mutation restrictions | Enforce immutability for the entire `templateData` map after hold release. Parameter names matching mutable field names must not inherit those fields' permissions. |
+| Generic parameters are used to bypass existing mutation restrictions | Enforce immutability for matched existing nodes' entire `templateData` map after hold release. Parameter names matching mutable field names must not inherit those fields' permissions. |
 | Multiple nodes or ConfigMaps have the same template key | Include node hostname, ConfigMap namespace/name, and template key in user-visible condition messages; key-specific failures also identify the parameter name. |
 | Users confuse template parameters with nmstate config (Approach A) | Mitigated by documentation clearly separating template parameters from nmstate content. |
 
@@ -848,8 +851,8 @@ the EP stays provisional until that process is complete.
 ### Mutability and Reinstall
 
 The node-level `templateData` field does not gain special mutation permissions.
-Once hold has been released, an existing node's parameters are immutable. This
-is consistent with existing treatment of inline network configuration and
+Once hold has been released, a matched existing node's parameters are immutable.
+This is consistent with existing treatment of inline network configuration and
 prevents general template inputs from bypassing restrictions on other fields.
 
 **Design constraint:** Network MAC mappings belong in the typed
@@ -872,9 +875,10 @@ including changes to `nodeNetwork.interfaces`, are preserved. An existing node's
 `templateData` must remain unchanged. Templates are rendered from that accepted
 spec. Once reinstall is in progress, further spec changes are blocked.
 
-**Scaling:** A newly added node may carry its own initial `templateData` when
-the existing scaling rules allow the addition. Existing nodes' parameters
-remain protected in that same update.
+**Scaling and replacement:** Nodes are matched by the existing identity rules,
+primarily `hostName`. An allowed addition or replacement can supply new parameters;
+changing `hostName` is treated as replacement, even if the BMC and boot MAC are
+unchanged. Matched existing nodes' parameters remain protected in that update.
 
 ### Test Plan
 
@@ -902,7 +906,7 @@ Unit tests:
   - Validation passes for existing nodes and nodes with `templateData` alongside
     the known fields. Parameters do not require `nodeNetwork` to be present.
 - `internal/controller/clusterinstance/helper_test.go`:
-  - `templateVar` decodes string, boolean, numeric (`json.Number`), array,
+  - `templateVar` decodes string, boolean, numeric (`int64`/`float64`), array,
     object, and null values correctly. Null must be tested via actual JSON
     unmarshalling into `NodeSpec` (the vendored `apiextensionsv1.JSON`
     stores empty `Raw` for null, not `[]byte("null")`).
@@ -912,8 +916,8 @@ Unit tests:
   - `hasTemplateVar` returns `true` for present keys (including null/false/0
     values) and `false` for absent keys.
   - Custom keys are accessible via the template engine through `templateVar`.
-  - Explicit numeric conversion supports arithmetic and comparison; cover its
-    range/format limits, null serialization, and template-defined null defaults.
+  - Integer parameters support arithmetic and comparison directly; cover nested
+    numbers, numeric limits, zero/default behavior, and null serialization.
 - `internal/controller/clusterinstance/template_engine_test.go`:
   - Default NMStateConfig template renders identically with old and new nodes
     when `templateData` is absent (backward compatibility).
@@ -942,8 +946,8 @@ Unit tests:
   - Existing reinstall permissions remain unchanged: schema-valid interface
     MAC changes, renames, additions, and removals remain accepted for a valid
     new request, both with unchanged `templateData` and without it.
-  - `templateData` changes are rejected on provisioned clusters, including
-    adding or removing the map or individual keys, and changing nested values.
+  - After provisioning, matched existing nodes reject `templateData` changes,
+    including adding/removing the map or keys, and changing nested values.
   - Changes between adjacent integers above 2^53 are rejected; numeric rounding
     must not hide parameter changes.
   - Parameter keys matching permitted field names, such as `extraLabels`,
@@ -958,6 +962,8 @@ Unit tests:
     rejects parameter changes; an active reinstall rejects both.
   - Scale-out permits initial parameters for a new node and rejects changes
     to existing-node parameters.
+  - Hostname replacement permits new parameters after provisioning, even with
+    unchanged BMC/boot MAC; active provisioning still blocks the update.
 
 Integration/e2e tests:
 
@@ -971,6 +977,8 @@ Integration/e2e tests:
   explicit null persist at `spec.nodes[].templateData`, including without
   `nodeNetwork`, and rejects non-object parameter maps. Unknown siblings must
   be rejected or pruned rather than preserved as another parameter namespace.
+- Cover client-side and server-side apply, transitions between them, and merge
+  patches touching nodes versus metadata; verify the documented null behavior.
 - Rendered InfraEnv `nmStateConfigLabelSelector` matches the NMStateConfig
   label produced by the custom template (interface-selector integration).
 - Verify live API condition messages for missing parameters and broken templates
@@ -1109,11 +1117,10 @@ on the outer struct and the schemas of declared child properties (e.g.,
 Root-level access via custom unmarshaling alone does
 not create Go struct fields; a separate template-facing representation would
 be required. Custom keys at the root level also risk collision with future
-upstream field additions. Finally, `map[string]interface{}` deserializes
-numbers as `float64`, causing potential formatting issues (e.g.,
-`prefix-length: 24` becomes `float64(24)`). Note that Approach A's
-`fromJson` has the same `float64` behavior; Approach B's `templateVar` avoids it
-by using `json.Decoder.UseNumber`.
+upstream field additions. Standard `encoding/json` and Approach A's `fromJson`
+decode numbers in `map[string]interface{}` as `float64`, risking precision loss
+for large integers. Approach B's `templateVar` preserves integers within `int64`
+using Kubernetes' JSON decoder.
 
 ### Alternative: Option B3 - Replace `NodeNetwork` with raw JSON
 
