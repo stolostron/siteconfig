@@ -257,6 +257,67 @@ spec:
                   normally, but installation is held until this field is set to false.
                   Can only be enabled at creation time. Defaults to false.
                 type: boolean
+              hostNetworkAttachmentTemplates:
+                description: |-
+                  HostNetworkAttachmentTemplates is a list of network attachment templates that must be rendered for the cluster.
+                  These are referenced by BMH instances to define which network attachment must be associated
+                  to each network interface.
+                items:
+                  description: |-
+                    HostNetworkAttachmentTemplate defines a template for rendering a HostNetworkAttachment CR.
+                    It wraps the BMO HostNetworkAttachmentSpec and adds a name for rendering purposes.
+                  properties:
+                    name:
+                      description: |-
+                        Name is the unique identifier for this network attachment configuration within the cluster namespace.
+                        This will be used as metadata.name when rendering the HostNetworkAttachment CR.
+                      maxLength: 253
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                      type: string
+                    spec:
+                      description: Spec contains the HostNetworkAttachment specification
+                        from baremetal-operator.
+                      properties:
+                        allowedVLANs:
+                          description: |-
+                            AllowedVLANs specifies the VLAN IDs allowed on this network attachment.
+                            Each entry is either a single VLAN ID (e.g., "100") or a range (e.g., "100-200").
+                            This is typically used in trunk or hybrid mode to specify which tagged VLANs can be carried on the interface.
+                          items:
+                            pattern: ^\d+(-\d+)?$
+                            type: string
+                          type: array
+                        mode:
+                          default: access
+                          description: Mode specifies the network attachment mode.
+                          enum:
+                          - access
+                          - trunk
+                          - hybrid
+                          type: string
+                        mtu:
+                          description: |-
+                            MTU specifies the Maximum Transmission Unit size for the network attachment.
+                            If not specified, the default MTU for the underlying network will be used.
+                          maximum: 9216
+                          minimum: 68
+                          type: integer
+                        nativeVLAN:
+                          description: |-
+                            NativeVLAN specifies the native VLAN ID for the network attachment.
+                            This is the untagged VLAN used on the interface.
+                          maximum: 4094
+                          minimum: 1
+                          type: integer
+                      required:
+                      - mode
+                      - nativeVLAN
+                      type: object
+                  required:
+                  - name
+                  - spec
+                  type: object
+                type: array
               ignitionConfigOverride:
                 description: |-
                   ignitionConfigOverride is a JSON-formatted string containing overrides
@@ -444,6 +505,79 @@ spec:
                       - ""
                       - disabled
                       type: string
+                    networkInterfaces:
+                      description: |-
+                        NetworkInterfaces defines network interfaces and their host network attachments using BMO's NetworkInterface type.
+                        Exactly one of name or macAddress must be set. The namespace of a SiteConfig-managed host network attachment
+                        defaults to the ClusterInstance's clusterName; external references must specify a namespace.
+                      items:
+                        description: NetworkInterface defines the network configuration
+                          for a specific interface.
+                        properties:
+                          hostNetworkAttachment:
+                            description: HostNetworkAttachment references the HostNetworkAttachment
+                              for this interface
+                            properties:
+                              name:
+                                description: Name of the HostNetworkAttachment resource
+                                maxLength: 253
+                                minLength: 1
+                                type: string
+                              namespace:
+                                description: Namespace of the HostNetworkAttachment
+                                  (defaults to BMH namespace)
+                                maxLength: 63
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          macAddress:
+                            description: |-
+                              MAC address of the network interface.  This must match the MAC address
+                              of a NIC discovered during inspection (see HardwareData resource).
+                              Mutually exclusive with Name.
+                            pattern: ^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$
+                            type: string
+                          name:
+                            description: |-
+                              Name of the network interface (e.g., "eth0", "ens1f0")
+                              This must match the name of a NIC discovered during inspection
+                              (see HardwareData resource).
+                              Mutually exclusive with MACAddress.
+                            pattern: ^[a-zA-Z0-9._-]+$
+                            type: string
+                          switchPort:
+                            description: |-
+                              SwitchPort defines the switch port on which this interface is attached.
+                              This is intended to be a replacement for LLDP information if
+                              LLDP is not enabled on the neighboring switches or if inspection is not
+                              used on the BMH.  If LLDP information is acquired during inspection and
+                              this field is provided then it will override the LLDP provided
+                              information; therefore, caution must be exercised when supplying this
+                              value.
+                            properties:
+                              portID:
+                                description: |-
+                                  PortID is expected to be the configuration name of the port in the
+                                  switch management system.
+                                type: string
+                              switchID:
+                                description: SwitchID is expected to be the management
+                                  MAC address of the switch
+                                pattern: ^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$
+                                type: string
+                              switchSystemName:
+                                description: SwitchSystemName is expected to be the
+                                  common name for the switch
+                                type: string
+                            required:
+                            - portID
+                            - switchID
+                            type: object
+                        required:
+                        - hostNetworkAttachment
+                        type: object
+                      type: array
                     nodeLabels:
                       additionalProperties:
                         type: string

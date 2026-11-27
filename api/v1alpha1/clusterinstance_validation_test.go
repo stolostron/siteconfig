@@ -22,6 +22,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/go-logr/logr"
+	bmh_v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -470,6 +471,36 @@ var _ = Describe("validatePostProvisioningChanges", func() {
 			for i := range newClusterInstance.Spec.Nodes {
 				newClusterInstance.Spec.Nodes[i].CPUArchitecture = ""
 			}
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should allow empty HNA lists after upgrade when the fields were omitted", func() {
+			Expect(oldClusterInstance.Spec.HostNetworkAttachmentTemplates).To(BeNil())
+			for i := range oldClusterInstance.Spec.Nodes {
+				Expect(oldClusterInstance.Spec.Nodes[i].NetworkInterfaces).To(BeNil())
+			}
+
+			newClusterInstance.Spec.HostNetworkAttachmentTemplates = []HostNetworkAttachmentTemplate{}
+			for i := range newClusterInstance.Spec.Nodes {
+				newClusterInstance.Spec.Nodes[i].NetworkInterfaces = []bmh_v1alpha1.NetworkInterface{}
+			}
+
+			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should allow omitted HNA lists during GitOps reconciliation", func() {
+			oldClusterInstance.Spec.HostNetworkAttachmentTemplates = []HostNetworkAttachmentTemplate{}
+			for i := range oldClusterInstance.Spec.Nodes {
+				oldClusterInstance.Spec.Nodes[i].NetworkInterfaces = []bmh_v1alpha1.NetworkInterface{}
+			}
+			newClusterInstance = oldClusterInstance.DeepCopy()
+			newClusterInstance.Spec.HostNetworkAttachmentTemplates = nil
+			for i := range newClusterInstance.Spec.Nodes {
+				newClusterInstance.Spec.Nodes[i].NetworkInterfaces = nil
+			}
+
 			err := validatePostProvisioningChanges(testLogger, oldClusterInstance, newClusterInstance, false)
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -1090,12 +1121,14 @@ var _ = Describe("GetAllowedPaths", func() {
 
 			// Should contain reinstall cluster path
 			Expect(paths).To(ContainElement("/reinstall"))
+			Expect(paths).To(ContainElement("/hostNetworkAttachmentTemplates"))
 
 			// Should contain reinstall node paths
 			Expect(paths).To(ContainElement("/nodes/*/bmcAddress"))
 			Expect(paths).To(ContainElement("/nodes/*/bootMACAddress"))
 			Expect(paths).To(ContainElement("/nodes/*/nodeNetwork/interfaces/*/macAddress"))
 			Expect(paths).To(ContainElement("/nodes/*/rootDeviceHints"))
+			Expect(paths).To(ContainElement("/nodes/*/networkInterfaces"))
 		})
 
 		It("should be a superset of SpecChangeBaseOnly paths", func() {

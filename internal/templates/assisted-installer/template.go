@@ -15,6 +15,8 @@ See the License for the specific language governing permissions and
 
 package assistedinstaller
 
+import "github.com/stolostron/siteconfig/internal/templates"
+
 // Default assisted installer install template names
 const (
 	ClusterLevelInstallTemplates = "ai-cluster-templates-v1"
@@ -269,7 +271,13 @@ spec:
 {{ if .SpecialVars.CurrentNode.RootDeviceHints }}
   rootDeviceHints:
 {{ .SpecialVars.CurrentNode.RootDeviceHints | toYaml | indent 4 }}
+{{ end }}
+{{ with .SpecialVars.CurrentNode.NetworkInterfaces }}
+  networkInterfaces:
+{{ defaultNetworkInterfaceNamespaces . $.Spec.ClusterName | toYaml | indent 4 }}
 {{ end }}`
+
+const HostNetworkAttachment = templates.HostNetworkAttachment
 
 func GetClusterTemplates() map[string]string {
 	data := make(map[string]string)
@@ -277,6 +285,7 @@ func GetClusterTemplates() map[string]string {
 	data["ClusterDeployment"] = ClusterDeployment
 	data["ManagedCluster"] = ManagedCluster
 	data["KlusterletAddonConfig"] = KlusterletAddonConfig
+	data["HostNetworkAttachment"] = HostNetworkAttachment
 	return data
 }
 

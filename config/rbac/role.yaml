@@ -136,6 +136,18 @@ rules:
   - patch
   - update
 - apiGroups:
+  - metal3.io
+  resources:
+  - hostnetworkattachments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - networking.k8s.io
   resources:
   - networkpolicies
