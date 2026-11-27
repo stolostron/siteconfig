@@ -814,7 +814,7 @@ func isValidJSON(input string) bool {
 		return true
 	}
 
-	var jsonData interface{}
+	var jsonData any
 	return json.Unmarshal([]byte(input), &jsonData) == nil
 }
 

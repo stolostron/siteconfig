@@ -57,10 +57,10 @@ func getManagedCluster(clusterInstance *v1alpha1.ClusterInstance) (*ci.RenderedO
 		return nil, nil
 	}
 
-	obj, err := ci.NewRenderedObject(map[string]interface{}{
+	obj, err := ci.NewRenderedObject(map[string]any{
 		"apiVersion": *manifest.APIGroup,
 		"kind":       manifest.Kind,
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name": manifest.Name,
 			"annotations": map[string]string{
 				ci.WaveAnnotation: fmt.Sprintf("%d", manifest.SyncWave),

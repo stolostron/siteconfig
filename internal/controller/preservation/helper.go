@@ -34,7 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/utils/ptr"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 	ci "github.com/stolostron/siteconfig/internal/controller/clusterinstance"
@@ -302,7 +301,7 @@ func backupResource(
 			APIVersion: corev1.SchemeGroupVersion.String(),
 		},
 		ObjectMeta: objectMeta,
-		Immutable:  ptr.To(true),
+		Immutable:  new(true),
 		Type:       corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
 			preservedDataKey: data,
@@ -490,7 +489,7 @@ func restoreResource(ctx context.Context, c client.Client, log *zap.Logger, conf
 
 	var (
 		restoredResource    client.Object
-		preservedData       interface{}
+		preservedData       any
 		originalAnnotations map[string]string
 		originalLabels      map[string]string
 	)

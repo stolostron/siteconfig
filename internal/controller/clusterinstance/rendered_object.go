@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/utils/ptr"
 
 	"github.com/stolostron/siteconfig/api/v1alpha1"
 )
@@ -54,13 +53,13 @@ type RenderedObjectCollection struct {
 	prune, suppress, render SyncWaveMap
 }
 
-func NewRenderedObject(manifest map[string]interface{}) (*RenderedObject, error) {
+func NewRenderedObject(manifest map[string]any) (*RenderedObject, error) {
 	obj := &RenderedObject{}
 	err := obj.SetObject(manifest)
 	return obj, err
 }
 
-func (r *RenderedObject) SetObject(manifest map[string]interface{}) error {
+func (r *RenderedObject) SetObject(manifest map[string]any) error {
 	// Marshal the input manifest to JSON
 	content, err := json.Marshal(manifest)
 	if err != nil {
@@ -129,7 +128,7 @@ func (r *RenderedObject) ManifestReference() *v1alpha1.ManifestReference {
 		return nil
 	}
 	return &v1alpha1.ManifestReference{
-		APIGroup:        ptr.To(r.GetAPIVersion()),
+		APIGroup:        new(r.GetAPIVersion()),
 		Kind:            r.GetKind(),
 		Name:            r.GetName(),
 		Namespace:       r.GetNamespace(),

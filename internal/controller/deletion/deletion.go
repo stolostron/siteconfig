@@ -181,7 +181,7 @@ func (d *DeletionHandler) DeleteObject(
 		zap.String("ClusterInstance", fmt.Sprintf("%s/%s", clusterInstance.Namespace, clusterInstance.Name)),
 	)
 
-	obj := ptr.To(object.GetObject())
+	obj := new(object.GetObject())
 	resourceId := object.GetResourceId()
 
 	if deleted, err := isObjectDeleted(ctx, d.Client, obj); deleted && err == nil {
@@ -216,10 +216,10 @@ func objectsForClusterInstance(clusterInstance *v1alpha1.ClusterInstance) []ci.R
 	objects := make([]ci.RenderedObject, 0, len(clusterInstance.Status.ManifestsRendered))
 	for _, manifest := range clusterInstance.Status.ManifestsRendered {
 		object := ci.RenderedObject{}
-		if err := object.SetObject(map[string]interface{}{
+		if err := object.SetObject(map[string]any{
 			"apiVersion": *manifest.APIGroup,
 			"kind":       manifest.Kind,
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      manifest.Name,
 				"namespace": manifest.Namespace,
 				"annotations": map[string]string{

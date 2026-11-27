@@ -154,9 +154,9 @@ func (te *TemplateEngine) renderTemplates(
 func appendAnnotationsAndLabels(
 	clusterInstance *v1alpha1.ClusterInstance,
 	node *v1alpha1.NodeSpec,
-	manifest map[string]interface{},
+	manifest map[string]any,
 	kind string,
-) map[string]interface{} {
+) map[string]any {
 	if node == nil {
 		// Append cluster-level user provided extra annotations if exist
 		if extraManifestAnnotations, ok := clusterInstance.Spec.ExtraAnnotationSearch(kind); ok {
@@ -272,7 +272,7 @@ func (te *TemplateEngine) renderManifestFromTemplate(
 	return objects, nil
 }
 
-func validateRenderedTemplate(manifest map[string]interface{}, templateKey string) error {
+func validateRenderedTemplate(manifest map[string]any, templateKey string) error {
 	if _, ok := manifest["apiVersion"].(string); !ok {
 		return fmt.Errorf("missing apiVersion in template %s", templateKey)
 	}
@@ -281,7 +281,7 @@ func validateRenderedTemplate(manifest map[string]interface{}, templateKey strin
 		return fmt.Errorf("missing kind in template %s", templateKey)
 	}
 
-	if metadata, ok := manifest["metadata"].(map[string]interface{}); ok {
+	if metadata, ok := manifest["metadata"].(map[string]any); ok {
 		if _, ok := metadata["name"].(string); !ok {
 			return fmt.Errorf("missing metadata.name in template %s", templateKey)
 		}
@@ -304,7 +304,7 @@ func ParseTemplate(templateKey, templateStr string) (*template.Template, error) 
 
 type renderedDocument struct {
 	index    int
-	manifest map[string]interface{}
+	manifest map[string]any
 }
 
 func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterData) ([]renderedDocument, error) {
@@ -353,7 +353,7 @@ func (te *TemplateEngine) render(templateKey, templateStr string, data *ClusterD
 				"failed to validate YAML document %d: alias refers to another document in template %s",
 				documentIndex, templateKey)
 		}
-		var doc map[string]interface{}
+		var doc map[string]any
 		if err := node.Decode(&doc); err != nil {
 			return renderedTemplates, yamlDocumentDecodeError(templateKey, documentIndex, err)
 		}

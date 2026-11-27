@@ -331,7 +331,7 @@ spec:
 
 type NetConfigData struct {
 	Interfaces []*aiv1beta1.Interface
-	Config     map[string]interface{}
+	Config     map[string]any
 }
 
 func (nc *NetConfigData) RawNetConfig() string {
@@ -342,10 +342,10 @@ func (nc *NetConfigData) RawNetConfig() string {
 	return string(b)
 }
 
-func (nc *NetConfigData) GetInterfaces() []interface{} {
-	interfaces := make([]interface{}, len(nc.Interfaces))
+func (nc *NetConfigData) GetInterfaces() []any {
+	interfaces := make([]any, len(nc.Interfaces))
 	for i, intf := range nc.Interfaces {
-		interfaces[i] = map[string]interface{}{"name": intf.Name, "macAddress": intf.MacAddress}
+		interfaces[i] = map[string]any{"name": intf.Name, "macAddress": intf.MacAddress}
 	}
 	return interfaces
 }
@@ -353,38 +353,38 @@ func (nc *NetConfigData) GetInterfaces() []interface{} {
 func GetMockNetConfig() *NetConfigData {
 	prefixLengthKey := "prefix-length"
 	netConf := &NetConfigData{}
-	netConf.Config = map[string]interface{}{
-		"interfaces": []interface{}{
-			map[string]interface{}{
+	netConf.Config = map[string]any{
+		"interfaces": []any{
+			map[string]any{
 				"name": "eno1",
 				"type": "ethernet",
-				"ipv4": map[string]interface{}{"dhcp": false, "enabled": true, "address": []interface{}{
-					map[string]interface{}{"ip": "203.0.113.1", prefixLengthKey: 24},
-					map[string]interface{}{"ip": "203.0.113.2", prefixLengthKey: 24},
-					map[string]interface{}{"ip": "203.0.113.3", prefixLengthKey: 24},
+				"ipv4": map[string]any{"dhcp": false, "enabled": true, "address": []any{
+					map[string]any{"ip": "203.0.113.1", prefixLengthKey: 24},
+					map[string]any{"ip": "203.0.113.2", prefixLengthKey: 24},
+					map[string]any{"ip": "203.0.113.3", prefixLengthKey: 24},
 				}},
-				"ipv6": map[string]interface{}{"dhcp": false, "enabled": true, "address": []interface{}{
-					map[string]interface{}{"ip": "	2001:0DB8:0:0:0:0:0:1", prefixLengthKey: 32},
-					map[string]interface{}{"ip": "	2001:0DB8:0:0:0:0:0:2", prefixLengthKey: 32},
-					map[string]interface{}{"ip": "	2001:0DB8:0:0:0:0:0:3", prefixLengthKey: 32}},
+				"ipv6": map[string]any{"dhcp": false, "enabled": true, "address": []any{
+					map[string]any{"ip": "	2001:0DB8:0:0:0:0:0:1", prefixLengthKey: 32},
+					map[string]any{"ip": "	2001:0DB8:0:0:0:0:0:2", prefixLengthKey: 32},
+					map[string]any{"ip": "	2001:0DB8:0:0:0:0:0:3", prefixLengthKey: 32}},
 				}},
-			map[string]interface{}{
+			map[string]any{
 				"name":  "bond99",
 				"type":  "bond",
 				"state": "up",
-				"ipv6": map[string]interface{}{
+				"ipv6": map[string]any{
 					"enabled": true,
-					"link-aggregation": map[string]interface{}{
+					"link-aggregation": map[string]any{
 						"mode":    "balance-rr",
-						"options": map[string]interface{}{"miimon": "140"}, "slaves": []interface{}{"eth0", "eth1"}},
-					"address": []interface{}{map[string]interface{}{
+						"options": map[string]any{"miimon": "140"}, "slaves": []any{"eth0", "eth1"}},
+					"address": []any{map[string]any{
 						"ip":            "2001:0DB8:0:0:0:0:0:4",
 						"prefix-length": 64}}}},
 		},
-		"dns-resolver": map[string]interface{}{"config": map[string]interface{}{
-			"server": []interface{}{"203.0.113.4"}}},
-		"routes": map[string]interface{}{
-			"config": []interface{}{map[string]interface{}{
+		"dns-resolver": map[string]any{"config": map[string]any{
+			"server": []any{"203.0.113.4"}}},
+		"routes": map[string]any{
+			"config": []any{map[string]any{
 				"destination":        "0.0.0.0/0",
 				"next-hop-address":   "203.0.113.255",
 				"next-hop-interface": "eno1",
