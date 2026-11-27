@@ -31,3 +31,7 @@ jobs:
         uses: DavidAnson/markdownlint-cli2-action@v19
         with:
           globs: 'docs/enhancements/*.md'
+
+      # ci-job skips docs-only changes, so the structure check runs here too.
+      - name: Validate enhancement proposal structure
+        run: hack/enhancement-lint.sh
