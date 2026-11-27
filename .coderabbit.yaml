@@ -86,6 +86,11 @@ reviews:
           validation that rejects a stored spec, and changed rendered output.
         - If a file in docs/enhancements/ covers this feature, does the code
           do what the proposal says? Name each difference.
+        - Are there comments that only restate the next line of code (for
+          example "// Check for duplicate names" above a duplicate check)?
+          Raise it once for the whole PR with up to three examples, not per
+          line. Leave godoc on exported identifiers and comments on API
+          fields alone; the latter become CRD descriptions.
 
     # Added on top of the org "**/api/**/*.go" entry.
     - path: "api/v1alpha1/*_types.go"
