@@ -282,6 +282,7 @@ func setupControllers(
 	clusterInstanceLogger := logger.Named("ClusterInstanceController")
 	if err := (&controller.ClusterInstanceReconciler{
 		Client:           mgr.GetClient(),
+		APIReader:        mgr.GetAPIReader(),
 		Scheme:           mgr.GetScheme(),
 		Recorder:         mgr.GetEventRecorder("ClusterInstanceController"),
 		Log:              clusterInstanceLogger,

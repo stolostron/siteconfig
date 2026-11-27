@@ -680,12 +680,15 @@ metadata:
 		Expect(result.Requeue).To(BeFalse())
 	})
 
-	It("should return if deletion has already failed", func() {
-		setReinstallStatusCondition(clusterInstance, *reinstallRenderedManifestsDeletedConditionStatus(metav1.ConditionFalse, v1alpha1.Failed, "Failed"))
+	It("retries deletion after a failure instead of authorizing a new installation", func() {
+		condition := reinstallRenderedManifestsDeletedConditionStatus(metav1.ConditionFalse, v1alpha1.Failed, "Failed")
+		setReinstallStatusCondition(clusterInstance, *condition)
 
 		result, err := handler.ensureRenderedManifestsAreDeleted(ctx, testLogger, clusterInstance)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(err).ToNot(HaveOccurred(), "resuming a failed teardown must retry deletion")
+		Expect(result.IsZero()).To(BeFalse(), "resume must wait until the retried deletion is observed complete")
+		condition = findReinstallStatusCondition(clusterInstance, v1alpha1.ReinstallRenderedManifestsDeleted)
+		Expect(condition.Reason).To(Equal(string(v1alpha1.InProgress)), "a failed condition is not proof of teardown")
 	})
 
 	It("should return a timeout condition if deletion times out", func() {
